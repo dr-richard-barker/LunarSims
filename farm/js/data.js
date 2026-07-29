@@ -110,9 +110,9 @@ const CROPS = [
 
 /* Structures you place on the surface. `once` means one is all the farm needs. */
 const BUILDINGS = [
-  { id: 'track', name: 'Regolith Track', cost: 120, science: 0, key: 'T',
+  { id: 'track', name: 'Regolith Track', cost: 120, science: 0, line: true, key: 'T',
     desc: 'Graded surface road. Modules must touch a track that reaches the habitat, or the crew cannot service them.' },
-  { id: 'rail', name: 'Rail Line', cost: 320, science: 0, key: 'L',
+  { id: 'rail', name: 'Rail Line', cost: 320, science: 0, line: true, key: 'L',
     desc: 'Bulk haulage on rails. Counts as service like a track, and any hall it touches gains a tenth again in throughput because the crop leaves the hall by the wagonload instead of by hand. Trains run themselves.' },
   { id: 'greenhouse', name: 'Grow Hall', cost: 500, perTile: true, drag: true, science: 0, key: 'G',
     desc: 'Drag out a pressurised grow hall of any size. Crops fill the whole hall, and cost, yield, lighting and water all scale with its footprint. 500 credits a tile.' },

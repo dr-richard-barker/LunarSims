@@ -505,18 +505,30 @@
 
   /* ---------- player actions ---------- */
 
-  function place(s, t, type) {
+  /* Why this tile will or will not take that structure. Mutates nothing, so the
+     build tools can use it to colour a drag preview. */
+  function canPlace(s, t, type, ignoreCost) {
     const B = buildById(type);
     if (!B) return 'Unknown structure.';
+    if (!t) return 'That is off the plot.';
     if (t.f) return 'A grow hall covers that ground.';
     if (t.t === 'crater') return 'The ground drops away here — nothing will sit level.';
     if (t.t === 'skylight') return 'That is the tube skylight. It stays open.';
     if (t.t === 'boulder') return 'Clear the boulders first.';
-    if (t.b) return 'Something is already built here.';
+    if (t.b) return t.b.type === type ? 'Already laid here.' : 'Something is already built here.';
     if (B.once && count(s, type) >= 1) return `The farm only needs one ${B.name.toLowerCase()}.`;
-    if (!s.sandbox) {
+    if (!ignoreCost && !s.sandbox) {
       if (s.credits < B.cost) return 'Not enough credits.';
       if (B.science && s.science < B.science) return `Needs ${B.science} science.`;
+    }
+    return null;
+  }
+
+  function place(s, t, type) {
+    const err = canPlace(s, t, type);
+    if (err) return err;
+    const B = buildById(type);
+    if (!s.sandbox) {
       s.credits -= B.cost;
       if (B.science) s.science -= B.science;
     }
@@ -748,7 +760,7 @@
   window.LF_SIM = {
     newGame, tick, place, bulldoze, plant, water, feed, treat, harvest, clear, autoManage,
     research, trade, sellFood, sellO2, resolveEvent,
-    addField, removeField, checkField, fieldCost, fieldAt, fieldById, fieldTiles,
+    addField, removeField, checkField, fieldCost, fieldAt, fieldById, fieldTiles, canPlace,
     planted, area, totalTiles, seedCost, serviceSet, fieldRailed,
     cropById, buildById, clamp, tileAt, built, count,
     generation, demand, storageCap, isSunlit, sunElevation, lightsOn,

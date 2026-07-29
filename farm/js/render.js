@@ -1018,6 +1018,41 @@
       ctx.closePath(); ctx.fill();
     }
 
+    /* dragged run of road or rail */
+    if (ui.line && ui.line.length) {
+      for (const p of ui.line) {
+        ctx.fillStyle = p.ok ? 'rgba(120,220,170,0.30)' : 'rgba(255,90,80,0.30)';
+        diamond(ctx, p.x, p.y, 1, 1); ctx.fill();
+        ctx.strokeStyle = p.ok ? 'rgba(110,231,160,0.85)' : 'rgba(255,122,104,0.85)';
+        ctx.lineWidth = 1.4;
+        diamond(ctx, p.x + 0.04, p.y + 0.04, 0.92, 0.92); ctx.stroke();
+      }
+      /* a spine down the middle so the run reads as one line, not a row of cells */
+      ctx.strokeStyle = 'rgba(233,242,255,0.55)';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 5]);
+      ctx.beginPath();
+      ui.line.forEach((p, i) => {
+        const q = iso(p.x + 0.5, p.y + 0.5);
+        if (i === 0) ctx.moveTo(q.x, q.y); else ctx.lineTo(q.x, q.y);
+      });
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      const end = ui.line[ui.line.length - 1];
+      const q = iso(end.x + 0.5, end.y + 0.5);
+      const label = ui.line.buildable
+        ? `${ui.line.buildable} tile${ui.line.buildable === 1 ? '' : 's'} — ${ui.line.cost.toLocaleString()} cr`
+        : 'nothing can be laid here';
+      ctx.font = '700 13px ui-monospace, Menlo, monospace';
+      ctx.textAlign = 'center';
+      const tw = ctx.measureText(label).width;
+      ctx.fillStyle = 'rgba(8,12,20,0.88)';
+      ctx.fillRect(q.x - tw / 2 - 8, q.y - 42, tw + 16, 21);
+      ctx.fillStyle = ui.line.buildable ? '#6ee7a0' : '#ff7a68';
+      ctx.fillText(label, q.x, q.y - 27);
+    }
+
     /* drag-out outline */
     if (ui.drag) {
       const r = ui.drag;

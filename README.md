@@ -17,11 +17,14 @@ Pick a tool from the palette, then click or drag on the ground:
   single crop across its whole floor, and cost, yield, lighting draw and water all
   scale with its footprint.
 - **Sow, water, feed, treat and harvest** whole halls.
-- **Lay regolith track** — a hall that does not touch a track reaching the habitat
-  cannot be serviced and grows at about three-quarters speed.
-- **Lay rail** — carries service like track, and gives any hall it touches a tenth
-  again in throughput. Freight trains run the line by themselves; give them a loop
-  or a long spine rather than a stub.
+- **Drag out track and rail.** Press, drag, release: the run takes the longer axis
+  first and turns once. The preview colours each tile green or red and totals the
+  cost as you go; blocked tiles are skipped rather than charged for.
+- A hall that does not touch a track reaching the habitat cannot be serviced and
+  grows at about three-quarters speed.
+- **Rail** carries service like track and gives any hall it touches a tenth again in
+  throughput. Freight trains run the line by themselves; give them a loop or a long
+  spine rather than a stub.
 - **Build** solar arrays, battery banks, habitats, an ilmenite reduction plant for
   water, a biomass oxidation loop for carbon, a landing pad and, eventually,
   fission surface power.

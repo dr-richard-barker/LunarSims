@@ -33,7 +33,7 @@
   let s = load() || S.newGame();
   let speed = 1, acc = 0, last = performance.now();
   let tool = { kind: 'op', id: 'inspect' };
-  const ui = { hover: null, hoverOk: true, selected: null, drag: null };
+  const ui = { hover: null, hoverOk: true, selected: null, drag: null, line: null };
   let dragStart = null;
 
   /* ---------- canvas ---------- */
@@ -100,29 +100,88 @@
   });
   cv.addEventListener('pointerup', () => { panFrom = null; });
   cv.addEventListener('pointercancel', () => { panFrom = null; });
-  const isDragTool = () => tool.kind === 'build' && tool.id === 'greenhouse';
+  /* 'rect' drags out a hall; 'line' runs a road or a railway. */
+  function dragMode() {
+    if (tool.kind !== 'build') return null;
+    const B = BUILDINGS.find(b => b.id === tool.id);
+    if (!B) return null;
+    return B.drag ? 'rect' : B.line ? 'line' : null;
+  }
+  const isDragTool = () => !!dragMode();
 
   function rectFrom(a, b) {
     const x = Math.min(a.x, b.x), y = Math.min(a.y, b.y);
     return { x, y, w: Math.abs(a.x - b.x) + 1, h: Math.abs(a.y - b.y) + 1 };
   }
 
+  /* An L-shaped run from a to b, longer axis first — the way a road tool has
+     behaved since SimCity. Each tile carries whether it can actually be laid. */
+  function lineFrom(a, b) {
+    const pts = [];
+    const push = (x, y) => {
+      const t = S.tileAt(s, x, y);
+      const err = S.canPlace(s, t, tool.id, true);
+      pts.push({ x, y, ok: !err, why: err });
+    };
+    let x = a.x, y = a.y;
+    push(x, y);
+    if (Math.abs(b.x - a.x) >= Math.abs(b.y - a.y)) {
+      while (x !== b.x) { x += Math.sign(b.x - x); push(x, y); }
+      while (y !== b.y) { y += Math.sign(b.y - y); push(x, y); }
+    } else {
+      while (y !== b.y) { y += Math.sign(b.y - y); push(x, y); }
+      while (x !== b.x) { x += Math.sign(b.x - x); push(x, y); }
+    }
+    const B = BUILDINGS.find(z => z.id === tool.id);
+    const buildable = pts.filter(p => p.ok).length;
+    pts.cost = s.sandbox ? 0 : buildable * B.cost;
+    pts.buildable = buildable;
+    return pts;
+  }
+
   cv.addEventListener('mousedown', e => {
     const h = R.hitTest(canvasPoint(e).x, canvasPoint(e).y);
     if (!h) return;
-    if (isDragTool()) { dragStart = h; ui.drag = rectFrom(h, h); e.preventDefault(); }
+    const mode = dragMode();
+    if (mode === 'rect') { dragStart = h; ui.drag = rectFrom(h, h); e.preventDefault(); }
+    else if (mode === 'line') { dragStart = h; ui.line = lineFrom(h, h); e.preventDefault(); }
   });
   cv.addEventListener('mousemove', e => {
     const p = canvasPoint(e);
     const h = R.hitTest(p.x, p.y);
     ui.hover = h;
     ui.hoverOk = h ? previewOk(h) : true;
-    if (dragStart && h) ui.drag = rectFrom(dragStart, h);
+    if (dragStart && h) {
+      if (dragMode() === 'line') ui.line = lineFrom(dragStart, h);
+      else ui.drag = rectFrom(dragStart, h);
+    }
   });
   window.addEventListener('mouseup', e => {
     if (!dragStart) return;
-    const r = ui.drag;
-    dragStart = null; ui.drag = null;
+    const r = ui.drag, line = ui.line;
+    dragStart = null; ui.drag = null; ui.line = null;
+
+    if (line) {
+      const B = BUILDINGS.find(z => z.id === tool.id);
+      let laid = 0, blocked = 0, broke = null;
+      for (const p of line) {
+        const err = S.place(s, S.tileAt(s, p.x, p.y), tool.id);
+        if (!err) { laid++; if (window.LF_AGENTS) window.LF_AGENTS.noteBuilt(p.x, p.y, 1, 1); }
+        else if (err === 'Not enough credits.') { broke = err; break; }
+        else blocked++;
+      }
+      if (laid) {
+        const skipped = blocked ? `, ${blocked} tile${blocked === 1 ? '' : 's'} skipped` : '';
+        toast(`${B.name}: ${laid} tile${laid === 1 ? '' : 's'} laid${skipped}.`);
+      } else {
+        toast(broke || (line[0] && line[0].why) || 'Nothing could be laid there.', true);
+      }
+      ui.selected = { x: line[line.length - 1].x, y: line[line.length - 1].y };
+      showTab('info');
+      renderAll();
+      return;
+    }
+
     if (!r) return;
     const err = S.addField(s, r.x, r.y, r.w, r.h);
     if (err) toast(err, true);
@@ -688,7 +747,7 @@
   function restart() {
     localStorage.removeItem(SAVE_KEY);
     s = S.newGame();
-    ui.selected = null; ui.drag = null; dragStart = null;
+    ui.selected = null; ui.drag = null; ui.line = null; dragStart = null;
     if (window.LF_AGENTS) window.LF_AGENTS.reset();
     $('#mOver').hidden = true;
     setSpeed(1);
