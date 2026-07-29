@@ -767,7 +767,7 @@
     if (ghost) {
       ctx.fillStyle = GHOST;
       ctx.strokeStyle = GHOST_EDGE;
-      ctx.lineWidth = 1;
+      ctx.lineWidth = 1.3;
       if (a.kind === 'rover') {
         ctx.beginPath(); ctx.ellipse(p.x, p.y - 7, 10, 7, 0, 0, 7); ctx.fill(); ctx.stroke();
       } else {
@@ -836,8 +836,8 @@
     return false;
   }
 
-  const GHOST = 'rgba(186,216,255,0.9)';
-  const GHOST_EDGE = 'rgba(120,170,235,0.9)';
+  const GHOST = 'rgba(198,224,255,0.95)';
+  const GHOST_EDGE = 'rgba(104,158,232,1)';
 
   /* A carriage on the rail. `dx/dy` is the heading, so the body is drawn along
      whichever axis the train is actually running. */
@@ -854,7 +854,7 @@
     if (ghost) {
       ctx.fillStyle = GHOST;
       ctx.strokeStyle = GHOST_EDGE;
-      ctx.lineWidth = 1;
+      ctx.lineWidth = 1.3;
       ctx.beginPath();
       ctx.ellipse(p.x, p.y - Z * 0.5, TW * 0.16, Z * 0.58, 0, 0, 7);
       ctx.fill(); ctx.stroke();
@@ -1004,7 +1004,7 @@
        settlement never seems to swallow its own people. */
     if (A) {
       ctx.save();
-      ctx.globalAlpha = 0.32;
+      ctx.globalAlpha = 0.58;
       for (const a of A.all()) if (occluded(s, a.x, a.y)) drawAgent(ctx, a, l, true);
       if (A.rail) for (const car of A.rail()) if (occluded(s, car.x, car.y)) drawCar(ctx, car, l, true);
       ctx.restore();
