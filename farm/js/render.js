@@ -503,18 +503,33 @@
     const type = t.b.type;
 
     if (type === 'track') {
+      const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]].filter(([dx, dy]) => {
+        const n = S.tileAt(s, x + dx, y + dy);
+        return n && (n.b || n.f);
+      });
+
       ctx.fillStyle = grey(104, l);
       diamond(ctx, x + 0.06, y + 0.06, 0.88, 0.88); ctx.fill();
-      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-        const n = S.tileAt(s, x + dx, y + dy);
-        if (n && (n.b || n.f)) {
-          diamond(ctx, x + 0.06 + dx * 0.45, y + 0.06 + dy * 0.45, 0.88, 0.88);
-          ctx.fill();
-        }
+      for (const [dx, dy] of dirs) {
+        diamond(ctx, x + 0.06 + dx * 0.45, y + 0.06 + dy * 0.45, 0.88, 0.88);
+        ctx.fill();
       }
-      const a = iso(x + 0.1, y + 0.5), b = iso(x + 0.9, y + 0.5);
-      ctx.strokeStyle = 'rgba(255,255,255,0.09)'; ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+
+      /* Centre line runs the way the road runs: a leg toward each connection,
+         so corners bend and junctions cross instead of every tile carrying the
+         same fixed stripe. An isolated tile keeps a token east-west mark. */
+      const legs = dirs.length ? dirs : [[1, 0], [-1, 0]];
+      const c = iso(x + 0.5, y + 0.5);
+      ctx.strokeStyle = 'rgba(255,255,255,0.16)';
+      ctx.lineWidth = 1.4;
+      ctx.setLineDash([5, 4]);
+      for (const [dx, dy] of legs) {
+        const e = iso(x + 0.5 + dx * 0.5, y + 0.5 + dy * 0.5);
+        ctx.beginPath();
+        ctx.moveTo(c.x, c.y); ctx.lineTo(e.x, e.y);
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
       return;
     }
 
