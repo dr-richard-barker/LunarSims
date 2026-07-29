@@ -102,7 +102,7 @@
     def(o, 'done', {}); def(o, 'log', []); def(o, 'over', null);
     def(o, 'nextField', o.fields.reduce((m, f) => Math.max(m, f.id || 0), 0) + 1);
 
-    ['dust', 'leak', 'busfault', 'biofilm', 'thermal', 'shutter']
+    ['dust', 'leak', 'busfault', 'biofilm', 'thermal', 'shutter', 'seed', 'railout', 'mppt']
       .forEach(k => def(o.flags, k, 0));
     def(o.up, 'led', 0); def(o.up, 'recovery', 0);
 
@@ -143,7 +143,8 @@
       auto: false, sandbox: false, history: [],
       map: makeMap(41), fields: [], nextField: 1,
       up: { led: 0, recovery: 0 },
-      flags: { dust: 0, leak: 0, busfault: 0, biofilm: 0, thermal: 0, shutter: 0 },
+      flags: { dust: 0, leak: 0, busfault: 0, biofilm: 0, thermal: 0, shutter: 0,
+               seed: 0, railout: 0, mppt: 0 },
       stats: { harvests: 0, kinds: {}, nightsSurvived: 0, closureStreak: 0,
                harvestedToday: 0, totalGrown: 0, totalEaten: 0, lastClosure: 0, brownouts: 0, seenNight: false },
       done: {}, log: [], over: null, litFields: 0, wantFields: 0, litTiles: 0, wantTiles: 0
@@ -287,7 +288,8 @@
   }
 
   function generation(s) {
-    const solar = isSunlit(s) ? count(s, 'solar') * ARRAY_KW * sunElevation(s) * dustFactor(s) : 0;
+    const derate = s.flags.mppt > 0 ? 0.67 : 1;
+    const solar = isSunlit(s) ? count(s, 'solar') * ARRAY_KW * sunElevation(s) * dustFactor(s) * derate : 0;
     const rtg = RTG_KW + count(s, 'reactor') * REACTOR_KW;
     return { solar, rtg, total: solar + rtg };
   }
@@ -381,7 +383,7 @@
         g *= f.health;
         g *= carbonLimit;
         if (!f.serviced) g *= UNSERVICED_PENALTY;
-        if (f.railed) g *= RAIL_BONUS;
+        if (f.railed && !s.flags.railout) g *= RAIL_BONUS;
         g *= RAW_SOIL + (1 - RAW_SOIL) * f.soil;
         if (s.flags.thermal > 0) g *= 0.7;
         if (f.infected) g *= 0.5;
@@ -458,7 +460,9 @@
     if (s.flags.leak) s.pressure -= 0.12;
     else if (s.pressure < 100) s.pressure = Math.min(100, s.pressure + 0.05);
 
-    for (const fl of ['shutter', 'thermal']) if (s.flags[fl] > 0) s.flags[fl]--;
+    for (const fl of ['shutter', 'thermal', 'seed', 'railout', 'mppt']) {
+      if (s.flags[fl] > 0) s.flags[fl]--;
+    }
 
     s.hour++;
     if (s.hour >= 24) { s.hour = 0; s.day++; endOfDay(s, log); }
@@ -485,6 +489,8 @@
       const pick = i % 5 === 4 ? 'arabidopsis' : (i % 3 === 1 ? 'wheat' : 'potato');
       plant(s, f, pick);
     });
+    if (s.flags.leak && s.spares >= 2) patchLeak(s);
+
     /* restock, leaving a working float so the player still has money to build */
     const float = 2500;
     if (s.water < 260 && s.credits > float) trade(s, 'water', 200);
@@ -639,7 +645,8 @@
     const cost = seedCost(c, f);
     if (s.credits < cost) return `Seed for that hall costs ${cost.toLocaleString()} credits.`;
     s.credits -= cost;
-    Object.assign(f, { crop: cropId, growth: 0, health: 1, infected: false, dead: false,
+    Object.assign(f, { crop: cropId, growth: 0, health: s.flags.seed > 0 ? 0.65 : 1,
+                       infected: false, dead: false,
                        moisture: 0.9, feed: 0.9, carbon: 0, warned: false, plantedDay: s.day });
     return null;
   }
@@ -719,6 +726,19 @@
     if (!s.sandbox) s.credits -= c.credits;
     s.nutrients -= c.nutrients;
     f.soil = clamp(f.soil + 0.30, 0, 1);
+    return null;
+  }
+
+  /* Deferring a hull patch used to be irreversible: only another micrometeorite
+     alert could clear the flag, so a leak left alone bled pressure to the abort
+     limit with nothing the player could do. Now it can always be worked. */
+  function patchLeak(s) {
+    if (!s.flags.leak) return 'The hull is holding.';
+    if (s.spares < 2) return 'Patching the hull needs 2 spares.';
+    s.spares -= 2;
+    s.flags.leak = 0;
+    s.pressure = Math.min(100, s.pressure + 1);
+    pushLog(s, 'Hull patched. Pressure holding.');
     return null;
   }
 
@@ -813,6 +833,78 @@
         else { s.crew += 2; L('Two agronomists joined the crew.'); }
         break;
       case 'crew_decline': s.morale -= 3; L('Transfer declined.'); break;
+      case 'seed_buy':
+        if (s.credits < 1800) { s.flags.seed = 14 * 24; L('No budget for fresh seed — the old stock goes in.'); }
+        else { s.credits -= 1800; L('Certified seed on the next lander.'); }
+        break;
+      case 'seed_sow': s.flags.seed = 14 * 24; L('Sowing the old stock. Anything planted this fortnight starts weak.'); break;
+
+      case 'sub_fix':
+        if (s.spares < 2) { s.flags.railout = 12 * 24; L('No spares to regrade with — the line runs slow.'); }
+        else { s.spares -= 2; L('Line regraded and repacked.'); }
+        break;
+      case 'sub_ignore': s.flags.railout = 12 * 24; L('Running slow over the settled stretch. No wagonload rate.'); break;
+
+      case 'ec_flush':
+        if (s.nutrients < 120) { for (const f of planted(s)) f.feed = Math.min(f.feed, 0.2); L('Not enough stock to re-mix — the solution stays foul.'); }
+        else { s.nutrients -= 120; L('Loop flushed and the solution re-mixed clean.'); }
+        break;
+      case 'ec_ride':
+        for (const f of planted(s)) f.feed = Math.min(f.feed, 0.2);
+        L('Diluted and carried on. Nutrient charge is down across the farm.');
+        break;
+
+      case 'salad_cut': {
+        const leafy = planted(s).find(f => cropById(f.crop).kind === 'leafy' && f.growth >= 0.6)
+          || planted(s).find(f => cropById(f.crop).kind === 'leafy');
+        if (!leafy) { s.morale -= 6; L('Nothing green anywhere near ready. The request goes unanswered.'); }
+        else {
+          const name = cropById(leafy.crop).name;
+          clearCrop(leafy);
+          s.morale = clamp(s.morale + 18, 0, 100);
+          s.stats.flowersRecent = true;
+          L(`Cut the ${name} for the mess. Best meal in a month.`);
+        }
+        break;
+      }
+      case 'salad_hold': s.morale -= 7; L('Everything went to the store. It was noticed.'); break;
+
+      case 'inoc_take':
+        if (s.credits < 3200) L('Could not afford the pallet; it flies home unopened.');
+        else {
+          s.credits -= 3200;
+          for (const f of s.fields) f.soil = clamp(f.soil + 0.25, 0, 1);
+          L('Inoculant worked through every bed on the farm.');
+        }
+        break;
+
+      case 'vip_full': {
+        /* judged on the farm as it actually stands */
+        const good = (s.stats.lastClosure >= 1 ? 1 : 0) + (s.morale >= 60 ? 1 : 0)
+          + (totalTiles(s) >= 24 ? 1 : 0);
+        if (good >= 2) {
+          s.credits += 6000; s.science += 8; s.morale = clamp(s.morale + 5, 0, 100);
+          L('The inspection went well. Six thousand credits and a commendation.');
+        } else {
+          s.morale -= 8;
+          L('The inspection did not go well. The manifest slot is under review.');
+        }
+        break;
+      }
+      case 'vip_brief': s.credits += 1200; L('A short tour and a small honorarium.'); break;
+
+      case 'mppt_swap':
+        if (s.spares < 2) { s.flags.mppt = 20 * 24; L('No spare controller — the string stays derated.'); }
+        else { s.spares -= 2; L('Controller swapped. Arrays back to full output.'); }
+        break;
+      case 'mppt_run': s.flags.mppt = 20 * 24; L('Left in circuit. Solar output is down by a third.'); break;
+
+      case 'samp_send':
+        if (s.food < dailyNeed(s) * 12 + 40000) L('Not enough in the store to spare 40,000 kcal.');
+        else { s.food -= 40000; s.science += 16; L('Samples frozen and away. Sixteen science.'); }
+        break;
+      case 'samp_keep': L('Request declined. The colony eats first.'); break;
+
       case 'therm_fix':
         if (s.credits < 500) { s.flags.thermal = 96; L('No budget for the scrub — running warm.'); }
         else { s.credits -= 500; s.flags.thermal = 0; L('Radiators scrubbed.'); }
@@ -850,7 +942,7 @@
   window.LF_SIM = {
     newGame, migrate, STATE_VERSION,
     tick, place, bulldoze, plant, water, feed, treat, harvest, clear, autoManage,
-    research, trade, sellFood, sellO2, resolveEvent, condition, conditionCost, RAW_SOIL,
+    research, trade, sellFood, sellO2, resolveEvent, condition, conditionCost, patchLeak, RAW_SOIL,
     addField, removeField, checkField, fieldCost, fieldAt, fieldById, fieldTiles, canPlace,
     planted, area, totalTiles, seedCost, serviceSet, fieldRailed,
     cropById, buildById, clamp, tileAt, built, count,

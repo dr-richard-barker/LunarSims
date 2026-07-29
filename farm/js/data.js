@@ -243,6 +243,92 @@ const EVENTS = [
     ]
   },
   {
+    id: 'seed', weight: 7, minDay: 22,
+    title: 'Seed Stock Viability',
+    text: 'The germination trays from the reserve locker are coming up patchy. Seed kept on the surface takes a dose year after year, and this batch has had enough of it.',
+    choices: [
+      { label: 'Order certified seed (1,800 cr)', effect: 'seed_buy',
+        hint: 'Fresh stock from Earth. Nothing else changes.' },
+      { label: 'Sow the old stock anyway', effect: 'seed_sow',
+        hint: 'Everything planted for the next fortnight starts weak.' }
+    ]
+  },
+  {
+    id: 'subsidence', weight: 6, minDay: 30,
+    title: 'Track Subsidence',
+    text: 'A stretch of the line has settled. Unpacked regolith beneath the ballast has found somewhere to go, and the rails now sit a hand-width out of true.',
+    choices: [
+      { label: 'Regrade and repack (2 spares)', effect: 'sub_fix',
+        hint: 'The haulage bonus keeps running.' },
+      { label: 'Run slow over it', effect: 'sub_ignore',
+        hint: 'No wagonload rate until it is fixed — halls lose the rail bonus.' }
+    ]
+  },
+  {
+    id: 'ec', weight: 8, minDay: 14,
+    title: 'Nutrient Solution Drift',
+    text: 'Conductivity is climbing across the manifold and the pH with it. Salts are accumulating faster than the crop is taking them up, which is the usual way of things in a tight loop.',
+    choices: [
+      { label: 'Flush and re-mix (120 nutrients)', effect: 'ec_flush',
+        hint: 'Dump the solution and start clean.' },
+      { label: 'Dilute and carry on', effect: 'ec_ride',
+        hint: 'Cheaper, but every hall loses most of its nutrient charge.' }
+    ]
+  },
+  {
+    id: 'salad', weight: 9, minDay: 20,
+    title: 'A Request From the Mess',
+    text: 'Someone has asked, not entirely as a joke, whether anything green might reach a plate this month. Two weeks of the same reconstituted staple will do that to a crew.',
+    choices: [
+      { label: 'Cut a leafy crop for the mess', effect: 'salad_cut',
+        hint: 'Loses that hall’s harvest. Worth a great deal to morale.' },
+      { label: 'Everything goes to the store', effect: 'salad_hold',
+        hint: 'The calories are banked and the mood is not.' }
+    ]
+  },
+  {
+    id: 'inoculant', weight: 7, minDay: 26,
+    title: 'Mycorrhizal Inoculant',
+    text: 'A pallet of fungal inoculant and composted biomass has come up on the lander. Worked through the beds it does in a week what a year of stubble does on its own.',
+    choices: [
+      { label: 'Work it through every hall (3,200 cr)', effect: 'inoc_take',
+        hint: 'Conditions all beds a good deal further.' },
+      { label: 'Leave it on the pad', effect: 'none', hint: '' }
+    ]
+  },
+  {
+    id: 'vip', weight: 6, minDay: 40,
+    title: 'Programme Inspection',
+    text: 'Someone from the programme office is coming through on the next rotation, with a clipboard and a view about whether this station is worth its manifest slot.',
+    choices: [
+      { label: 'Show them the whole operation', effect: 'vip_full',
+        hint: 'Judged on closure and morale. A good farm is rewarded; a poor one is not.' },
+      { label: 'Keep the tour short', effect: 'vip_brief',
+        hint: 'A modest fee either way.' }
+    ]
+  },
+  {
+    id: 'mppt', weight: 6, minDay: 24,
+    title: 'Charge Controller Fault',
+    text: 'One string of arrays is not tracking its maximum power point. It still makes current; it simply makes noticeably less of it than the sun is offering.',
+    choices: [
+      { label: 'Swap the unit (2 spares)', effect: 'mppt_swap', hint: 'Back to full output.' },
+      { label: 'Leave it in circuit', effect: 'mppt_run',
+        hint: 'Solar output down by a third until it is replaced.' }
+    ]
+  },
+  {
+    id: 'samples', weight: 7, minDay: 35,
+    title: 'Sample Return Request',
+    text: 'A laboratory on Earth wants biomass grown in this regolith — roots, leaves and all, frozen and flown home. It is a real request, and it costs you food.',
+    choices: [
+      { label: 'Freeze and ship the samples', effect: 'samp_send',
+        hint: 'Trades 40,000 kcal for a useful amount of science.' },
+      { label: 'Decline — the colony eats first', effect: 'samp_keep',
+        hint: 'No science, no loss.' }
+    ]
+  },
+  {
     id: 'thermal', weight: 5, minDay: 18,
     title: 'Radiator Fouling',
     text: 'The farm is running warm. Dust on the radiator panels is cutting heat rejection, and the canopy feels it first.',
@@ -265,7 +351,22 @@ const MILESTONES = [
     done: s => s.fields.reduce((a, f) => a + f.w * f.h, 0) >= 40 },
   { id: 'bighall', text: 'Raise a single hall of twenty tiles or more',
     done: s => s.fields.some(f => f.w * f.h >= 20) },
-  { id: 'variety', text: 'Harvest ten different crops', done: s => Object.keys(s.stats.kinds).length >= 10 }
+  { id: 'variety', text: 'Harvest ten different crops', done: s => Object.keys(s.stats.kinds).length >= 10 },
+  { id: 'everycrop', text: 'Grow every crop in the roster at least once',
+    done: s => Object.keys(s.stats.kinds).length >= CROPS.length },
+  { id: 'worked', text: 'Bring a hall to fully worked ground',
+    done: s => s.fields.some(f => (f.soil || 0) >= 0.995) },
+  { id: 'allworked', text: 'Have every hall on fully worked ground',
+    done: s => s.fields.length >= 3 && s.fields.every(f => (f.soil || 0) >= 0.995) },
+  { id: 'freight', text: 'Run freight: a hall served by its own rail head',
+    done: s => s.map.filter(t => t.b && t.b.type === 'rail').length >= 8
+      && s.fields.some(f => f.railed) },
+  { id: 'shielded', text: 'Bury the farm under regolith shielding', done: s => !!s.up.shield },
+  { id: 'science', text: 'Bank fifty science', done: s => s.science >= 50 },
+  { id: 'abundance', text: 'Grow twice what the colony eats',
+    done: s => s.stats.lastClosure >= 2 },
+  { id: 'fivenights', text: 'Come through five lunar nights', done: s => s.stats.nightsSurvived >= 5 },
+  { id: 'ayear', text: 'Farm for a full Earth year', done: s => s.day >= 365 }
 ];
 
 window.LF_DATA = { K, CROPS, BUILDINGS, UPGRADES, EVENTS, MILESTONES };

@@ -301,6 +301,69 @@ td.mark{width:34px;text-align:center}
         ];
       } },
 
+    { name: 'Every event choice resolves',
+      why: 'a typo in one effect would otherwise wait until a player happens to meet it',
+      run() {
+        const EV = window.LF_DATA.EVENTS;
+        const effects = [];
+        EV.forEach(e => e.choices.forEach(c => effects.push([e.id, c.effect])));
+
+        /* declining a request is meant to leave the farm exactly as it was */
+        const DELIBERATE_NO_OPS = ['samp_keep'];
+
+        /* everything the effects can touch — a narrower snapshot reports real
+           changes as no-ops, which is how the first cut of this test failed */
+        const snapshot = s => JSON.stringify({
+          credits: s.credits, spares: s.spares, nutrients: s.nutrients, water: s.water,
+          food: Math.round(s.food), science: s.science, morale: Math.round(s.morale),
+          crew: s.crew, o2: Math.round(s.o2), co2: Math.round(s.co2),
+          flags: s.flags,
+          soil: s.fields.map(x => x.soil), crops: s.fields.map(x => x.crop),
+          infected: s.fields.map(x => x.infected), feed: s.fields.map(x => +x.feed.toFixed(2)),
+          health: s.fields.map(x => +x.health.toFixed(2))
+        });
+
+        let threw = null, changedNothing = [];
+        for (const [id, effect] of effects) {
+          if (effect === 'none' || DELIBERATE_NO_OPS.includes(effect)) continue;
+          const s = S.newGame();
+          s.credits = 60000; s.spares = 9; s.nutrients = 600; s.food = 2e6; s.science = 40;
+          addHall(s, 3, 2, 'romaine');
+          addHall(s, 2, 2, 'potato');
+          s.fields.forEach(f => { f.growth = 0.8; f.soil = 0.4; });
+          /* quarters to spare, so a crew transfer has somewhere to put people */
+          for (let i = 0; i < 2; i++) {
+            const t = s.map.find(t => !t.b && !t.f && t.t === 'flat');
+            if (t) S.place(s, t, 'hab');
+          }
+          const before = snapshot(s);
+          s.pendingEvent = id;
+          try { S.resolveEvent(s, id, effect); }
+          catch (err) { threw = `${id}/${effect}: ${err.message}`; break; }
+          const after = snapshot(s);
+          if (before === after) changedNothing.push(`${id}/${effect}`);
+          if (s.pendingEvent !== null) { threw = `${id}/${effect} left the alert pending`; break; }
+        }
+
+        /* the flags the new events set must actually wear off */
+        const s2 = S.newGame();
+        S.resolveEvent(s2, 'mppt', 'mppt_run');
+        const litBefore = S.generation(s2).solar;
+        s2.flags.mppt = 0;
+        const litAfter = S.generation(s2).solar;
+
+        return [
+          ['no choice throws', threw, null],
+          ['every choice that should act, acts', changedNothing.join(', '), ''],
+          ['every event offers at least two ways out',
+            EV.every(e => e.choices.length >= 2), true],
+          ['every effect the data names exists in the simulation',
+            effects.filter(([, ef]) => ef !== 'none' &&
+              !S.resolveEvent.toString().includes(`'${ef}'`)).map(x => x[1]).join(', '), ''],
+          ['a derated controller cuts solar', litBefore < litAfter || litAfter === 0, true]
+        ];
+      } },
+
     { name: 'An older save is carried forward, not thrown away',
       why: 'a run stored before bed conditioning must not be silently ruined by loading it',
       run() {

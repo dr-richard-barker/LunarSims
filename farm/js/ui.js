@@ -650,7 +650,8 @@
         ${row('Carbon dioxide', s.co2.toFixed(1) + ' kg', s.co2 < 20 ? 'bad' : s.co2 < 55 ? 'warn' : 'good')}
         ${row('Pressure', s.pressure.toFixed(1) + ' %', s.pressure < 95 ? 'bad' : 'good')}
         ${row('Spares', s.spares, s.spares < 2 ? 'warn' : '')}
-        ${s.flags.leak ? row('Hull', 'LEAKING', 'bad') : ''}
+        ${s.flags.leak ? `<div class="row"><span class="k">Hull</span>
+          <button class="ghost" data-buy="patch" ${s.spares < 2 ? 'disabled' : ''}>LEAKING — patch (2 spares)</button></div>` : ''}
         ${s.flags.thermal ? row('Radiators', 'fouled — growth slowed', 'warn') : ''}
       </div>
 
@@ -683,7 +684,8 @@
     if (off) off.onclick = () => { s.isruOn = false; renderAll(); };
     p.querySelectorAll('[data-buy]').forEach(b => b.onclick = () => {
       const w = b.dataset.buy;
-      if (w === 'sell') act(S.sellFood(s, 20000));
+      if (w === 'patch') act(S.patchLeak(s));
+      else if (w === 'sell') act(S.sellFood(s, 20000));
       else if (w === 'o2') act(S.sellO2(s, 60));
       else if (w === 'buyo2') act(S.trade(s, 'o2', 60));
       else if (w === 'co2') act(S.trade(s, 'co2', 40));

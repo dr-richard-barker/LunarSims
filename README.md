@@ -32,6 +32,10 @@ Pick a tool from the palette, then click or drag on the ground:
 - **Build** solar arrays, battery banks, habitats, an ilmenite reduction plant for
   water, a biomass oxidation loop for carbon, a landing pad and, eventually,
   fission surface power.
+- **Answer the station alerts.** Eighteen of them, each a decision rather than a
+  dice roll: shelter from a flare or keep the lamps on, patch a puncture or log it,
+  buy certified seed or sow the tired stock, cut a leafy crop for the mess or bank
+  the calories. Eighteen milestones mark a farm that works.
 
 Three things drive the difficulty:
 
