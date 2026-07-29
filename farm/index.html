@@ -31,6 +31,7 @@
     <div class="modes">
       <button id="btnAuto" class="mode" title="Let the crew tend, harvest, replant and restock on their own">Auto-manage</button>
       <button id="btnReport" class="mode" title="Telemetry report">Report</button>
+      <button id="btnLeague" class="mode" title="Scores from past runs">League</button>
       <button id="btnSandbox" class="mode" title="Build anything at no cost">Sandbox</button>
     </div>
   </div>
@@ -162,7 +163,17 @@
     <h2 id="overTitle">The farm failed</h2>
     <p id="overText"></p>
     <div id="overStats" class="statgrid"></div>
-    <div class="sheetfoot"><button class="primary" id="overRestart">Start again</button></div>
+    <div class="sheetfoot">
+      <button class="ghost" id="overLeague">File to the league</button>
+      <button class="primary" id="overRestart">Start again</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="mLeague" hidden>
+  <div class="sheet report scroll">
+    <div id="leagueBody"></div>
+    <div class="sheetfoot"><button class="ghost" data-close>Close</button></div>
   </div>
 </div>
 
@@ -178,8 +189,10 @@
 
 <script src="js/data.js"></script>
 <script src="js/sim.js"></script>
+<script src="js/agents.js"></script>
 <script src="js/render.js"></script>
 <script src="js/dashboard.js"></script>
+<script src="js/league.js"></script>
 <script src="js/ui.js"></script>
 </body>
 </html>

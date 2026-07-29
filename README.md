@@ -36,12 +36,28 @@ Three things drive the difficulty:
   and lift morale. Arabidopsis pays only in science, which is what unlocks the
   serious hardware.
 
-Extras in the header: **Auto-manage** hands the daily tending to the crew,
-**Report** opens a telemetry dashboard that can be read either as a situation report
-to Earth Operations or as a note to the settlers, and **Sandbox** makes construction
-free.
+### The view
 
-Progress saves to `localStorage` once a day and on demand.
+The plot is drawn in 2:1 isometric projection: extruded structures lit by the real
+sun angle, long shadows that swing round as the lunar day passes, and glazed halls
+you can see the canopy through. **Scroll to zoom, drag with the right button to
+pan** (arrow keys and `+`/`-` also work). Zoom in and the settlement is alive —
+suited crew walking the track network, rovers hauling between modules, and build
+bots throwing sparks over anything newly raised until it tops out.
+
+### Extras in the header
+
+- **Auto-manage** hands the daily tending to the crew: they water, feed, treat,
+  harvest, replant and restock, keeping a working float in the bank.
+- **Report** opens a telemetry dashboard — eight metrics over time with the lunar
+  nights banded behind them — written either as a situation report to Earth
+  Operations or, at one click, as a note to the settlers. Same facts, different room.
+- **League** scores the run and files it against previous ones. Export writes a JSON
+  file; import merges someone else's back in.
+- **Sandbox** makes all construction free.
+
+Progress saves to `localStorage` once a day and on demand. The league is stored the
+same way — there is no server behind the page, which is why export exists.
 
 ### Layout
 
@@ -52,9 +68,11 @@ farm/
   style.css
   js/data.js        crops, structures, equipment, events, milestones
   js/sim.js         the simulation — one tick is one hour
-  js/render.js      canvas renderer, procedural throughout
+  js/agents.js      crew, rovers and build bots — cosmetic, reads the same state
+  js/render.js      isometric canvas renderer, procedural throughout
   js/dashboard.js   the report dashboard
-  js/ui.js          tools, panels, main loop, saving
+  js/league.js      scoring, the league table, export and import
+  js/ui.js          tools, camera, panels, main loop, saving
 ```
 
 ## On the crop list

@@ -42,12 +42,64 @@
   const dpr = Math.min(2, window.devicePixelRatio || 1);
   cv.width = R.W * dpr; cv.height = R.H * dpr;
   cv.style.aspectRatio = `${R.W} / ${R.H}`;
-  ctx.scale(dpr, dpr);
 
+  /* Camera over the plate. The canvas keeps a fixed logical size; the camera
+     scales and offsets the world inside it, so zooming in shows the settlement
+     at a size where you can actually watch people walk about. */
+  const cam = { x: R.W / 2, y: R.H / 2, z: 1, min: 0.55, max: 3.4 };
+  function applyCam() {
+    ctx.setTransform(dpr * cam.z, 0, 0, dpr * cam.z,
+      dpr * (R.W / 2 - cam.x * cam.z), dpr * (R.H / 2 - cam.y * cam.z));
+  }
+  function clampCam() {
+    cam.z = Math.max(cam.min, Math.min(cam.max, cam.z));
+    const halfW = R.W / (2 * cam.z), halfH = R.H / (2 * cam.z);
+    cam.x = Math.max(Math.min(halfW, R.W - halfW), Math.min(cam.x, Math.max(R.W - halfW, halfW)));
+    cam.y = Math.max(Math.min(halfH, R.H - halfH), Math.min(cam.y, Math.max(R.H - halfH, halfH)));
+  }
+
+  /* canvas pixel -> world coordinate the renderer draws in */
   function canvasPoint(e) {
     const r = cv.getBoundingClientRect();
-    return { x: (e.clientX - r.left) * (R.W / r.width), y: (e.clientY - r.top) * (R.H / r.height) };
+    const sx = (e.clientX - r.left) * (R.W / r.width);
+    const sy = (e.clientY - r.top) * (R.H / r.height);
+    return {
+      x: (sx - (R.W / 2 - cam.x * cam.z)) / cam.z,
+      y: (sy - (R.H / 2 - cam.y * cam.z)) / cam.z
+    };
   }
+
+  cv.addEventListener('wheel', e => {
+    e.preventDefault();
+    const before = canvasPoint(e);
+    cam.z *= e.deltaY < 0 ? 1.12 : 1 / 1.12;
+    clampCam();
+    const after = canvasPoint(e);
+    cam.x += before.x - after.x;
+    cam.y += before.y - after.y;
+    clampCam();
+  }, { passive: false });
+
+  /* pan with the right button or a middle drag */
+  let panFrom = null;
+  cv.addEventListener('contextmenu', e => e.preventDefault());
+  cv.addEventListener('pointerdown', e => {
+    if (e.button === 2 || e.button === 1) {
+      panFrom = { x: e.clientX, y: e.clientY, cx: cam.x, cy: cam.y };
+      cv.setPointerCapture(e.pointerId);
+      e.preventDefault();
+    }
+  });
+  cv.addEventListener('pointermove', e => {
+    if (!panFrom) return;
+    const r = cv.getBoundingClientRect();
+    const k = (R.W / r.width) / cam.z;
+    cam.x = panFrom.cx - (e.clientX - panFrom.x) * k;
+    cam.y = panFrom.cy - (e.clientY - panFrom.y) * k;
+    clampCam();
+  });
+  cv.addEventListener('pointerup', () => { panFrom = null; });
+  cv.addEventListener('pointercancel', () => { panFrom = null; });
   const isDragTool = () => tool.kind === 'build' && tool.id === 'greenhouse';
 
   function rectFrom(a, b) {
@@ -76,6 +128,7 @@
     if (err) toast(err, true);
     else {
       toast(`Grow hall raised: ${r.w} × ${r.h} tiles.`);
+      if (window.LF_AGENTS) window.LF_AGENTS.noteBuilt(r.x, r.y, r.w, r.h);
       ui.selected = { x: r.x, y: r.y };
       showTab('info');
     }
@@ -116,6 +169,7 @@
     if (tool.kind === 'build') {
       const err = tool.id === 'bulldoze' ? S.bulldoze(s, t) : S.place(s, t, tool.id);
       if (err) toast(err, true);
+      else if (tool.id !== 'bulldoze' && window.LF_AGENTS) window.LF_AGENTS.noteBuilt(t.x, t.y, 1, 1);
       showTab('info'); renderAll();
       return;
     }
@@ -561,6 +615,41 @@
   }
   $('#btnReport').onclick = openReport;
 
+  /* ---------- league ---------- */
+  function openLeague(justFiled) {
+    const body = $('#leagueBody');
+    body.innerHTML = window.LF_LEAGUE.render(justFiled);
+    body.querySelector('#lFile').onclick = () => {
+      const res = window.LF_LEAGUE.file(s, s.over || null);
+      toast(res.added ? `Run filed: ${res.r.score.toLocaleString()} points.` : 'That run is already on file.');
+      openLeague(res.r);
+    };
+    body.querySelector('#lExport').onclick = () => {
+      const n = window.LF_LEAGUE.exportRuns();
+      toast(n ? `Exported ${n} run${n === 1 ? '' : 's'}.` : 'Nothing on file to export.', !n);
+    };
+    const input = body.querySelector('#lFileInput');
+    body.querySelector('#lImport').onclick = () => input.click();
+    input.onchange = () => {
+      const f = input.files && input.files[0];
+      if (!f) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        const res = window.LF_LEAGUE.importRuns(String(reader.result));
+        if (typeof res === 'string') toast(res, true);
+        else { toast(`Merged ${res} run${res === 1 ? '' : 's'}.`); openLeague(); }
+      };
+      reader.readAsText(f);
+    };
+    $('#mLeague').hidden = false;
+  }
+  $('#btnLeague').onclick = () => openLeague();
+  $('#overLeague').onclick = () => {
+    const res = window.LF_LEAGUE.file(s, s.over);
+    $('#mOver').hidden = true;
+    openLeague(res.r);
+  };
+
   /* ---------- events ---------- */
   function showEvent(id) {
     const e = EVENTS.find(x => x.id === id);
@@ -600,6 +689,7 @@
     localStorage.removeItem(SAVE_KEY);
     s = S.newGame();
     ui.selected = null; ui.drag = null; dragStart = null;
+    if (window.LF_AGENTS) window.LF_AGENTS.reset();
     $('#mOver').hidden = true;
     setSpeed(1);
     renderAll();
@@ -607,13 +697,41 @@
   $('#btnReset').onclick = () => { if (confirm('Abandon this run and start a new one?')) restart(); };
   $('#overRestart').onclick = restart;
   $('#btnHelp').onclick = () => { $('#mHelp').hidden = false; };
+  /* Every pop-up gets a cross in the corner, closes on the backdrop, and closes
+     on Escape. Dismissing a station alert takes no action either way. */
+  function closeModal(m) {
+    if (!m || m.hidden) return;
+    if (m.id === 'mEvent' && s.pendingEvent) {
+      S.pushLog(s, 'Alert dismissed without action.');
+      s.pendingEvent = null;
+    }
+    m.hidden = true;
+    $('#dtip').hidden = true;
+    renderAll();
+  }
+  function topModal() {
+    const open = [...document.querySelectorAll('.modal')].filter(m => !m.hidden);
+    return open[open.length - 1];
+  }
+  document.querySelectorAll('.modal').forEach(m => {
+    const sheet = m.querySelector('.sheet');
+    if (sheet && !sheet.querySelector('.xclose')) {
+      const x = el('button', 'xclose', '&times;');
+      x.type = 'button';
+      x.title = 'Close';
+      x.setAttribute('aria-label', 'Close');
+      x.onclick = () => closeModal(m);
+      sheet.prepend(x);
+    }
+    m.addEventListener('mousedown', e => { if (e.target === m) closeModal(m); });
+  });
   document.querySelectorAll('[data-close]').forEach(b => {
-    b.onclick = () => { b.closest('.modal').hidden = true; };
+    b.onclick = () => closeModal(b.closest('.modal'));
   });
 
   document.addEventListener('keydown', e => {
     if (e.target.tagName === 'INPUT') return;
-    if (e.key === 'Escape') { $('#mPlant').hidden = true; $('#mHelp').hidden = true; }
+    if (e.key === 'Escape') { closeModal(topModal()); return; }
     if (e.key === ' ') { e.preventDefault(); setSpeed(speed === 0 ? 1 : 0); }
     const op = OPS.find(o => o.key === e.key);
     if (op) setTool({ kind: 'op', id: op.id }, op.hint);
@@ -621,6 +739,13 @@
     if (B) setTool({ kind: 'build', id: B.id },
       B.drag ? `${B.name} — drag out a rectangle. ${fmt(B.cost)} credits a tile.`
              : `${B.name} — ${fmt(B.cost)} credits. ${B.desc}`);
+    const pan = 90 / cam.z;
+    if (e.key === 'ArrowLeft') { cam.x -= pan; clampCam(); }
+    if (e.key === 'ArrowRight') { cam.x += pan; clampCam(); }
+    if (e.key === 'ArrowUp') { cam.y -= pan; clampCam(); }
+    if (e.key === 'ArrowDown') { cam.y += pan; clampCam(); }
+    if (e.key === '+' || e.key === '=') { cam.z *= 1.2; clampCam(); }
+    if (e.key === '-' || e.key === '_') { cam.z /= 1.2; clampCam(); }
     if (e.key.toLowerCase() === 'x') setTool({ kind: 'build', id: 'bulldoze' },
       'Bulldoze — remove a structure or empty hall (60 cr), or clear boulders (120 cr).');
   });
@@ -641,7 +766,7 @@
   function frame(now) {
     const dt = Math.min(0.25, (now - last) / 1000);
     last = now;
-    const blocked = !$('#mEvent').hidden || !$('#mOver').hidden || !$('#mPlant').hidden || !$('#mReport').hidden;
+    const blocked = !$('#mEvent').hidden || !$('#mOver').hidden || !$('#mPlant').hidden || !$('#mReport').hidden || !$('#mLeague').hidden;
 
     if (speed > 0 && !blocked && !s.over) {
       acc += dt * speed;
@@ -657,6 +782,8 @@
       if (s.day !== lastDaySaved) { lastDaySaved = s.day; save(); }
     }
 
+    if (window.LF_AGENTS) window.LF_AGENTS.update(s, dt);
+    applyCam();
     R.draw(ctx, s, ui);
     requestAnimationFrame(frame);
   }
