@@ -79,12 +79,29 @@ halls need no such help, because you can see straight through them.
 Progress saves to `localStorage` once a day and on demand. The league is stored the
 same way — there is no server behind the page, which is why export exists.
 
+### Testing
+
+`sim.js` and `data.js` contain no DOM references at all — the dependency runs one way,
+renderer to simulation, never back. That is what makes the balance testable, and it is why the
+simulation survived three renderer rewrites almost untouched.
+
+Open **`farm/harness.html`** in a browser. It loads only the data and the simulation, replaces
+`Math.random` with a seeded generator so runs are reproducible, and plays nine scenarios out
+over hundreds of simulated days — a careless farm failing, a competent one closing the food
+loop, auto-manage surviving unattended, the unserviced and rail modifiers each biting by the
+amount they claim, raw regolith yielding what the constant says, a monoculture costing morale,
+the lunar night shedding load, and a run surviving the JSON round trip it is stored as.
+
+It needs no install and no build step. **Re-run it after any change to `sim.js` or `data.js`** —
+balance is only visible over hundreds of days and cannot be judged by eye.
+
 ### Layout
 
 ```
 index.html          hub page
 farm/
   index.html        game shell, help text
+  harness.html      headless simulation tests — open it in a browser
   style.css
   js/data.js        crops, structures, equipment, events, milestones
   js/sim.js         the simulation — one tick is one hour

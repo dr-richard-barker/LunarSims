@@ -835,28 +835,47 @@
 
   /* ---------- main loop ---------- */
   let lastDaySaved = s.day;
+  /* An exception anywhere in the frame used to kill the loop silently, because
+     the next requestAnimationFrame sat after the work. The farm would simply
+     freeze with nothing said. Now the loop always reschedules and says so. */
+  let crashed = null;
+  function reportCrash(err) {
+    const msg = (err && err.message) || String(err);
+    if (crashed === msg) return;
+    crashed = msg;
+    console.error('Lunar Farm — frame error:', err);
+    const bar = $('#toolHint');
+    if (bar) bar.textContent = `Something went wrong in the last frame: ${msg} — the game is still running; a reload will clear it.`;
+    setSpeed(0);
+  }
+
   function frame(now) {
     const dt = Math.min(0.25, (now - last) / 1000);
     last = now;
-    const blocked = !$('#mEvent').hidden || !$('#mOver').hidden || !$('#mPlant').hidden || !$('#mReport').hidden || !$('#mLeague').hidden;
+    try {
+      const blocked = !$('#mEvent').hidden || !$('#mOver').hidden || !$('#mPlant').hidden
+        || !$('#mReport').hidden || !$('#mLeague').hidden;
 
-    if (speed > 0 && !blocked && !s.over) {
-      acc += dt * speed;
-      let guard = 0;
-      while (acc >= 1 && guard < 40) {
-        acc -= 1; guard++;
-        S.tick(s);
-        if (s.pendingEvent) { showEvent(s.pendingEvent); break; }
-        if (s.over) { showOver(); break; }
+      if (speed > 0 && !blocked && !s.over) {
+        acc += dt * speed;
+        let guard = 0;
+        while (acc >= 1 && guard < 40) {
+          acc -= 1; guard++;
+          S.tick(s);
+          if (s.pendingEvent) { showEvent(s.pendingEvent); break; }
+          if (s.over) { showOver(); break; }
+        }
+        renderHUD();
+        if (currentTab === 'info' || currentTab === 'systems') renderPanel();
+        if (s.day !== lastDaySaved) { lastDaySaved = s.day; save(); }
       }
-      renderHUD();
-      if (currentTab === 'info' || currentTab === 'systems') renderPanel();
-      if (s.day !== lastDaySaved) { lastDaySaved = s.day; save(); }
-    }
 
-    if (window.LF_AGENTS) window.LF_AGENTS.update(s, dt);
-    applyCam();
-    R.draw(ctx, s, ui);
+      if (window.LF_AGENTS) window.LF_AGENTS.update(s, dt);
+      applyCam();
+      R.draw(ctx, s, ui);
+    } catch (err) {
+      reportCrash(err);
+    }
     requestAnimationFrame(frame);
   }
 
