@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lunar Sims — classic simulation games, reimagined on the Moon</title>
+<meta name="description" content="Original browser simulation games set on the lunar surface, in the spirit of the classic Maxis sims. Lunar Farm is playable now.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🌘</text></svg>">
+<style>
+:root{
+  --bg:#080a10; --panel:#11141c; --panel-2:#161a24; --line:#232838;
+  --ink:#e6ebf5; --ink-soft:#9aa6bd; --ink-faint:#5c6478;
+  --accent:#6ee7a0; --accent-2:#8ab4ff; --led:#ff5fbd;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+}
+*{box-sizing:border-box}
+body{
+  margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);
+  line-height:1.65;
+}
+.wrap{max-width:940px;margin:0 auto;padding:0 22px}
+header.top{
+  border-bottom:1px solid var(--line);
+  background:
+    radial-gradient(900px 320px at 78% -40%, rgba(255,95,189,.16), transparent 70%),
+    linear-gradient(180deg,#141824,#0d1017);
+  padding:60px 0 46px;
+}
+.eyebrow{
+  font-family:var(--mono);font-size:10.5px;letter-spacing:.22em;text-transform:uppercase;
+  color:var(--accent);margin-bottom:12px;
+}
+h1{margin:0 0 12px;font-size:clamp(30px,5.4vw,46px);line-height:1.12;letter-spacing:-.015em}
+.lede{margin:0;max-width:64ch;font-size:16.5px;color:var(--ink-soft)}
+main{padding:44px 0 70px}
+h2{font-size:13px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-soft);
+   font-family:var(--mono);font-weight:600;margin:0 0 16px}
+h2+.grid{margin-bottom:44px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px}
+.card{
+  display:flex;flex-direction:column;background:var(--panel);border:1px solid var(--line);
+  border-radius:12px;overflow:hidden;text-decoration:none;color:inherit;
+}
+a.card:hover{border-color:var(--accent-2)}
+.shot{height:132px;position:relative;overflow:hidden;background:#0c0f16;border-bottom:1px solid var(--line)}
+.shot svg{position:absolute;inset:0;width:100%;height:100%}
+.card .body{padding:15px 17px 17px}
+.card h3{margin:0 0 3px;font-size:17px}
+.card .tag{
+  font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--ink-faint);
+}
+.card p{margin:9px 0 0;font-size:13.5px;color:var(--ink-soft)}
+.pill{
+  display:inline-block;margin-top:12px;font-family:var(--mono);font-size:10px;
+  letter-spacing:.12em;text-transform:uppercase;padding:4px 9px;border-radius:20px;
+}
+.pill.live{background:rgba(110,231,160,.14);color:var(--accent);border:1px solid rgba(110,231,160,.35)}
+.pill.soon{background:rgba(255,255,255,.05);color:var(--ink-faint);border:1px solid var(--line)}
+.note{
+  margin-top:8px;background:var(--panel);border:1px solid var(--line);
+  border-left:2px solid var(--accent-2);border-radius:0 10px 10px 0;padding:18px 20px;
+}
+.note h3{margin:0 0 8px;font-size:15px}
+.note p{margin:0 0 10px;font-size:13.5px;color:var(--ink-soft)}
+.note p:last-child{margin-bottom:0}
+footer{border-top:1px solid var(--line);padding:24px 0 40px;color:var(--ink-faint);font-size:12.5px}
+footer a{color:var(--ink-soft)}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap">
+    <div class="eyebrow">Lunar Sims</div>
+    <h1>Classic simulation games,<br>reimagined on the Moon.</h1>
+    <p class="lede">Original browser games in the spirit of the management sims of the early nineties —
+      rebuilt from scratch, set on the lunar surface, and grounded in what it would actually take to live
+      there. No downloads, no emulator: they run in this tab.</p>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <h2>Playable now</h2>
+  <div class="grid">
+    <a class="card" href="farm/">
+      <div class="shot">
+        <svg viewBox="0 0 320 132" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+          <rect width="320" height="132" fill="#9a9a9e"/>
+          <ellipse cx="44" cy="26" rx="26" ry="10" fill="#8a8a8e"/>
+          <ellipse cx="270" cy="112" rx="30" ry="12" fill="#8a8a8e"/>
+          <circle cx="120" cy="104" r="6" fill="#7f7f84"/><circle cx="136" cy="112" r="4" fill="#7f7f84"/>
+          <g>
+            <rect x="96" y="34" width="128" height="64" rx="8" fill="#241c2b" stroke="#ff5fbd" stroke-width="2"/>
+            <rect x="104" y="40" width="112" height="3" rx="1.5" fill="#ff5fbd"/>
+            <rect x="104" y="70" width="112" height="3" rx="1.5" fill="#ff5fbd"/>
+            <g fill="#6ba24f">
+              <circle cx="120" cy="56" r="7"/><circle cx="152" cy="56" r="7"/>
+              <circle cx="184" cy="56" r="7"/><circle cx="120" cy="86" r="7"/>
+              <circle cx="152" cy="86" r="7"/><circle cx="184" cy="86" r="7"/>
+            </g>
+            <g fill="#c9a86a">
+              <circle cx="120" cy="56" r="2.6"/><circle cx="152" cy="56" r="2.6"/>
+              <circle cx="184" cy="56" r="2.6"/><circle cx="120" cy="86" r="2.6"/>
+              <circle cx="152" cy="86" r="2.6"/><circle cx="184" cy="86" r="2.6"/>
+            </g>
+          </g>
+          <rect x="238" y="44" width="44" height="26" rx="3" fill="#2c4a86" stroke="#7fa8e0"/>
+          <rect x="30" y="60" width="34" height="20" rx="10" fill="#b9b9be" stroke="#7a7a80"/>
+        </svg>
+      </div>
+      <div class="body">
+        <span class="tag">Agriculture · in the spirit of SimFarm</span>
+        <h3>Lunar Farm</h3>
+        <p>Run the farm that keeps a lava-tube colony alive. Drag out pressurised grow halls, sow them,
+          and balance power, water, oxygen and carbon through a fourteen-day lunar night. The crop roster
+          is drawn from plants that have actually flown.</p>
+        <span class="pill live">Play now</span>
+      </div>
+    </a>
+  </div>
+
+  <h2>Sketched, not yet built</h2>
+  <div class="grid">
+    <div class="card">
+      <div class="shot">
+        <svg viewBox="0 0 320 132" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+          <rect width="320" height="132" fill="#0f1219"/>
+          <g stroke="#2a3040" stroke-width="1" fill="none">
+            <path d="M40 118 L40 20 L280 20 L280 118"/>
+            <path d="M40 96 H280 M40 74 H280 M40 52 H280"/>
+            <path d="M100 20 V118 M160 20 V118 M220 20 V118"/>
+          </g>
+          <rect x="42" y="98" width="56" height="18" fill="#2b3a5c"/>
+          <rect x="102" y="76" width="56" height="18" fill="#3a5c4a"/>
+          <rect x="162" y="54" width="56" height="18" fill="#5c4a2b"/>
+          <rect x="222" y="98" width="56" height="18" fill="#4a2b5c"/>
+          <circle cx="70" cy="107" r="3" fill="#ffd166"/><circle cx="130" cy="85" r="3" fill="#ffd166"/>
+        </svg>
+      </div>
+      <div class="body">
+        <span class="tag">Habitation · in the spirit of SimTower</span>
+        <h3>Lunar Habitat</h3>
+        <p>A buried tower driven downward instead of upward: shirtsleeve levels, lift shafts, radiation
+          shielding overhead, and the awkward truth that everyone wants to eat at the same hour.</p>
+        <span class="pill soon">Not started</span>
+      </div>
+    </div>
+    <div class="card">
+      <div class="shot">
+        <svg viewBox="0 0 320 132" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+          <rect width="320" height="132" fill="#171208"/>
+          <g stroke="#3e2f14" stroke-width="7" fill="none" stroke-linecap="round">
+            <path d="M20 66 C70 30, 120 100, 170 66 S270 40, 300 74"/>
+            <path d="M60 120 C90 96, 120 110, 150 92"/>
+            <path d="M180 22 C210 44, 240 30, 268 48"/>
+          </g>
+          <g fill="#c9a03a">
+            <circle cx="96" cy="60" r="4"/><circle cx="120" cy="72" r="4"/><circle cx="150" cy="80" r="4"/>
+            <circle cx="182" cy="70" r="4"/><circle cx="214" cy="56" r="4"/><circle cx="244" cy="62" r="4"/>
+          </g>
+        </svg>
+      </div>
+      <div class="body">
+        <span class="tag">Colony · in the spirit of SimAnt</span>
+        <h3>Regolith Colony</h3>
+        <p>Tunnelling robots as a colony organism — foraging ice, hauling regolith, and laying the
+          galleries a settlement is later poured into.</p>
+        <span class="pill soon">Not started</span>
+      </div>
+    </div>
+  </div>
+
+  <h2>About these games</h2>
+  <div class="note">
+    <h3>Original code, familiar shapes</h3>
+    <p>These are new games, written from scratch. They take their <em>shape</em> from the Maxis
+      management sims of the early nineties — a map you build on, a tool palette, a simulation that
+      answers back — but they share no code, art or data with them, and none of those games is
+      distributed here. The originals are still someone's property; this is homage, not a repack.</p>
+    <p>Where a number could be grounded in real research it has been: the crop list in
+      <a href="farm/">Lunar Farm</a> is made of plants that have actually been grown in orbit or are
+      long-standing candidates for bioregenerative life support, and the lunar day, the carbon loop and
+      the power budget all behave roughly as they should. The exact values are tuned to make a good
+      game, not to publish.</p>
+  </div>
+
+</main>
+
+<footer class="wrap">
+  Built by <a href="https://github.com/dr-richard-barker">Richard Barker</a> ·
+  <a href="https://github.com/dr-richard-barker/LunarSims">Source on GitHub</a>
+</footer>
+
+</body>
+</html>

@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lunar Farm — Marius Hills Skylight Station</title>
+<meta name="description" content="A lunar agriculture simulation: build a closed-loop farm on the surface and keep it alive through the 14-day lunar night.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🌱</text></svg>">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="hud">
+  <div class="brand">
+    <span class="mark">🌱</span>
+    <div>
+      <strong>LUNAR FARM</strong>
+      <small>Marius Hills Skylight Station</small>
+    </div>
+  </div>
+  <div class="chips" id="chips"></div>
+  <div class="clockbox">
+    <div class="clock"><span id="dayN">Day 1</span> <span id="clockT">06:00</span></div>
+    <div class="phase" id="phase">—</div>
+    <div class="speeds">
+      <button data-speed="0" class="sp">❚❚</button>
+      <button data-speed="1" class="sp on">1×</button>
+      <button data-speed="4" class="sp">4×</button>
+      <button data-speed="12" class="sp">12×</button>
+    </div>
+    <div class="modes">
+      <button id="btnAuto" class="mode" title="Let the crew tend, harvest, replant and restock on their own">Auto-manage</button>
+      <button id="btnReport" class="mode" title="Telemetry report">Report</button>
+      <button id="btnSandbox" class="mode" title="Build anything at no cost">Sandbox</button>
+    </div>
+  </div>
+</header>
+
+<main>
+  <nav class="palette">
+    <div class="palgroup">
+      <h4>Operate</h4>
+      <div class="tools" id="opTools"></div>
+    </div>
+    <div class="palgroup">
+      <h4>Build</h4>
+      <div class="tools" id="buildTools"></div>
+    </div>
+  </nav>
+
+  <section class="stage">
+    <canvas id="cv"></canvas>
+    <div class="statusbar"><span id="toolHint">Inspect — click any tile to read it.</span></div>
+  </section>
+
+  <aside class="panel">
+    <nav class="tabs">
+      <button class="tab on" data-tab="info">Tile</button>
+      <button class="tab" data-tab="systems">Systems</button>
+      <button class="tab" data-tab="research">Research</button>
+      <button class="tab" data-tab="goals">Goals</button>
+      <button class="tab" data-tab="log">Log</button>
+    </nav>
+    <div class="tabpane on" id="pane-info">
+      <div id="tileDetail" class="empty">Click a tile on the surface.</div>
+      <div class="actions" id="tileActions"></div>
+    </div>
+    <div class="tabpane" id="pane-systems"></div>
+    <div class="tabpane" id="pane-research"></div>
+    <div class="tabpane" id="pane-goals"></div>
+    <div class="tabpane" id="pane-log"></div>
+    <footer class="panelfoot">
+      <button id="btnHelp" class="ghost">How to play</button>
+      <button id="btnSave" class="ghost">Save</button>
+      <button id="btnReset" class="ghost danger">New run</button>
+    </footer>
+  </aside>
+</main>
+
+<div class="modal" id="mPlant" hidden>
+  <div class="sheet wide">
+    <h2>Seed stock</h2>
+    <p class="lede" id="plantLede">Choose what goes in the hall.</p>
+    <div class="croplist" id="cropList"></div>
+    <div class="sheetfoot"><button class="ghost" data-close>Cancel</button></div>
+  </div>
+</div>
+
+<div class="modal" id="mEvent" hidden>
+  <div class="sheet">
+    <div class="eyebrow">Station alert</div>
+    <h2 id="evTitle"></h2>
+    <p id="evText"></p>
+    <div class="choices" id="evChoices"></div>
+  </div>
+</div>
+
+<div class="modal" id="mHelp" hidden>
+  <div class="sheet wide scroll">
+    <h2>How to play</h2>
+
+    <h3>The short version</h3>
+    <p>You have a plot of lunar surface at the rim of a lava-tube skylight, and a colony that needs feeding.
+      Pick a tool on the left, then click — or drag — on the ground. Raise grow halls, sow them, keep them
+      watered and fed, harvest before anything wilts, and spend the proceeds on the hardware that gets you
+      through the night.</p>
+
+    <h3>Making a field</h3>
+    <p>Take the <strong>Grow Hall</strong> tool and <strong>drag a rectangle</strong> across open ground —
+      the outline shows the size and the price as you go, green if it will fit and red if something is in
+      the way. Let go and the hall goes up. A hall is one field: it takes a single crop across its whole
+      floor, and cost, yield, lighting draw and water all scale with how many tiles you gave it. Halls can
+      be anything from a single tile up to eight a side, so you can put a small research hall next to a
+      sprawling potato barn.</p>
+
+    <h3>Tracks matter</h3>
+    <p>A hall or module has to touch a regolith track that leads back to a habitat, or the crew cannot
+      service it properly and it grows at about three-quarters speed. Lay track as you expand — it is the cheapest
+      thing you can build. Unserviced modules show a red pip.</p>
+
+    <h3>The lunar night is the whole game</h3>
+    <p>A lunar day runs about 29.5 Earth days: roughly fourteen and a half sunlit, then the same again in
+      darkness. Solar arrays give you nothing for two weeks at a stretch. A legacy radioisotope unit covers
+      baseline life support but not the grow lamps, so power is shed one whole hall at a time as the
+      batteries drain. Battery banks buy you a few halls through the night; fission surface power ends the
+      problem for good.</p>
+
+    <h3>The loop is closed</h3>
+    <p>Plants make oxygen and consume carbon dioxide; the crew do the reverse. A surplus farm exports carbon
+      inside the food it sells, so the buffer runs down over time — watch the CO₂ figure, build the biomass
+      oxidation loop, and buy a cylinder if it gets tight. Water is recycled at about eighty percent; the
+      rest comes from resupply or from cooking hydrogen out of regolith.</p>
+
+    <h3>Reading a hall</h3>
+    <p>The bar along the bottom of a hall is growth. Coloured pips along the top mean, in order: green for
+      ready to harvest, yellow for fungal infection, blue for dry, purple for starved of nutrients, red for
+      no track connection. Select any module to see the full picture.</p>
+
+    <h3>Things worth knowing</h3>
+    <ul>
+      <li>Photoperiod is a lever, not a setting. Longer days grow crops faster and cost proportionally more power.</li>
+      <li>Leafy greens are quick, cheap and barely feed anyone. Potato, sweetpotato, wheat and soybean are what close the calorie gap.</li>
+      <li>Duckweed and spirulina are fast enough to finish inside a single lunar day. Plant them before sunset.</li>
+      <li>Zinnias feed nobody and are worth planting anyway — crew morale is a real constraint.</li>
+      <li>Arabidopsis pays in science, which is what unlocks the serious hardware.</li>
+      <li>Fungal infection spreads to neighbouring halls if you leave it.</li>
+      <li>Surplus oxygen sells. So does surplus food, but selling food exports carbon.</li>
+    </ul>
+
+    <h3>Credits</h3>
+    <p>An original game, written from scratch. It owes its shape to Maxis' <em>SimFarm</em> (1993), but shares
+      no code or art with it. The crop roster is drawn from plants that have actually flown or are long-standing
+      candidates for bioregenerative life support; the numbers are tuned for play, not for publication.</p>
+
+    <div class="sheetfoot"><button class="ghost" data-close>Close</button></div>
+  </div>
+</div>
+
+<div class="modal" id="mOver" hidden>
+  <div class="sheet">
+    <div class="eyebrow">Run ended</div>
+    <h2 id="overTitle">The farm failed</h2>
+    <p id="overText"></p>
+    <div id="overStats" class="statgrid"></div>
+    <div class="sheetfoot"><button class="primary" id="overRestart">Start again</button></div>
+  </div>
+</div>
+
+<div class="modal" id="mReport" hidden>
+  <div class="sheet report scroll">
+    <div id="reportBody"></div>
+    <div class="sheetfoot"><button class="ghost" data-close>Close</button></div>
+  </div>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+<div class="dtip" id="dtip" hidden></div>
+
+<script src="js/data.js"></script>
+<script src="js/sim.js"></script>
+<script src="js/render.js"></script>
+<script src="js/dashboard.js"></script>
+<script src="js/ui.js"></script>
+</body>
+</html>

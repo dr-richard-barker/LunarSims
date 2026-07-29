@@ -1,0 +1,681 @@
+/* Lunar Farm — interface, loop and persistence. */
+
+(function () {
+  const { K, CROPS, BUILDINGS, UPGRADES, EVENTS, MILESTONES } = window.LF_DATA;
+  const S = window.LF_SIM;
+  const R = window.LF_RENDER;
+  const SAVE_KEY = 'lunarfarm.save.v5';
+
+  const $ = sel => document.querySelector(sel);
+  const el = (tag, cls, html) => {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (html != null) n.innerHTML = html;
+    return n;
+  };
+  const fmt = n => Math.round(n).toLocaleString();
+  const pct = n => Math.round(n * 100) + '%';
+
+  const OPS = [
+    { id: 'inspect', glyph: '⌖', name: 'Inspect', key: '1', hint: 'Click anything to read it.' },
+    { id: 'plant', glyph: '❀', name: 'Plant', key: '2', hint: 'Click an empty grow hall to sow the whole floor.' },
+    { id: 'water', glyph: '≋', name: 'Water', key: '3', hint: 'Click a planted hall to refill its moisture.' },
+    { id: 'feed', glyph: '✦', name: 'Feed', key: '4', hint: 'Click a planted hall to recharge nutrients.' },
+    { id: 'treat', glyph: '✛', name: 'Treat', key: '5', hint: 'Sterilise a fungal outbreak. 120 cr a tile.' },
+    { id: 'harvest', glyph: '✄', name: 'Harvest', key: '6', hint: 'Click a hall whose crop is ready.' },
+    { id: 'clear', glyph: '⌫', name: 'Clear', key: '7', hint: 'Strip a crop out of a hall.' }
+  ];
+  const GLYPH = {
+    track: '═', greenhouse: '⌂', solar: '▤', battery: '▬', hab: '◍',
+    isru: '⚗', composter: '♻', reactor: '☢', pad: '◎'
+  };
+
+  let s = load() || S.newGame();
+  let speed = 1, acc = 0, last = performance.now();
+  let tool = { kind: 'op', id: 'inspect' };
+  const ui = { hover: null, hoverOk: true, selected: null, drag: null };
+  let dragStart = null;
+
+  /* ---------- canvas ---------- */
+  const cv = $('#cv');
+  const ctx = cv.getContext('2d');
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  cv.width = R.W * dpr; cv.height = R.H * dpr;
+  cv.style.aspectRatio = `${R.W} / ${R.H}`;
+  ctx.scale(dpr, dpr);
+
+  function canvasPoint(e) {
+    const r = cv.getBoundingClientRect();
+    return { x: (e.clientX - r.left) * (R.W / r.width), y: (e.clientY - r.top) * (R.H / r.height) };
+  }
+  const isDragTool = () => tool.kind === 'build' && tool.id === 'greenhouse';
+
+  function rectFrom(a, b) {
+    const x = Math.min(a.x, b.x), y = Math.min(a.y, b.y);
+    return { x, y, w: Math.abs(a.x - b.x) + 1, h: Math.abs(a.y - b.y) + 1 };
+  }
+
+  cv.addEventListener('mousedown', e => {
+    const h = R.hitTest(canvasPoint(e).x, canvasPoint(e).y);
+    if (!h) return;
+    if (isDragTool()) { dragStart = h; ui.drag = rectFrom(h, h); e.preventDefault(); }
+  });
+  cv.addEventListener('mousemove', e => {
+    const p = canvasPoint(e);
+    const h = R.hitTest(p.x, p.y);
+    ui.hover = h;
+    ui.hoverOk = h ? previewOk(h) : true;
+    if (dragStart && h) ui.drag = rectFrom(dragStart, h);
+  });
+  window.addEventListener('mouseup', e => {
+    if (!dragStart) return;
+    const r = ui.drag;
+    dragStart = null; ui.drag = null;
+    if (!r) return;
+    const err = S.addField(s, r.x, r.y, r.w, r.h);
+    if (err) toast(err, true);
+    else {
+      toast(`Grow hall raised: ${r.w} × ${r.h} tiles.`);
+      ui.selected = { x: r.x, y: r.y };
+      showTab('info');
+    }
+    renderAll();
+  });
+  cv.addEventListener('mouseleave', () => { ui.hover = null; });
+  cv.addEventListener('click', e => {
+    if (isDragTool()) return;         // handled by the drag cycle
+    const p = canvasPoint(e);
+    const h = R.hitTest(p.x, p.y);
+    if (h) applyTool(h);
+  });
+
+  function previewOk(h) {
+    const t = S.tileAt(s, h.x, h.y);
+    if (!t) return false;
+    const f = S.fieldAt(s, t);
+    if (tool.kind === 'build') {
+      if (tool.id === 'bulldoze') return !!t.b || !!f || t.t === 'boulder';
+      if (tool.id === 'greenhouse') return !t.b && !f && t.t !== 'crater' && t.t !== 'skylight' && t.t !== 'boulder';
+      return !t.b && !f && t.t !== 'crater' && t.t !== 'skylight' && t.t !== 'boulder';
+    }
+    if (tool.id === 'inspect') return true;
+    if (!f) return false;
+    if (tool.id === 'plant') return !f.crop && !f.dead;
+    if (tool.id === 'harvest') return !!f.crop && f.growth >= 1;
+    if (tool.id === 'treat') return !!f.infected;
+    if (tool.id === 'clear') return !!f.crop || f.dead;
+    return !!f.crop && !f.dead;
+  }
+
+  function applyTool(h) {
+    const t = S.tileAt(s, h.x, h.y);
+    if (!t) return;
+    ui.selected = { x: h.x, y: h.y };
+    const f = S.fieldAt(s, t);
+
+    if (tool.kind === 'build') {
+      const err = tool.id === 'bulldoze' ? S.bulldoze(s, t) : S.place(s, t, tool.id);
+      if (err) toast(err, true);
+      showTab('info'); renderAll();
+      return;
+    }
+    switch (tool.id) {
+      case 'inspect': break;
+      case 'plant':
+        if (!f) { toast('Crops only grow in a grow hall. Drag one out first.', true); break; }
+        if (f.crop || f.dead) { toast('That hall is not clear.', true); break; }
+        showTab('info'); openPlant(); return;
+      case 'water': act(S.water(s, f)); break;
+      case 'feed': act(S.feed(s, f)); break;
+      case 'treat': act(S.treat(s, f)); break;
+      case 'harvest': act(S.harvest(s, f)); break;
+      case 'clear': act(S.clear(s, f)); break;
+    }
+    showTab('info');
+    renderAll();
+  }
+
+  /* ---------- palette ---------- */
+  function buildPalette() {
+    const op = $('#opTools'); op.innerHTML = '';
+    for (const o of OPS) {
+      const b = el('button', 'tool',
+        `<span class="g">${o.glyph}</span><span class="n">${o.name}</span><span class="k">${o.key}</span>`);
+      b.onclick = () => setTool({ kind: 'op', id: o.id }, o.hint);
+      b.dataset.tool = 'op:' + o.id;
+      op.appendChild(b);
+    }
+    const bt = $('#buildTools'); bt.innerHTML = '';
+    for (const B of BUILDINGS) {
+      const short = B.name.replace(/ (Module|Array|Bank|Plant|Loop|Power|Pad)$/, '');
+      const cost = B.perTile ? `${fmt(B.cost)}/tile` : fmt(B.cost) + (B.science ? ' · ' + B.science + 's' : '');
+      const b = el('button', 'tool',
+        `<span class="g">${GLYPH[B.id] || '▪'}</span><span class="n">${short}</span>
+         <span class="k">${B.key}</span><span class="c">${cost}</span>`);
+      b.onclick = () => setTool({ kind: 'build', id: B.id },
+        B.drag ? `${B.name} — drag out a rectangle. ${fmt(B.cost)} credits a tile.`
+               : `${B.name} — ${fmt(B.cost)} credits. ${B.desc}`);
+      b.dataset.tool = 'build:' + B.id;
+      bt.appendChild(b);
+    }
+    const bd = el('button', 'tool danger',
+      `<span class="g">✖</span><span class="n">Bulldoze</span><span class="k">X</span><span class="c">60</span>`);
+    bd.onclick = () => setTool({ kind: 'build', id: 'bulldoze' },
+      'Bulldoze — remove a structure or empty hall (60 cr), or clear boulders (120 cr).');
+    bd.dataset.tool = 'build:bulldoze';
+    bt.appendChild(bd);
+    markTool();
+  }
+
+  function setTool(t, hint) {
+    tool = t;
+    $('#toolHint').textContent = hint || '';
+    cv.style.cursor = isDragTool() ? 'cell' : 'crosshair';
+    markTool();
+  }
+  function markTool() {
+    document.querySelectorAll('.tool').forEach(b =>
+      b.classList.toggle('on', b.dataset.tool === tool.kind + ':' + tool.id));
+  }
+
+  /* ---------- toast ---------- */
+  let toastT = null;
+  function toast(msg, bad) {
+    const t = $('#toast');
+    t.textContent = msg;
+    t.className = 'toast' + (bad ? ' bad' : '');
+    t.hidden = false;
+    clearTimeout(toastT);
+    toastT = setTimeout(() => { t.hidden = true; }, 2600);
+  }
+  function act(err) { if (err) toast(err, true); else renderAll(); }
+
+  /* ---------- HUD ---------- */
+  function renderHUD() {
+    const gen = S.generation(s), dem = S.demand(s);
+    const foodDays = s.food / Math.max(1, S.dailyNeed(s));
+    const chips = [
+      ['Credits', fmt(s.credits), s.credits < 500 ? 'bad' : ''],
+      ['Food', foodDays.toFixed(1) + ' d', foodDays < 5 ? 'bad' : foodDays < 12 ? 'warn' : 'good'],
+      ['Power', fmt(s.stored) + ' kWh', s.stored < 10 ? 'bad' : s.stored < 30 ? 'warn' : ''],
+      ['Net', (gen.total - dem.total >= 0 ? '+' : '') + (gen.total - dem.total).toFixed(1) + ' kW',
+        gen.total - dem.total < 0 ? 'warn' : 'good'],
+      ['Water', fmt(s.water) + ' L', s.water < 80 ? 'bad' : s.water < 200 ? 'warn' : ''],
+      ['Oxygen', s.o2.toFixed(0) + ' kg', s.o2 < 40 ? 'bad' : s.o2 < 90 ? 'warn' : ''],
+      ['CO₂', s.co2.toFixed(0) + ' kg', s.co2 < 20 ? 'bad' : s.co2 < 55 ? 'warn' : ''],
+      ['Nutrients', fmt(s.nutrients), s.nutrients < 40 ? 'warn' : ''],
+      ['Crew', `${s.crew}/${S.crewCapacity(s)}`, ''],
+      ['Morale', Math.round(s.morale) + '%', s.morale < 35 ? 'bad' : s.morale < 55 ? 'warn' : 'good'],
+      ['Science', fmt(s.science), '']
+    ];
+    $('#chips').innerHTML = chips.map(([k, v, c]) =>
+      `<div class="chip ${c}"><b>${v}</b><span>${k}</span></div>`).join('');
+
+    $('#dayN').textContent = 'Day ' + s.day;
+    $('#clockT').textContent = String(s.hour).padStart(2, '0') + ':00';
+    const phase = ((s.day + s.hour / 24) % K.LUNAR_CYCLE);
+    const sunlit = S.isSunlit(s);
+    const left = sunlit ? (K.LUNAR_CYCLE / 2 - phase) : (K.LUNAR_CYCLE - phase);
+    $('#phase').textContent = sunlit
+      ? `Lunar day — ${left.toFixed(1)} d of sun left`
+      : `Lunar night — ${left.toFixed(1)} d until sunrise`;
+  }
+
+  /* ---------- info panel ---------- */
+  function meter(label, val, colour, extra) {
+    return `<div class="meter"><div class="lab"><span>${label}</span><span>${extra || pct(val)}</span></div>
+      <div class="track"><div class="fill" style="width:${Math.max(0, Math.min(1, val)) * 100}%;background:${colour}"></div></div></div>`;
+  }
+
+  const TERRAIN = {
+    flat: 'Graded regolith. Level enough to build on.',
+    rough: 'Broken ejecta. Buildable, if untidy.',
+    boulder: 'A boulder field. Bulldoze it before anything can go here.',
+    crater: 'A crater bowl. Nothing will sit level here.',
+    skylight: 'The lava-tube skylight the station was founded on. It stays open.'
+  };
+
+  function renderInfoPane() {
+    const box = $('#tileDetail'), acts = $('#tileActions');
+    acts.innerHTML = '';
+    const t = ui.selected ? S.tileAt(s, ui.selected.x, ui.selected.y) : null;
+    if (!t) { box.className = 'empty'; box.textContent = 'Click a tile on the surface.'; return; }
+    box.className = '';
+    const f = S.fieldAt(s, t);
+
+    if (f) return renderFieldPane(f, box, acts);
+
+    const coord = `${t.x + 1},${t.y + 1}`;
+    if (!t.b) {
+      box.innerHTML = `<div class="baytitle"><h2>Open ground</h2><span class="num">${coord}</span></div>
+        <p class="cultivar">${t.t.charAt(0).toUpperCase() + t.t.slice(1)}</p>
+        <p style="font-size:12px;line-height:1.55;color:var(--ink-soft)">${TERRAIN[t.t]}</p>
+        <p class="note">Pick the Grow Hall tool and drag a rectangle across open ground to raise a hall.</p>`;
+      return;
+    }
+
+    const B = S.buildById(t.b.type);
+    const extra = {
+      solar: `Rated ${S.ARRAY_KW} kW at local noon. The farm's arrays are making ${S.generation(s).solar.toFixed(2)} kW right now.`,
+      battery: `Holds ${S.BATTERY_KWH} kWh. Farm storage is ${fmt(s.stored)} of ${fmt(S.storageCap(s))} kWh.`,
+      hab: `Quarters for three. Crew is ${s.crew} of ${S.crewCapacity(s)}.`,
+      reactor: `${S.REACTOR_KW} kW, day and night.`,
+      isru: s.isruOn ? 'Running: +14 L of water a day.' : 'Idle.',
+      composter: 'Returning 75% of each crop’s fixed carbon at harvest.',
+      pad: 'Resupply is 15% cheaper and produce sells for more.',
+      track: 'Graded surface road. Halls and modules touching the network are serviced by the crew.'
+    }[t.b.type] || '';
+    box.innerHTML = `<div class="baytitle"><h2>${B.name}</h2><span class="num">${coord}</span></div>
+      <p class="cultivar">Structure</p>
+      <p style="font-size:12px;line-height:1.55;color:var(--ink-soft)">${extra}</p>
+      <p class="note">${B.desc}</p>`;
+  }
+
+  function renderFieldPane(f, box, acts) {
+    const A = S.area(f);
+    const coord = `${f.x + 1},${f.y + 1} · ${f.w}×${f.h}`;
+
+    if (!f.crop) {
+      box.innerHTML = `<div class="baytitle"><h2>Grow hall</h2><span class="num">${coord}</span></div>
+        <p class="cultivar">${A} tiles under glass, beds flushed and ready.</p>
+        <div class="rows" style="margin-top:10px">
+          <div class="row"><span class="k">Lighting draw</span><span class="v">${(A * S.ledKW(s)).toFixed(2)} kW</span></div>
+          <div class="row"><span class="k">Service</span><span class="v ${f.serviced ? 'good' : 'bad'}">${f.serviced ? 'ON TRACK NETWORK' : 'NO TRACK'}</span></div>
+        </div>
+        ${f.serviced ? '' : '<p class="note" style="border-left-color:var(--bad)">No track connection — the crew cannot service this hall, and it grows at about three-quarters speed.</p>'}`;
+      const btn = el('button', 'act primary wide', 'Sow a crop');
+      btn.onclick = openPlant;
+      acts.appendChild(btn);
+      return;
+    }
+
+    const c = S.cropById(f.crop);
+    const daysIn = s.day - f.plantedDay;
+    const remain = f.growth >= 1 ? 0 : Math.ceil((1 - f.growth) * c.days * (24 / Math.max(1, s.photoperiod)));
+    box.innerHTML = `
+      <div class="baytitle"><h2>${c.name}</h2><span class="num">${coord}</span></div>
+      <p class="cultivar">${c.cultivar || '&nbsp;'}</p>
+      ${meter('Growth', f.growth, f.growth >= 1 ? 'var(--accent)' : 'var(--accent-2)', f.growth >= 1 ? 'READY' : pct(f.growth))}
+      ${meter('Health', f.health, f.health > 0.6 ? 'var(--accent)' : f.health > 0.3 ? 'var(--warn)' : 'var(--bad)')}
+      ${meter('Moisture', f.moisture, f.moisture < 0.15 ? 'var(--bad)' : '#4aa8ff')}
+      ${meter('Nutrient charge', f.feed, f.feed < 0.1 ? 'var(--bad)' : '#7bd88f')}
+      <div class="rows" style="margin-top:12px">
+        <div class="row"><span class="k">Hall size</span><span class="v">${A} tiles</span></div>
+        <div class="row"><span class="k">Sown</span><span class="v">${daysIn} d ago</span></div>
+        <div class="row"><span class="k">Est. to harvest</span><span class="v">${f.growth >= 1 ? '—' : remain + ' d'}</span></div>
+        <div class="row"><span class="k">Yield at full health</span><span class="v">${fmt(c.kcal * S.KCAL_SCALE * A)} kcal</span></div>
+        <div class="row"><span class="k">Station pays</span><span class="v good">${fmt(c.value * S.VALUE_SCALE * A)} cr</span></div>
+        <div class="row"><span class="k">Lamps</span><span class="v ${f.litNow ? 'good' : 'warn'}">${f.litNow ? 'ON' : 'OFF'}</span></div>
+        ${f.serviced ? '' : '<div class="row"><span class="k">Service</span><span class="v bad">NO TRACK</span></div>'}
+        ${f.infected ? '<div class="row"><span class="k">Status</span><span class="v bad">FUNGAL INFECTION</span></div>' : ''}
+        ${f.dead ? '<div class="row"><span class="k">Status</span><span class="v bad">CROP LOST</span></div>' : ''}
+      </div>
+      <p class="note">${c.note}</p>`;
+
+    const mk = (label, cls, fn, disabled) => {
+      const b = el('button', 'act ' + (cls || ''), label);
+      b.disabled = !!disabled; b.onclick = fn;
+      acts.appendChild(b);
+    };
+    if (f.dead) { mk('Clear the beds', 'primary wide', () => act(S.clear(s, f))); return; }
+    mk('Water', '', () => act(S.water(s, f)), f.moisture > 0.95);
+    mk('Feed', '', () => act(S.feed(s, f)), f.feed > 0.95);
+    mk(`Treat (${fmt(120 * A)} cr)`, '', () => act(S.treat(s, f)), !f.infected);
+    mk('Clear', '', () => act(S.clear(s, f)));
+    mk(f.growth >= 1 ? 'Harvest' : 'Not ready', 'primary wide', () => act(S.harvest(s, f)), f.growth < 1);
+  }
+
+  /* ---------- crop picker ---------- */
+  function openPlant() {
+    const t = ui.selected ? S.tileAt(s, ui.selected.x, ui.selected.y) : null;
+    const f = S.fieldAt(s, t);
+    if (!f) return toast('Select a grow hall first.', true);
+    const A = S.area(f);
+    $('#plantLede').textContent =
+      `${A} tiles under glass. The whole hall takes one crop, and seed, yield and water all scale with the floor.`;
+    const list = $('#cropList');
+    list.innerHTML = '';
+    for (const c of CROPS) {
+      const cost = S.seedCost(c, f);
+      const btn = el('button', 'crop');
+      btn.disabled = s.credits < cost;
+      btn.innerHTML = `
+        <div class="top">
+          <b><span class="dot" style="background:${c.colour}"></span>${c.name}</b>
+          <span class="seed">${fmt(cost)} cr</span>
+        </div>
+        <div class="cv">${c.cultivar || '&nbsp;'}</div>
+        <div class="stats">
+          <span>${c.days} d</span>
+          <span>${c.kcal ? fmt(c.kcal * S.KCAL_SCALE * A) + ' kcal' : 'no calories'}</span>
+          <span>${fmt(c.value * S.VALUE_SCALE * A)} cr</span>
+          ${c.science > 2 ? `<span>+${c.science} sci</span>` : ''}
+          ${c.morale > 10 ? `<span>+morale</span>` : ''}
+        </div>`;
+      btn.onclick = () => {
+        const err = S.plant(s, f, c.id);
+        if (err) return toast(err, true);
+        $('#mPlant').hidden = true;
+        toast(`${c.name} sown across ${A} tiles.`);
+        renderAll();
+      };
+      list.appendChild(btn);
+    }
+    $('#mPlant').hidden = false;
+  }
+
+  /* ---------- systems ---------- */
+  function renderSystems() {
+    const gen = S.generation(s), dem = S.demand(s);
+    const net = gen.total - dem.total;
+    const res = S.nightReserve(s);
+    const rec = S.recoveryRate(s);
+    const tiles = S.totalTiles(s);
+    const plantedTiles = S.planted(s).reduce((a, f) => a + S.area(f), 0);
+    const row = (k, v, cls) => `<div class="row"><span class="k">${k}</span><span class="v ${cls || ''}">${v}</span></div>`;
+    const padDisc = S.count(s, 'pad') ? 0.85 : 1;
+
+    $('#pane-systems').innerHTML = `
+      <h3 class="sec">Power</h3>
+      <div class="rows">
+        ${row('Solar (' + S.count(s, 'solar') + ')', gen.solar.toFixed(2) + ' kW', gen.solar > 0 ? 'good' : 'warn')}
+        ${row('RTG + reactor', gen.rtg.toFixed(2) + ' kW')}
+        ${row('Life support', '−' + dem.ls.toFixed(2) + ' kW')}
+        ${row('Grow lighting', '−' + dem.lit.toFixed(2) + ' kW')}
+        ${row('ISRU plant', '−' + dem.isru.toFixed(2) + ' kW')}
+        ${row('Net', (net >= 0 ? '+' : '') + net.toFixed(2) + ' kW', net >= 0 ? 'good' : 'bad')}
+        ${row('Stored', fmt(s.stored) + ' / ' + fmt(S.storageCap(s)) + ' kWh')}
+        ${row('Halls lit', s.litFields + ' of ' + s.wantFields, s.litFields < s.wantFields ? 'bad' : 'good')}
+        ${row('Reserve at this draw', res === Infinity ? 'indefinite' : (res / 24).toFixed(1) + ' d',
+          res === Infinity ? 'good' : res < 24 ? 'bad' : 'warn')}
+        ${s.flags.dust ? row('Array soiling', '−' + pct(1 - S.dustFactor(s)), 'warn') : ''}
+        ${s.flags.busfault ? row('Bus fault', 'storage halved', 'bad') : ''}
+      </div>
+
+      <h3 class="sec">Photoperiod</h3>
+      <div class="seg" id="ppSeg">
+        ${[8, 12, 16, 20].map(h => `<button data-pp="${h}" class="${s.photoperiod === h ? 'on' : ''}">${h} h</button>`).join('')}
+      </div>
+      <p style="font-size:11px;color:var(--ink-soft);margin:8px 0 0;line-height:1.5">
+        Lighting is ${S.ledKW(s).toFixed(2)} kW a tile. ${plantedTiles} of ${tiles} tiles are sown,
+        so a full photoperiod costs ${(plantedTiles * S.ledKW(s) * s.photoperiod).toFixed(0)} kWh a day.</p>
+
+      <h3 class="sec">Water and nutrients</h3>
+      <div class="rows">
+        ${row('In the loop', fmt(s.water) + ' L', s.water < 120 ? 'bad' : '')}
+        ${row('Recovery', pct(rec), rec < 0.7 ? 'warn' : 'good')}
+        ${row('Nutrient stock', fmt(s.nutrients), s.nutrients < 40 ? 'warn' : '')}
+        ${row('ISRU output', S.count(s, 'isru') ? (s.isruOn ? '+14 L/d' : 'idle') : 'not built', S.count(s, 'isru') && s.isruOn ? 'good' : '')}
+        ${s.flags.biofilm ? row('Biofilm', 'recovery −10 pts', 'bad') : ''}
+      </div>
+      ${S.count(s, 'isru') ? `<div class="ctrl"><label>Run the ISRU plant</label>
+        <div class="seg"><button id="isruOn" class="${s.isruOn ? 'on' : ''}">On</button>
+        <button id="isruOff" class="${!s.isruOn ? 'on' : ''}">Off</button></div></div>` : ''}
+
+      <h3 class="sec">Atmosphere</h3>
+      <div class="rows">
+        ${row('Oxygen', s.o2.toFixed(1) + ' kg', s.o2 < 60 ? 'bad' : 'good')}
+        ${row('Carbon dioxide', s.co2.toFixed(1) + ' kg', s.co2 < 20 ? 'bad' : s.co2 < 55 ? 'warn' : 'good')}
+        ${row('Pressure', s.pressure.toFixed(1) + ' %', s.pressure < 95 ? 'bad' : 'good')}
+        ${row('Spares', s.spares, s.spares < 2 ? 'warn' : '')}
+        ${s.flags.leak ? row('Hull', 'LEAKING', 'bad') : ''}
+        ${s.flags.thermal ? row('Radiators', 'fouled — growth slowed', 'warn') : ''}
+      </div>
+
+      <h3 class="sec">Colony</h3>
+      <div class="rows">
+        ${row('Crew', `${s.crew} / ${S.crewCapacity(s)}`)}
+        ${row('Daily requirement', fmt(S.dailyNeed(s)) + ' kcal')}
+        ${row('Ground under glass', tiles + ' tiles')}
+        ${row('Food closure (to date)', pct(s.stats.lastClosure), s.stats.lastClosure >= 1 ? 'good' : 'warn')}
+        ${row('Closure streak', s.stats.closureStreak + ' d')}
+        ${row('Harvests', s.stats.harvests)}
+      </div>
+
+      <h3 class="sec">Resupply</h3>
+      <div class="rows">
+        <div class="row"><span class="k">Water, 200 L</span><button class="ghost" data-buy="water">${fmt(840 * padDisc)} cr</button></div>
+        <div class="row"><span class="k">Nutrients, 200</span><button class="ghost" data-buy="nutrients">${fmt(600 * padDisc)} cr</button></div>
+        <div class="row"><span class="k">Spares, 4</span><button class="ghost" data-buy="spares">${fmt(1040 * padDisc)} cr</button></div>
+        <div class="row"><span class="k">Rations, 30,000 kcal</span><button class="ghost" data-buy="food">${fmt(720 * padDisc)} cr</button></div>
+        <div class="row"><span class="k">CO₂ cylinder, 40 kg</span><button class="ghost" data-buy="co2">${fmt(880 * padDisc)} cr</button></div>
+        <div class="row"><span class="k">O₂ cylinder, 60 kg</span><button class="ghost" data-buy="buyo2">${fmt(1200 * padDisc)} cr</button></div>
+        <div class="row"><span class="k">Sell 20,000 kcal</span><button class="ghost" data-buy="sell">+${fmt(20000 * (S.count(s, 'pad') ? .015 : .012))} cr</button></div>
+        <div class="row"><span class="k">Sell 60 kg oxygen</span><button class="ghost" data-buy="o2">+840 cr</button></div>
+      </div>`;
+
+    const p = $('#pane-systems');
+    p.querySelectorAll('[data-pp]').forEach(b => b.onclick = () => { s.photoperiod = +b.dataset.pp; renderAll(); });
+    const on = p.querySelector('#isruOn'), off = p.querySelector('#isruOff');
+    if (on) on.onclick = () => { s.isruOn = true; renderAll(); };
+    if (off) off.onclick = () => { s.isruOn = false; renderAll(); };
+    p.querySelectorAll('[data-buy]').forEach(b => b.onclick = () => {
+      const w = b.dataset.buy;
+      if (w === 'sell') act(S.sellFood(s, 20000));
+      else if (w === 'o2') act(S.sellO2(s, 60));
+      else if (w === 'buyo2') act(S.trade(s, 'o2', 60));
+      else if (w === 'co2') act(S.trade(s, 'co2', 40));
+      else if (w === 'food') act(S.trade(s, 'food', 30000));
+      else if (w === 'water') act(S.trade(s, 'water', 200));
+      else if (w === 'nutrients') act(S.trade(s, 'nutrients', 200));
+      else act(S.trade(s, 'spares', 4));
+    });
+  }
+
+  /* ---------- research ---------- */
+  function renderResearch() {
+    const p = $('#pane-research');
+    p.innerHTML = `<p style="font-size:11.5px;color:var(--ink-soft);line-height:1.55;margin:0 0 12px">
+      Credits ${fmt(s.credits)} · Science ${fmt(s.science)}. Structures go on the map — this is
+      equipment fitted across the whole farm.</p>`;
+    for (const u of UPGRADES) {
+      const owned = s.up[u.id];
+      const has = u.repeat ? (owned || 0) : !!owned;
+      const affordable = s.credits >= u.cost && (!u.science || s.science >= u.science);
+      const item = el('div', 'item');
+      item.innerHTML = `
+        <h4><span>${u.name}</span><span class="cost">${fmt(u.cost)} cr${u.science ? ` · ${u.science} sci` : ''}</span></h4>
+        <p>${u.desc}</p>
+        ${u.repeat ? `<div class="owned" style="margin-bottom:6px">Fitted: ${owned || 0}</div>` : ''}`;
+      const btn = el('button', '', has && !u.repeat ? 'Fitted' : 'Fit');
+      btn.disabled = (has && !u.repeat) || !affordable;
+      btn.onclick = () => act(S.research(s, u.id));
+      item.appendChild(btn);
+      p.appendChild(item);
+    }
+  }
+
+  function renderGoals() {
+    $('#pane-goals').innerHTML = `<p style="font-size:11.5px;color:var(--ink-soft);line-height:1.55;margin:0 0 10px">
+      There is no ending. These are the marks of a farm that works.</p>` +
+      MILESTONES.map(m => {
+        const d = s.done[m.id];
+        return `<div class="goal ${d ? 'done' : ''}"><span class="tick">${d ? '✔' : '○'}</span>
+          <span>${m.text}${d ? ` <span style="opacity:.6">— day ${d}</span>` : ''}</span></div>`;
+      }).join('');
+  }
+
+  function renderLog() {
+    $('#pane-log').innerHTML = s.log.length
+      ? s.log.map(l => `<div class="logline"><b>D${l.day}</b>${l.msg}</div>`).join('')
+      : '<div class="empty">Nothing logged yet.</div>';
+  }
+
+  function renderPanel() {
+    if (currentTab === 'info') renderInfoPane();
+    if (currentTab === 'systems') renderSystems();
+    if (currentTab === 'research') renderResearch();
+    if (currentTab === 'goals') renderGoals();
+    if (currentTab === 'log') renderLog();
+  }
+  function renderAll() { renderHUD(); renderPanel(); }
+
+  /* ---------- tabs ---------- */
+  let currentTab = 'info';
+  function showTab(name) {
+    currentTab = name;
+    document.querySelectorAll('.tab').forEach(t => t.classList.toggle('on', t.dataset.tab === name));
+    document.querySelectorAll('.tabpane').forEach(t => t.classList.toggle('on', t.id === 'pane-' + name));
+    renderPanel();
+  }
+  document.querySelectorAll('.tab').forEach(t => t.onclick = () => showTab(t.dataset.tab));
+
+  /* ---------- speed ---------- */
+  document.querySelectorAll('.sp').forEach(b => b.onclick = () => setSpeed(+b.dataset.speed));
+  function setSpeed(v) {
+    speed = v;
+    document.querySelectorAll('.sp').forEach(x => x.classList.toggle('on', +x.dataset.speed === v));
+  }
+
+  /* ---------- modes and the report ---------- */
+  function markModes() {
+    $('#btnAuto').classList.toggle('on', !!s.auto);
+    $('#btnSandbox').classList.toggle('on', !!s.sandbox);
+  }
+  $('#btnAuto').onclick = () => {
+    s.auto = !s.auto;
+    markModes();
+    toast(s.auto
+      ? 'Auto-manage on. The crew will tend, harvest, replant and restock each day.'
+      : 'Auto-manage off. The farm is yours again.');
+    S.pushLog(s, s.auto ? 'Handed day-to-day running to the crew.' : 'Took back day-to-day running of the farm.');
+    renderAll();
+  };
+  $('#btnSandbox').onclick = () => {
+    s.sandbox = !s.sandbox;
+    markModes();
+    toast(s.sandbox
+      ? 'Sandbox on. Halls, structures and equipment cost nothing.'
+      : 'Sandbox off. Everything costs credits again.');
+    renderAll();
+  };
+
+  let audience = 'earth';
+  function openReport() {
+    const body = $('#reportBody');
+    body.innerHTML = window.LF_DASH.render(s, audience);
+    const swap = body.querySelector('#dAudience');
+    if (swap) swap.onclick = () => { audience = audience === 'earth' ? 'settlers' : 'earth'; openReport(); };
+    window.LF_DASH.wireHover(body, s, $('#dtip'));
+    $('#mReport').hidden = false;
+  }
+  $('#btnReport').onclick = openReport;
+
+  /* ---------- events ---------- */
+  function showEvent(id) {
+    const e = EVENTS.find(x => x.id === id);
+    if (!e) { s.pendingEvent = null; return; }
+    $('#evTitle').textContent = e.title;
+    $('#evText').textContent = e.text;
+    const box = $('#evChoices');
+    box.innerHTML = '';
+    for (const c of e.choices) {
+      const btn = el('button', 'choice', `<b>${c.label}</b>${c.hint ? `<span>${c.hint}</span>` : ''}`);
+      btn.onclick = () => {
+        S.resolveEvent(s, e.id, c.effect);
+        $('#mEvent').hidden = true;
+        renderAll();
+      };
+      box.appendChild(btn);
+    }
+    $('#mEvent').hidden = false;
+  }
+
+  /* ---------- persistence ---------- */
+  function save() {
+    try { localStorage.setItem(SAVE_KEY, JSON.stringify(s)); return true; }
+    catch (err) { return false; }
+  }
+  function load() {
+    try {
+      const raw = localStorage.getItem(SAVE_KEY);
+      if (!raw) return null;
+      const o = JSON.parse(raw);
+      return (o && o.version === 5) ? o : null;
+    } catch (err) { return null; }
+  }
+
+  $('#btnSave').onclick = () => { const ok = save(); toast(ok ? 'Saved to this browser.' : 'Could not save.', !ok); };
+  function restart() {
+    localStorage.removeItem(SAVE_KEY);
+    s = S.newGame();
+    ui.selected = null; ui.drag = null; dragStart = null;
+    $('#mOver').hidden = true;
+    setSpeed(1);
+    renderAll();
+  }
+  $('#btnReset').onclick = () => { if (confirm('Abandon this run and start a new one?')) restart(); };
+  $('#overRestart').onclick = restart;
+  $('#btnHelp').onclick = () => { $('#mHelp').hidden = false; };
+  document.querySelectorAll('[data-close]').forEach(b => {
+    b.onclick = () => { b.closest('.modal').hidden = true; };
+  });
+
+  document.addEventListener('keydown', e => {
+    if (e.target.tagName === 'INPUT') return;
+    if (e.key === 'Escape') { $('#mPlant').hidden = true; $('#mHelp').hidden = true; }
+    if (e.key === ' ') { e.preventDefault(); setSpeed(speed === 0 ? 1 : 0); }
+    const op = OPS.find(o => o.key === e.key);
+    if (op) setTool({ kind: 'op', id: op.id }, op.hint);
+    const B = BUILDINGS.find(b => b.key.toLowerCase() === e.key.toLowerCase());
+    if (B) setTool({ kind: 'build', id: B.id },
+      B.drag ? `${B.name} — drag out a rectangle. ${fmt(B.cost)} credits a tile.`
+             : `${B.name} — ${fmt(B.cost)} credits. ${B.desc}`);
+    if (e.key.toLowerCase() === 'x') setTool({ kind: 'build', id: 'bulldoze' },
+      'Bulldoze — remove a structure or empty hall (60 cr), or clear boulders (120 cr).');
+  });
+
+  function showOver() {
+    $('#overText').textContent = s.over;
+    $('#overStats').innerHTML = `
+      <div><b>${s.day}</b><span>days run</span></div>
+      <div><b>${s.stats.harvests}</b><span>harvests</span></div>
+      <div><b>${Object.keys(s.stats.kinds).length}</b><span>crops grown</span></div>
+      <div><b>${s.stats.nightsSurvived}</b><span>lunar nights</span></div>`;
+    $('#mOver').hidden = false;
+    setSpeed(0);
+  }
+
+  /* ---------- main loop ---------- */
+  let lastDaySaved = s.day;
+  function frame(now) {
+    const dt = Math.min(0.25, (now - last) / 1000);
+    last = now;
+    const blocked = !$('#mEvent').hidden || !$('#mOver').hidden || !$('#mPlant').hidden || !$('#mReport').hidden;
+
+    if (speed > 0 && !blocked && !s.over) {
+      acc += dt * speed;
+      let guard = 0;
+      while (acc >= 1 && guard < 40) {
+        acc -= 1; guard++;
+        S.tick(s);
+        if (s.pendingEvent) { showEvent(s.pendingEvent); break; }
+        if (s.over) { showOver(); break; }
+      }
+      renderHUD();
+      if (currentTab === 'info' || currentTab === 'systems') renderPanel();
+      if (s.day !== lastDaySaved) { lastDaySaved = s.day; save(); }
+    }
+
+    R.draw(ctx, s, ui);
+    requestAnimationFrame(frame);
+  }
+
+  /* ---------- boot ---------- */
+  markModes();
+  if (!s.log.length) {
+    S.pushLog(s, 'Farm handover complete: one 3×2 grow hall, a habitat, four arrays and two battery banks.');
+    S.pushLog(s, 'Drag out more halls with the Grow Hall tool. The sun sets on day 15 — plan for it.');
+  }
+  buildPalette();
+  setTool({ kind: 'op', id: 'inspect' }, OPS[0].hint);
+  showTab('info');
+  renderAll();
+  if (s.over) showOver();
+  requestAnimationFrame(frame);
+
+  window.__lf = {
+    get s() { return s; }, set s(v) { s = v; }, S, R, ui,
+    tick: n => { for (let i = 0; i < n; i++) S.tick(s); renderAll(); }
+  };
+})();
