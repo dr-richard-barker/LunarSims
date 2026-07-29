@@ -80,26 +80,6 @@
     clampCam();
   }, { passive: false });
 
-  /* pan with the right button or a middle drag */
-  let panFrom = null;
-  cv.addEventListener('contextmenu', e => e.preventDefault());
-  cv.addEventListener('pointerdown', e => {
-    if (e.button === 2 || e.button === 1) {
-      panFrom = { x: e.clientX, y: e.clientY, cx: cam.x, cy: cam.y };
-      cv.setPointerCapture(e.pointerId);
-      e.preventDefault();
-    }
-  });
-  cv.addEventListener('pointermove', e => {
-    if (!panFrom) return;
-    const r = cv.getBoundingClientRect();
-    const k = (R.W / r.width) / cam.z;
-    cam.x = panFrom.cx - (e.clientX - panFrom.x) * k;
-    cam.y = panFrom.cy - (e.clientY - panFrom.y) * k;
-    clampCam();
-  });
-  cv.addEventListener('pointerup', () => { panFrom = null; });
-  cv.addEventListener('pointercancel', () => { panFrom = null; });
   /* 'rect' drags out a hall; 'line' runs a road or a railway. */
   function dragMode() {
     if (tool.kind !== 'build') return null;
@@ -139,25 +119,152 @@
     return pts;
   }
 
-  cv.addEventListener('mousedown', e => {
-    const h = R.hitTest(canvasPoint(e).x, canvasPoint(e).y);
-    if (!h) return;
+  /* ---------- input ----------
+     One pointer-based path serves mouse, pen and touch. On a mouse nothing has
+     changed: left builds or applies the tool, the right button pans, the wheel
+     zooms. On touch, one finger builds when a build tool is up and otherwise
+     drags the map about, a tap applies the tool, and two fingers pinch to zoom
+     and pan together. */
+
+  const pointers = new Map();          // live pointers, by id
+  let gesture = null;                  // 'build' | 'pan' | 'pinch' | 'tap'
+  let panFrom = null;
+  let pinch = null;
+  let travelled = 0;                   // how far this gesture has moved, in CSS px
+  const TAP_SLOP = 10;                 // beyond this it is a drag, not a tap
+
+  const midpoint = pts => {
+    const a = [...pts.values()];
+    return { x: (a[0].x + a[1].x) / 2, y: (a[0].y + a[1].y) / 2 };
+  };
+  const spread = pts => {
+    const a = [...pts.values()];
+    return Math.hypot(a[0].x - a[1].x, a[0].y - a[1].y);
+  };
+  const worldPerCssPx = () => (R.W / cv.getBoundingClientRect().width) / cam.z;
+
+  function beginPan(e) {
+    gesture = 'pan';
+    panFrom = { x: e.clientX, y: e.clientY, cx: cam.x, cy: cam.y };
+  }
+  function beginBuild(h, mode) {
+    gesture = 'build';
+    dragStart = h;
+    if (mode === 'line') ui.line = lineFrom(h, h); else ui.drag = rectFrom(h, h);
+  }
+  function beginPinch() {
+    gesture = 'pinch';
+    cancelBuild();
+    pinch = { dist: spread(pointers), mid: midpoint(pointers), z: cam.z, cx: cam.x, cy: cam.y };
+  }
+  function cancelBuild() {
+    dragStart = null; ui.drag = null; ui.line = null;
+  }
+
+  cv.addEventListener('contextmenu', e => e.preventDefault());
+
+  cv.addEventListener('pointerdown', e => {
+    cv.setPointerCapture(e.pointerId);
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    travelled = 0;
+
+    if (pointers.size === 2) { beginPinch(); e.preventDefault(); return; }
+    if (pointers.size > 2) return;
+
     const mode = dragMode();
-    if (mode === 'rect') { dragStart = h; ui.drag = rectFrom(h, h); e.preventDefault(); }
-    else if (mode === 'line') { dragStart = h; ui.line = lineFrom(h, h); e.preventDefault(); }
+    if (e.button === 2 || e.button === 1) { beginPan(e); e.preventDefault(); return; }
+
+    const h = R.hitTest(canvasPoint(e).x, canvasPoint(e).y);
+    if (mode && h) { beginBuild(h, mode); e.preventDefault(); return; }
+
+    /* No build tool up: a mouse waits to see if this is a click, while a finger
+       is free to start dragging the map straight away. */
+    gesture = 'tap';
+    if (e.pointerType !== 'mouse') panFrom = { x: e.clientX, y: e.clientY, cx: cam.x, cy: cam.y };
   });
-  cv.addEventListener('mousemove', e => {
+
+  cv.addEventListener('pointermove', e => {
+    const prev = pointers.get(e.pointerId);
+    if (prev) {
+      travelled += Math.hypot(e.clientX - prev.x, e.clientY - prev.y);
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    }
+
+    if (gesture === 'pinch' && pointers.size >= 2) {
+      const dist = spread(pointers), mid = midpoint(pointers);
+      const k = worldPerCssPx() * cam.z;                 // world px per CSS px at zoom 1
+      cam.z = pinch.z * (dist / (pinch.dist || dist));
+      clampCam();
+      cam.x = pinch.cx - (mid.x - pinch.mid.x) * (k / cam.z);
+      cam.y = pinch.cy - (mid.y - pinch.mid.y) * (k / cam.z);
+      clampCam();
+      e.preventDefault();
+      return;
+    }
+
+    if (gesture === 'pan' || (gesture === 'tap' && panFrom && travelled > TAP_SLOP)) {
+      if (gesture === 'tap') gesture = 'pan';
+      const k = worldPerCssPx();
+      cam.x = panFrom.cx - (e.clientX - panFrom.x) * k;
+      cam.y = panFrom.cy - (e.clientY - panFrom.y) * k;
+      clampCam();
+      e.preventDefault();
+      return;
+    }
+
     const p = canvasPoint(e);
     const h = R.hitTest(p.x, p.y);
-    ui.hover = h;
-    ui.hoverOk = h ? previewOk(h) : true;
-    if (dragStart && h) {
+    /* a finger has no hover state to leave behind */
+    if (e.pointerType === 'mouse' || gesture === 'build') {
+      ui.hover = h;
+      ui.hoverOk = h ? previewOk(h) : true;
+    }
+    if (gesture === 'build' && dragStart && h) {
       if (dragMode() === 'line') ui.line = lineFrom(dragStart, h);
       else ui.drag = rectFrom(dragStart, h);
+      e.preventDefault();
     }
   });
-  window.addEventListener('mouseup', e => {
-    if (!dragStart) return;
+
+  function endPointer(e) {
+    pointers.delete(e.pointerId);
+
+    if (gesture === 'pinch') {
+      /* lifting one finger of a pinch leaves the other panning, not building */
+      if (pointers.size === 1) {
+        const only = [...pointers.values()][0];
+        gesture = 'pan';
+        panFrom = { x: only.x, y: only.y, cx: cam.x, cy: cam.y };
+      } else if (pointers.size === 0) { gesture = null; pinch = null; }
+      return;
+    }
+    if (pointers.size > 0) return;
+
+    const wasTap = gesture === 'tap' && travelled <= TAP_SLOP;
+    const wasBuild = gesture === 'build';
+    gesture = null; panFrom = null;
+
+    if (wasTap) {
+      const h = R.hitTest(canvasPoint(e).x, canvasPoint(e).y);
+      if (h) applyTool(h);
+      if (e.pointerType !== 'mouse') ui.hover = null;
+      return;
+    }
+    if (!wasBuild) { if (e.pointerType !== 'mouse') ui.hover = null; return; }
+
+    commitBuild();
+    if (e.pointerType !== 'mouse') ui.hover = null;
+  }
+  cv.addEventListener('pointerup', endPointer);
+  cv.addEventListener('pointercancel', e => {
+    pointers.delete(e.pointerId);
+    if (pointers.size === 0) { gesture = null; panFrom = null; pinch = null; cancelBuild(); ui.hover = null; }
+  });
+  cv.addEventListener('pointerleave', e => {
+    if (e.pointerType === 'mouse' && gesture !== 'build') ui.hover = null;
+  });
+
+  function commitBuild() {
     const r = ui.drag, line = ui.line;
     dragStart = null; ui.drag = null; ui.line = null;
 
@@ -192,14 +299,7 @@
       showTab('info');
     }
     renderAll();
-  });
-  cv.addEventListener('mouseleave', () => { ui.hover = null; });
-  cv.addEventListener('click', e => {
-    if (isDragTool()) return;         // handled by the drag cycle
-    const p = canvasPoint(e);
-    const h = R.hitTest(p.x, p.y);
-    if (h) applyTool(h);
-  });
+  }
 
   function previewOk(h) {
     const t = S.tileAt(s, h.x, h.y);
@@ -893,7 +993,7 @@
   requestAnimationFrame(frame);
 
   window.__lf = {
-    get s() { return s; }, set s(v) { s = v; }, S, R, ui,
+    get s() { return s; }, set s(v) { s = v; }, S, R, ui, cam,
     tick: n => { for (let i = 0; i < n; i++) S.tick(s); renderAll(); }
   };
 })();
