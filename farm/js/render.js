@@ -534,26 +534,37 @@
     }
 
     if (type === 'rail') {
-      /* ballast bed, sleepers and two bright rails, mitred into every junction */
+      /* Ballast, sleepers and two bright metals, laid toward each connection —
+         so a straight run reads straight, corners bend and junctions cross.
+         Rail meets grow halls and track as well as other rail, otherwise the
+         line stops short of whatever it was built to serve. */
       const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]].filter(([dx, dy]) => {
         const n = S.tileAt(s, x + dx, y + dy);
-        return n && n.b && (n.b.type === 'rail' || n.b.type === 'hab' || n.b.type === 'pad');
+        return n && (n.f || (n.b && n.b.type !== 'solar' && n.b.type !== 'battery'));
       });
+      const legs = dirs.length ? dirs : [[1, 0], [-1, 0]];
+      const junction = legs.length >= 3;
+      /* keep the middle of a junction clear of sleepers so the crossing reads */
+      const first = junction ? 0.30 : 0.15;
+
       ctx.fillStyle = grey(92, l);
       diamond(ctx, x + 0.20, y + 0.20, 0.6, 0.6); ctx.fill();
-      const legs = dirs.length ? dirs : [[1, 0], [-1, 0]];
       for (const [dx, dy] of legs) {
         const bx = x + 0.20 + (dx === 1 ? 0.6 : dx === -1 ? -0.5 : 0);
         const by = y + 0.20 + (dy === 1 ? 0.6 : dy === -1 ? -0.5 : 0);
-        ctx.fillStyle = grey(92, l);
         diamond(ctx, dx ? bx : x + 0.20, dy ? by : y + 0.20,
           dx ? 0.5 : 0.6, dy ? 0.5 : 0.6);
         ctx.fill();
-        /* sleepers */
-        ctx.strokeStyle = `rgba(48,42,36,${0.75 * Math.max(l, 0.45)})`;
+      }
+
+      for (const [dx, dy] of legs) {
+        /* sleepers, square across the direction of travel */
+        ctx.strokeStyle = `rgba(48,42,36,${0.78 * Math.max(l, 0.45)})`;
         ctx.lineWidth = 2;
         for (let i = 0; i < 3; i++) {
-          const u = 0.5 + dx * (0.16 + i * 0.16), v = 0.5 + dy * (0.16 + i * 0.16);
+          const d = first + i * 0.15;
+          if (d > 0.52) break;
+          const u = 0.5 + dx * d, v = 0.5 + dy * d;
           const a = iso(x + u - (dy ? 0.17 : 0), y + v - (dx ? 0.17 : 0));
           const b2 = iso(x + u + (dy ? 0.17 : 0), y + v + (dx ? 0.17 : 0));
           ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b2.x, b2.y); ctx.stroke();
@@ -566,6 +577,28 @@
           const b2 = iso(x + 0.5 + dx * 0.5 + (dy ? off : 0), y + 0.5 + dy * 0.5 + (dx ? off : 0));
           ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b2.x, b2.y); ctx.stroke();
         }
+      }
+
+      /* a crossing plate where lines meet */
+      if (junction) {
+        ctx.fillStyle = `rgba(190,204,224,${0.16 + l * 0.14})`;
+        diamond(ctx, x + 0.34, y + 0.34, 0.32, 0.32); ctx.fill();
+        ctx.strokeStyle = `rgba(214,226,242,${0.35 + l * 0.35})`;
+        ctx.lineWidth = 1.2;
+        diamond(ctx, x + 0.34, y + 0.34, 0.32, 0.32); ctx.stroke();
+      }
+
+      /* buffers at the end of the line */
+      if (legs.length === 1) {
+        const [dx, dy] = legs[0];
+        const e = iso(x + 0.5 - dx * 0.30, y + 0.5 - dy * 0.30);
+        ctx.strokeStyle = `rgba(255,140,110,${0.55 + l * 0.35})`;
+        ctx.lineWidth = 3;
+        const a = iso(x + 0.5 - dx * 0.30 - (dy ? 0.15 : 0), y + 0.5 - dy * 0.30 - (dx ? 0.15 : 0));
+        const b2 = iso(x + 0.5 - dx * 0.30 + (dy ? 0.15 : 0), y + 0.5 - dy * 0.30 + (dx ? 0.15 : 0));
+        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b2.x, b2.y); ctx.stroke();
+        ctx.fillStyle = `rgba(255,160,120,${0.5 + l * 0.3})`;
+        ctx.beginPath(); ctx.arc(e.x, e.y - 3, 2.2, 0, 7); ctx.fill();
       }
       return;
     }
