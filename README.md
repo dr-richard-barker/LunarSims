@@ -98,6 +98,34 @@ the lunar night shedding load, and a run surviving the JSON round trip it is sto
 It needs no install and no build step. **Re-run it after any change to `sim.js` or `data.js`** —
 balance is only visible over hundreds of days and cannot be judged by eye.
 
+### Performance
+
+Open **`farm/perf.html`**. It times the three things that happen every frame — the
+simulation tick, the agent update and the render — across four farms, from a fresh plot
+to the plot packed with the biggest halls it will hold, all in ripe wheat. It also counts
+the canvas calls each render issues, so a slow frame can be traced rather than guessed at.
+
+Measured on a development laptop, worst case (322 tiles under glass, 90 halls, 19 agents):
+
+| | ms per call | share of a 60fps frame |
+|---|---|---|
+| Simulation tick (one game hour) | 0.03 | negligible — 12 ticks a second at 12× costs 0.04% of wall clock |
+| Agent update | 0.008 | negligible |
+| Render | 5.74 | 34% |
+
+**The render is effectively the entire frame cost, and it is comfortable.** No optimisation
+is warranted, which is the useful result: content can be deepened without fear. Two things
+worth knowing before that changes:
+
+- An **empty** plot already costs 1.3 ms and 6,890 canvas calls, most of it the regolith
+  speckle — a fixed tax paid every frame for something that never moves. Caching the terrain
+  to an offscreen bitmap is the obvious lever *if one is ever needed*; it is not needed now,
+  and it would buy a saving at the cost of invalidating the cache whenever the light or the
+  map changes.
+- These are desktop numbers. A mid-range phone runs several times slower, so the ceiling case
+  could fall below 60fps on mobile. **Measure on a real device before acting** — that is what
+  this page is for, and guessing is what it exists to prevent.
+
 ### Layout
 
 ```
@@ -105,6 +133,7 @@ index.html          hub page
 farm/
   index.html        game shell, help text
   harness.html      headless simulation tests — open it in a browser
+  perf.html         frame-cost profile — open it in a browser
   style.css
   js/data.js        crops, structures, equipment, events, milestones
   js/sim.js         the simulation — one tick is one hour

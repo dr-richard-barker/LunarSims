@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lunar Farm — performance profile</title>
+<style>
+:root{
+  --bg:#080a10; --panel:#11141c; --panel-2:#161a24; --line:#232838;
+  --ink:#e6ebf5; --ink-soft:#9aa6bd; --ink-faint:#5c6478;
+  --good:#6ee7a0; --bad:#ff7a68; --warn:#ffc46b;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.6}
+.wrap{max-width:1040px;margin:0 auto;padding:34px 22px 70px}
+h1{font-size:26px;margin:0 0 6px}
+.lede{color:var(--ink-soft);font-size:14px;margin:0 0 8px;max-width:78ch}
+.note{color:var(--ink-faint);font-size:12.5px;margin:0 0 22px;max-width:78ch}
+#summary{
+  font-family:var(--mono);font-size:14px;padding:12px 16px;border-radius:9px;
+  background:var(--panel);border:1px solid var(--line);margin-bottom:20px;white-space:pre-wrap;
+}
+.sc{background:var(--panel);border:1px solid var(--line);border-radius:10px;margin-bottom:12px;overflow:hidden}
+.sc > h2{margin:0;padding:11px 16px;font-size:14px;display:flex;gap:10px;align-items:baseline;
+  background:var(--panel-2);border-bottom:1px solid var(--line)}
+.sc h2 .why{font-weight:400;font-size:12px;color:var(--ink-soft)}
+.sc h2 .verdict{margin-left:auto;font-family:var(--mono);font-size:12px}
+table{border-collapse:collapse;width:100%;font-size:12.5px}
+td,th{padding:7px 16px;border-bottom:1px solid var(--line);font-family:var(--mono);text-align:right}
+th{text-align:right;color:var(--ink-faint);font-weight:600;font-size:10px;letter-spacing:.1em;text-transform:uppercase}
+td:first-child,th:first-child{text-align:left;font-family:var(--sans);color:var(--ink-soft)}
+tr:last-child td{border-bottom:none}
+.good{color:var(--good)} .bad{color:var(--bad)} .warn{color:var(--warn)}
+.sub{font-size:11px;color:var(--ink-faint);padding:8px 16px;border-bottom:1px solid var(--line)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Lunar Farm — performance profile</h1>
+  <p class="lede">Times the three things that happen every frame — the simulation tick, the agent
+    update and the render — at an empty farm, a mid-game farm and a farm built out to the edges of
+    the plot. Then counts the canvas operations each render issues, so a slow frame can be traced
+    to the thing issuing the work rather than guessed at.</p>
+  <p class="note">A frame has 16.7 ms at 60fps. These figures are CPU-side: canvas calls are queued
+    and flushed by the GPU, so the true cost of a draw is at least this and never less. Measured on
+    whatever machine opens this page, so compare runs on one machine rather than across two.</p>
+  <div id="summary">measuring…</div>
+  <div id="out"></div>
+</div>
+
+<script src="js/data.js"></script>
+<script src="js/sim.js"></script>
+<script src="js/agents.js"></script>
+<script src="js/render.js"></script>
+<script>
+(function () {
+  const S = window.LF_SIM, A = window.LF_AGENTS, R = window.LF_RENDER, K = window.LF_DATA.K;
+
+  /* a real canvas, at the size the game actually uses */
+  const cv = document.createElement('canvas');
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  cv.width = R.W * dpr; cv.height = R.H * dpr;
+  const ctx = cv.getContext('2d');
+  ctx.scale(dpr, dpr);
+  const ui = { hover: null, hoverOk: true, selected: null, drag: null, line: null };
+
+  /* ---------- building farms to measure ---------- */
+
+  function clearSpot(s, w, h) {
+    for (let y = 0; y < K.ROWS; y++)
+      for (let x = 0; x < K.COLS; x++)
+        if (!S.checkField(s, x, y, w, h)) return [x, y];
+    return null;
+  }
+  function hall(s, w, h, crop) {
+    const spot = clearSpot(s, w, h);
+    if (!spot) return null;
+    if (S.addField(s, spot[0], spot[1], w, h)) return null;
+    const f = s.fields[s.fields.length - 1];
+    if (crop) S.plant(s, f, crop);
+    f.growth = 0.7; f.soil = 1;
+    return f;
+  }
+  const CROPS = ['potato', 'tomato', 'wheat', 'romaine', 'zinnia', 'spirulina', 'arabidopsis'];
+
+  function build(kind) {
+    const s = S.newGame();
+    s.sandbox = true; s.credits = 1e9; s.food = 1e9;
+    if (kind === 'empty') return s;
+
+    /* The true ceiling: pack the plot with the largest halls that will fit and
+       fill them with fully grown wheat, which is the most expensive plant to
+       draw — five curved stalks and five seed heads per tile. */
+    if (kind === 'glass') {
+      for (const side of [8, 6, 5, 4, 3, 2, 1]) {
+        for (let guard = 0; guard < 400; guard++) {
+          const f = hall(s, side, side, 'wheat');
+          if (!f) break;
+          f.growth = 1;
+        }
+      }
+      for (let y = 0; y < K.ROWS; y++)
+        for (let x = 0; x < K.COLS; x++) {
+          const t = S.tileAt(s, x, y);
+          if (t && !t.b && !t.f) S.place(s, t, (x + y) % 2 ? 'rail' : 'track');
+        }
+      for (let i = 0; i < 200; i++) A.update(s, 0.05);
+      return s;
+    }
+
+    const halls = kind === 'max' ? 40 : 8;
+    for (let i = 0; i < halls; i++) {
+      if (!hall(s, kind === 'max' ? 3 : 4, kind === 'max' ? 3 : 3, CROPS[i % CROPS.length])) break;
+    }
+    /* roads and rail everywhere they will still fit */
+    for (let y = 0; y < K.ROWS; y++) {
+      for (let x = 0; x < K.COLS; x++) {
+        const t = S.tileAt(s, x, y);
+        if (!t || t.b || t.f) continue;
+        const want = kind === 'max' ? ((x + y) % 2 === 0 ? 'rail' : 'track') : (y % 4 === 0 ? 'rail' : null);
+        if (want) S.place(s, t, want);
+      }
+    }
+    if (kind === 'max') {
+      for (let i = 0; i < 6; i++) {
+        const t = s.map.find(t => !t.b && !t.f && t.t === 'flat');
+        if (t) S.place(s, t, 'hab');
+      }
+      s.crew = S.crewCapacity(s);
+    }
+    /* let the agent layer populate to its ceiling */
+    for (let i = 0; i < 200; i++) A.update(s, 0.05);
+    return s;
+  }
+
+  /* ---------- timing ---------- */
+
+  function time(fn, iterations) {
+    for (let i = 0; i < 8; i++) fn();                 // warm up
+    const t0 = performance.now();
+    for (let i = 0; i < iterations; i++) fn();
+    return (performance.now() - t0) / iterations;
+  }
+
+  /* Count the canvas work one draw issues, so the expensive phase is identified
+     rather than assumed. */
+  const COUNTED = ['fillRect', 'fill', 'stroke', 'beginPath', 'arc', 'ellipse',
+                   'moveTo', 'lineTo', 'quadraticCurveTo', 'fillText',
+                   'createLinearGradient', 'createRadialGradient', 'save', 'restore'];
+  function countOps(s) {
+    const counts = {}, originals = {};
+    for (const m of COUNTED) {
+      originals[m] = ctx[m];
+      counts[m] = 0;
+      ctx[m] = function (...args) { counts[m]++; return originals[m].apply(ctx, args); };
+    }
+    R.draw(ctx, s, ui);
+    for (const m of COUNTED) ctx[m] = originals[m];
+    counts.total = COUNTED.reduce((a, m) => a + counts[m], 0);
+    return counts;
+  }
+
+  const SCENARIOS = [
+    { key: 'empty', name: 'A fresh plot', why: 'one inherited hall, the handover kit' },
+    { key: 'mid',   name: 'A mid-game farm', why: '8 halls, some rail, a working swarm' },
+    { key: 'max',   name: 'Built to the edges', why: 'every buildable tile used, agents at their ceiling' },
+    { key: 'glass', name: 'The true ceiling', why: 'plot packed with the biggest halls, all ripe wheat' }
+  ];
+
+  const out = document.getElementById('out');
+  const rows = [];
+
+  SCENARIOS.forEach(sc => {
+    const s = build(sc.key);
+    const cars = A.rail ? A.rail().length : 0;
+
+    const tick   = time(() => { S.tick(s); if (s.pendingEvent) s.pendingEvent = null; }, 400);
+    const agents = time(() => A.update(s, 0.016), 400);
+    const draw   = time(() => R.draw(ctx, s, ui), 60);
+    const frame  = agents + draw;                     // what a paused game costs per frame
+    const ops    = countOps(s);
+
+    const scale = {
+      fields: s.fields.length,
+      tiles: S.totalTiles(s),
+      built: s.map.filter(t => t.b).length,
+      agents: A.all().length,
+      cars
+    };
+    rows.push({ sc, tick, agents, draw, frame, ops, scale });
+
+    const verdict = frame < 8 ? 'good' : frame < 16.7 ? 'warn' : 'bad';
+    const label = frame < 8 ? 'COMFORTABLE' : frame < 16.7 ? 'TIGHT' : 'OVER BUDGET';
+    const box = document.createElement('div');
+    box.className = 'sc';
+    box.innerHTML = `
+      <h2>${sc.name}<span class="why">${sc.why}</span>
+        <span class="verdict ${verdict}">${label} · ${frame.toFixed(2)} ms/frame</span></h2>
+      <div class="sub">${scale.fields} halls · ${scale.tiles} tiles under glass ·
+        ${scale.built} built tiles · ${scale.agents} crew and rovers · ${scale.cars} rail wagons</div>
+      <table>
+        <tr><th>per call</th><th>ms</th><th>share of a 60fps frame</th></tr>
+        <tr><td>Simulation tick (one game hour)</td><td>${tick.toFixed(3)}</td>
+            <td class="${tick > 4 ? 'bad' : ''}">${(tick / 16.7 * 100).toFixed(1)}%</td></tr>
+        <tr><td>Agent update</td><td>${agents.toFixed(3)}</td>
+            <td class="${agents > 4 ? 'bad' : ''}">${(agents / 16.7 * 100).toFixed(1)}%</td></tr>
+        <tr><td>Render</td><td>${draw.toFixed(3)}</td>
+            <td class="${draw > 12 ? 'bad' : draw > 8 ? 'warn' : ''}">${(draw / 16.7 * 100).toFixed(1)}%</td></tr>
+      </table>
+      <div class="sub">canvas calls issued by one render — ${ops.total.toLocaleString()} in total</div>
+      <table>
+        ${COUNTED.filter(m => ops[m] > 0).sort((a, b) => ops[b] - ops[a]).slice(0, 8)
+          .map(m => `<tr><td>${m}</td><td>${ops[m].toLocaleString()}</td>
+            <td>${(ops[m] / ops.total * 100).toFixed(0)}%</td></tr>`).join('')}
+      </table>`;
+    out.appendChild(box);
+  });
+
+  const worst = rows[rows.length - 1];
+  const budget = 16.7;
+  document.getElementById('summary').textContent =
+    `Worst case (${worst.sc.name}): ${worst.frame.toFixed(2)} ms per frame — `
+    + `${(worst.frame / budget * 100).toFixed(0)}% of a 60fps budget, `
+    + `${(1000 / Math.max(worst.frame, 0.001)).toFixed(0)} fps ceiling.\n`
+    + `Render is ${(worst.draw / worst.frame * 100).toFixed(0)}% of it, issuing `
+    + `${worst.ops.total.toLocaleString()} canvas calls per frame.\n`
+    + `A simulation tick costs ${worst.tick.toFixed(3)} ms; at 12x speed the game asks for 12 a second, `
+    + `so ticks are ${(worst.tick * 12 / 1000 * 100).toFixed(1)}% of one second of wall clock.`;
+})();
+</script>
+</body>
+</html>
