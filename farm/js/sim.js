@@ -25,6 +25,8 @@
   const STATION_CO2 = 3.0;         // kg per day
   const UNSERVICED_PENALTY = 0.72; // growth factor for a hall with no track to the hab
   const RAIL_BONUS = 1.10;         // a hall on the rail head ships out by wagon
+  const RAW_SOIL = 0.62;           // growth factor in unconditioned regolith
+  const SOIL_PER_LIT_HOUR = 0.00004;
   const MAX_FIELD = 8;             // longest side you may drag
 
   const co2Cap = s => (s.up.composter ? 400 : 260);
@@ -94,7 +96,8 @@
        crew left a crop part-grown in it: a staple takes longer to mature than
        the handover stores last, so the farm has to start mid-cycle. */
     addField(s, 9, 4, 4, 3, true);
-    Object.assign(s.fields[0], { crop: 'potato', growth: 0.55, plantedDay: 1 });
+    /* the beds you inherit have been worked for years */
+    Object.assign(s.fields[0], { crop: 'potato', growth: 0.55, plantedDay: 1, soil: 0.8 });
     return s;
   }
 
@@ -142,7 +145,11 @@
       id: s.nextField++, x, y, w, h,
       crop: null, growth: 0, health: 1, moisture: 0.9, feed: 0.9,
       infected: false, dead: false, carbon: 0, litNow: false,
-      plantedDay: 0, warned: false, serviced: true
+      plantedDay: 0, warned: false, serviced: true,
+      /* Regolith is not soil until you make it soil: fresh beds are sharp,
+         sterile dust with no structure and no biology. Conditioning comes from
+         working roots and stubble back in, harvest after harvest. */
+      soil: 0.15
     };
     s.fields.push(f);
     for (const t of fieldTiles(s, f)) t.f = f.id;
@@ -314,6 +321,7 @@
         g *= carbonLimit;
         if (!f.serviced) g *= UNSERVICED_PENALTY;
         if (f.railed) g *= RAIL_BONUS;
+        g *= RAW_SOIL + (1 - RAW_SOIL) * (f.soil === undefined ? 1 : f.soil);
         if (s.flags.thermal > 0) g *= 0.7;
         if (f.infected) g *= 0.5;
         if (s.pressure < 90) g *= 0.6;
@@ -323,6 +331,7 @@
         const o2 = O2_PER_LIT_HOUR * c.o2 * g * A;
         o2Made += o2; co2Used += o2 * CO2_PER_O2; f.carbon += o2 * CO2_PER_O2;
 
+        f.soil = clamp((f.soil || 0) + SOIL_PER_LIT_HOUR, 0, 1);
         f.moisture -= (c.water / 24) * 0.020;
         f.feed -= (c.nutrients / 24) * 0.022;
         waterUsed += (c.water / 24) * WATER_PER_TILE * A;
@@ -612,12 +621,16 @@
        carbon leaves the loop inside the food. */
     s.co2 = clamp(s.co2 + f.carbon * (s.up.composter ? 0.75 : 0.42), 0, co2Cap(s));
     if (s.up.composter) s.nutrients += 4 * A;
+    /* stubble and root mass go back into the beds */
+    const worked = s.up.composter ? 0.20 : 0.12;
     s.stats.harvests++;
     s.stats.kinds[c.id] = (s.stats.kinds[c.id] || 0) + 1;
     s.stats.harvestedToday += kcal;
     const msg = `Harvested ${c.name}: ${kcal.toLocaleString()} kcal, ${pay.toLocaleString()} cr.`;
     if (log) log.push(msg); else pushLog(s, msg);
+    const keptSoil = clamp((f.soil || 0) + worked, 0, 1);
     clearCrop(f);
+    f.soil = keptSoil;
     return null;
   }
 
@@ -629,6 +642,22 @@
   function clear(s, f) {
     if (!f || (!f.crop && !f.dead)) return 'Nothing to clear.';
     clearCrop(f);
+    return null;
+  }
+
+  const conditionCost = f => ({ credits: 90 * area(f), nutrients: 6 * area(f) });
+
+  /* Work imported biomass through the beds: buys in one go what several
+     harvests would eventually do on their own. */
+  function condition(s, f) {
+    if (!f) return 'Select a grow hall first.';
+    if ((f.soil || 0) >= 0.995) return 'Those beds are fully conditioned.';
+    const c = conditionCost(f);
+    if (!s.sandbox && s.credits < c.credits) return `Conditioning that hall costs ${c.credits.toLocaleString()} credits.`;
+    if (s.nutrients < c.nutrients) return `Conditioning that hall needs ${Math.ceil(c.nutrients)} nutrients.`;
+    if (!s.sandbox) s.credits -= c.credits;
+    s.nutrients -= c.nutrients;
+    f.soil = clamp((f.soil || 0) + 0.30, 0, 1);
     return null;
   }
 
@@ -759,7 +788,7 @@
 
   window.LF_SIM = {
     newGame, tick, place, bulldoze, plant, water, feed, treat, harvest, clear, autoManage,
-    research, trade, sellFood, sellO2, resolveEvent,
+    research, trade, sellFood, sellO2, resolveEvent, condition, conditionCost, RAW_SOIL,
     addField, removeField, checkField, fieldCost, fieldAt, fieldById, fieldTiles, canPlace,
     planted, area, totalTiles, seedCost, serviceSet, fieldRailed,
     cropById, buildById, clamp, tileAt, built, count,

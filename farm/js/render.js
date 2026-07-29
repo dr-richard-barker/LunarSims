@@ -361,8 +361,20 @@
     const c = f.crop ? S.cropById(f.crop) : null;
     for (let ty = 0; ty < f.h; ty++) {
       for (let tx = 0; tx < f.w; tx++) {
-        ctx.fillStyle = f.dead ? 'rgba(74,66,54,0.9)' : 'rgba(60,50,42,0.9)';
+        /* raw regolith is pale grey dust; worked beds darken as they condition */
+        const soil = f.soil === undefined ? 1 : f.soil;
+        const rr0 = Math.round(126 - 66 * soil);
+        const gg0 = Math.round(120 - 70 * soil);
+        const bb0 = Math.round(112 - 70 * soil);
+        ctx.fillStyle = f.dead ? 'rgba(74,66,54,0.9)' : `rgba(${rr0},${gg0},${bb0},0.92)`;
         diamond(ctx, f.x + tx + 0.08, f.y + ty + 0.08, 0.84, 0.84); ctx.fill();
+        if (soil < 0.55) {
+          /* unbroken dust still shows the grader's tracks */
+          ctx.strokeStyle = `rgba(255,255,255,${0.05 + (1 - soil) * 0.05})`;
+          ctx.lineWidth = 1;
+          const a1 = iso(f.x + tx + 0.14, f.y + ty + 0.5), b1 = iso(f.x + tx + 0.86, f.y + ty + 0.5);
+          ctx.beginPath(); ctx.moveTo(a1.x, a1.y); ctx.lineTo(b1.x, b1.y); ctx.stroke();
+        }
         const p = iso(f.x + tx + 0.5, f.y + ty + 0.5);
         if (c && !f.dead) {
           drawPlant(ctx, c, f.growth, f.health, p.x, p.y + TH * 0.18, 1);

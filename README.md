@@ -17,6 +17,10 @@ Pick a tool from the palette, then click or drag on the ground:
   single crop across its whole floor, and cost, yield, lighting draw and water all
   scale with its footprint.
 - **Sow, water, feed, treat and harvest** whole halls.
+- **Condition the beds.** Regolith is not soil until you make it soil: a new hall is sterile dust
+  and grows at about two-thirds rate until roots and stubble have been worked through it. Each
+  harvest improves it, the biomass loop improves it faster, or you can buy the conditioning
+  outright. Bulldozing a hall throws that work away.
 - **Drag out track and rail.** Press, drag, release: the run takes the longer axis
   first and turns once. The preview colours each tile green or red and totals the
   cost as you go; blocked tiles are skipped rather than charged for.
@@ -114,7 +118,9 @@ vertical-builder formula upended, towering up for sunlight or digging down into 
 [The Boring Mining Game](https://dr-richard-barker.github.io/lunar-arcade/games/boring-mining/), an ISRU
 swarm where you pilot one drone and lay scent beacons the rest follow.
 
-Those two cover the SimTower and SimAnt shapes, so this repository does not duplicate them.
+Those two cover the SimTower and SimAnt shapes, so this repository does not duplicate them. The
+arcade's own **Regolith Farm** concept has been folded into this game rather than built separately —
+its regolith-into-soil premise is the bed-conditioning mechanic above.
 
 ## Provenance
 

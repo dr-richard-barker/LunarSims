@@ -391,11 +391,19 @@
     if (!f.crop) {
       box.innerHTML = `<div class="baytitle"><h2>Grow hall</h2><span class="num">${coord}</span></div>
         <p class="cultivar">${A} tiles under glass, beds flushed and ready.</p>
+        ${meter('Bed conditioning', f.soil === undefined ? 1 : f.soil,
+          (f.soil || 0) > 0.66 ? '#c9a86a' : (f.soil || 0) > 0.33 ? 'var(--warn)' : 'var(--bad)')}
         <div class="rows" style="margin-top:10px">
           <div class="row"><span class="k">Lighting draw</span><span class="v">${(A * S.ledKW(s)).toFixed(2)} kW</span></div>
           <div class="row"><span class="k">Service</span><span class="v ${f.serviced ? 'good' : 'bad'}">${f.serviced ? 'ON TRACK NETWORK' : 'NO TRACK'}</span></div>
         </div>
         ${f.serviced ? '' : '<p class="note" style="border-left-color:var(--bad)">No track connection — the crew cannot service this hall, and it grows at about three-quarters speed.</p>'}`;
+      const cond = S.conditionCost(f);
+      const cb = el('button', 'act wide',
+        `Condition beds (${fmt(cond.credits)} cr · ${Math.ceil(cond.nutrients)} nutrients)`);
+      cb.disabled = (f.soil || 0) >= 0.995;
+      cb.onclick = () => act(S.condition(s, f));
+      acts.appendChild(cb);
       const btn = el('button', 'act primary wide', 'Sow a crop');
       btn.onclick = openPlant;
       acts.appendChild(btn);
@@ -412,6 +420,8 @@
       ${meter('Health', f.health, f.health > 0.6 ? 'var(--accent)' : f.health > 0.3 ? 'var(--warn)' : 'var(--bad)')}
       ${meter('Moisture', f.moisture, f.moisture < 0.15 ? 'var(--bad)' : '#4aa8ff')}
       ${meter('Nutrient charge', f.feed, f.feed < 0.1 ? 'var(--bad)' : '#7bd88f')}
+      ${meter('Bed conditioning', f.soil === undefined ? 1 : f.soil,
+        (f.soil || 0) > 0.66 ? '#c9a86a' : (f.soil || 0) > 0.33 ? 'var(--warn)' : 'var(--bad)')}
       <div class="rows" style="margin-top:12px">
         <div class="row"><span class="k">Hall size</span><span class="v">${A} tiles</span></div>
         <div class="row"><span class="k">Sown</span><span class="v">${daysIn} d ago</span></div>
@@ -419,6 +429,7 @@
         <div class="row"><span class="k">Yield at full health</span><span class="v">${fmt(c.kcal * S.KCAL_SCALE * A)} kcal</span></div>
         <div class="row"><span class="k">Station pays</span><span class="v good">${fmt(c.value * S.VALUE_SCALE * A)} cr</span></div>
         <div class="row"><span class="k">Lamps</span><span class="v ${f.litNow ? 'good' : 'warn'}">${f.litNow ? 'ON' : 'OFF'}</span></div>
+        <div class="row"><span class="k">Beds yielding</span><span class="v ${(f.soil || 0) > 0.66 ? 'good' : 'warn'}">${pct(S.RAW_SOIL + (1 - S.RAW_SOIL) * (f.soil === undefined ? 1 : f.soil))}</span></div>
         ${f.serviced ? '' : '<div class="row"><span class="k">Service</span><span class="v bad">NO TRACK</span></div>'}
         ${f.infected ? '<div class="row"><span class="k">Status</span><span class="v bad">FUNGAL INFECTION</span></div>' : ''}
         ${f.dead ? '<div class="row"><span class="k">Status</span><span class="v bad">CROP LOST</span></div>' : ''}
@@ -435,6 +446,8 @@
     mk('Feed', '', () => act(S.feed(s, f)), f.feed > 0.95);
     mk(`Treat (${fmt(120 * A)} cr)`, '', () => act(S.treat(s, f)), !f.infected);
     mk('Clear', '', () => act(S.clear(s, f)));
+    const cc = S.conditionCost(f);
+    mk(`Condition (${fmt(cc.credits)} cr)`, '', () => act(S.condition(s, f)), (f.soil || 0) >= 0.995);
     mk(f.growth >= 1 ? 'Harvest' : 'Not ready', 'primary wide', () => act(S.harvest(s, f)), f.growth < 1);
   }
 
