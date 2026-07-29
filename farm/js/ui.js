@@ -26,7 +26,7 @@
     { id: 'clear', glyph: '⌫', name: 'Clear', key: '7', hint: 'Strip a crop out of a hall.' }
   ];
   const GLYPH = {
-    track: '═', greenhouse: '⌂', solar: '▤', battery: '▬', hab: '◍',
+    track: '═', rail: '╬', greenhouse: '⌂', solar: '▤', battery: '▬', hab: '◍',
     isru: '⚗', composter: '♻', reactor: '☢', pad: '◎'
   };
 

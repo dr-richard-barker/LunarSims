@@ -24,6 +24,7 @@
      carbon a surplus farm fixes leaves inside the food it exports. */
   const STATION_CO2 = 3.0;         // kg per day
   const UNSERVICED_PENALTY = 0.72; // growth factor for a hall with no track to the hab
+  const RAIL_BONUS = 1.10;         // a hall on the rail head ships out by wagon
   const MAX_FIELD = 8;             // longest side you may drag
 
   const co2Cap = s => (s.up.composter ? 400 : 260);
@@ -170,7 +171,8 @@
         const n = tileAt(s, t.x + dx, t.y + dy);
         if (!n || !n.b) continue;
         const k = idx(n.x, n.y);
-        if (net.has(k) || (n.b.type !== 'track' && n.b.type !== 'hab')) continue;
+        const carries = n.b.type === 'track' || n.b.type === 'rail' || n.b.type === 'hab';
+        if (net.has(k) || !carries) continue;
         net.add(k); queue.push(n);
       }
     }
@@ -187,6 +189,19 @@
 
   function fieldServiced(s, f, touching) {
     return fieldTiles(s, f).some(t => touching.has(idx(t.x, t.y)));
+  }
+
+  /* A hall whose outline touches rail ships its crop out by the wagonload. */
+  function fieldRailed(s, f) {
+    for (let y = f.y - 1; y <= f.y + f.h; y++) {
+      for (let x = f.x - 1; x <= f.x + f.w; x++) {
+        const inside = x >= f.x && x < f.x + f.w && y >= f.y && y < f.y + f.h;
+        if (inside) continue;
+        const t = tileAt(s, x, y);
+        if (t && t.b && t.b.type === 'rail') return true;
+      }
+    }
+    return false;
   }
 
   function sunElevation(s) {
@@ -289,6 +304,7 @@
       const A = area(f);
       const rate = 1 / (c.days * s.photoperiod);
       f.serviced = fieldServiced(s, f, touching);
+      f.railed = fieldRailed(s, f);
 
       if (f.litNow) {
         let g = 1;
@@ -297,6 +313,7 @@
         g *= f.health;
         g *= carbonLimit;
         if (!f.serviced) g *= UNSERVICED_PENALTY;
+        if (f.railed) g *= RAIL_BONUS;
         if (s.flags.thermal > 0) g *= 0.7;
         if (f.infected) g *= 0.5;
         if (s.pressure < 90) g *= 0.6;
@@ -732,7 +749,7 @@
     newGame, tick, place, bulldoze, plant, water, feed, treat, harvest, clear, autoManage,
     research, trade, sellFood, sellO2, resolveEvent,
     addField, removeField, checkField, fieldCost, fieldAt, fieldById, fieldTiles,
-    planted, area, totalTiles, seedCost, serviceSet,
+    planted, area, totalTiles, seedCost, serviceSet, fieldRailed,
     cropById, buildById, clamp, tileAt, built, count,
     generation, demand, storageCap, isSunlit, sunElevation, lightsOn,
     dailyNeed, nightReserve, recoveryRate, crewCapacity, dustFactor, ledKW, pushLog,

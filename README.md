@@ -19,6 +19,9 @@ Pick a tool from the palette, then click or drag on the ground:
 - **Sow, water, feed, treat and harvest** whole halls.
 - **Lay regolith track** — a hall that does not touch a track reaching the habitat
   cannot be serviced and grows at about three-quarters speed.
+- **Lay rail** — carries service like track, and gives any hall it touches a tenth
+  again in throughput. Freight trains run the line by themselves; give them a loop
+  or a long spine rather than a stub.
 - **Build** solar arrays, battery banks, habitats, an ilmenite reduction plant for
   water, a biomass oxidation loop for carbon, a landing pad and, eventually,
   fission surface power.
@@ -42,8 +45,12 @@ The plot is drawn in 2:1 isometric projection: extruded structures lit by the re
 sun angle, long shadows that swing round as the lunar day passes, and glazed halls
 you can see the canopy through. **Scroll to zoom, drag with the right button to
 pan** (arrow keys and `+`/`-` also work). Zoom in and the settlement is alive —
-suited crew walking the track network, rovers hauling between modules, and build
-bots throwing sparks over anything newly raised until it tops out.
+suited crew walking the track network, rovers hauling between modules, freight
+trains working the rail with their wagons swinging properly through the corners,
+and build bots throwing sparks over anything newly raised until it tops out.
+Habitats are drawn in full: regolith berms, ribbed hulls, an airlock cap with
+chevrons, lit portholes that glow through the lunar night, radiator fins and a
+comms mast with a blinking beacon.
 
 ### Extras in the header
 

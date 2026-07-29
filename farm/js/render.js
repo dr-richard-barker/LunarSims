@@ -11,11 +11,11 @@
   const S = window.LF_SIM;
   const A = window.LF_AGENTS;
 
-  const TW = 68, TH = 34;          // tile footprint on screen
-  const OX = K.ROWS * TW / 2 + 12; // origin: leaves room for the left corner
-  const OY = 108;                  // headroom for tall structures
-  const W = (K.COLS + K.ROWS) * TW / 2 + 24;
-  const H = (K.COLS + K.ROWS) * TH / 2 + OY + 96;
+  const TW = 88, TH = 44;          // tile footprint on screen
+  const OX = K.ROWS * TW / 2 + 14; // origin: leaves room for the left corner
+  const OY = 132;                  // headroom for tall structures
+  const W = (K.COLS + K.ROWS) * TW / 2 + 28;
+  const H = (K.COLS + K.ROWS) * TH / 2 + OY + 84;
 
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const iso = (tx, ty) => ({ x: OX + (tx - ty) * (TW / 2), y: OY + (tx + ty) * (TH / 2) });
@@ -313,7 +313,7 @@
 
   /* ---------- grow halls ---------- */
 
-  const HALL_Z = 30;
+  const HALL_Z = 38;
 
   function drawField(ctx, s, f, l, sv, hovered, selected) {
     const site = A && A.siteAt(f.x, f.y);
@@ -494,7 +494,44 @@
       return;
     }
 
-    const Z = { solar: 20, battery: 18, hab: 26, isru: 32, composter: 24, reactor: 26, pad: 3 }[type] || 20;
+    if (type === 'rail') {
+      /* ballast bed, sleepers and two bright rails, mitred into every junction */
+      const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]].filter(([dx, dy]) => {
+        const n = S.tileAt(s, x + dx, y + dy);
+        return n && n.b && (n.b.type === 'rail' || n.b.type === 'hab' || n.b.type === 'pad');
+      });
+      ctx.fillStyle = grey(92, l);
+      diamond(ctx, x + 0.20, y + 0.20, 0.6, 0.6); ctx.fill();
+      const legs = dirs.length ? dirs : [[1, 0], [-1, 0]];
+      for (const [dx, dy] of legs) {
+        const bx = x + 0.20 + (dx === 1 ? 0.6 : dx === -1 ? -0.5 : 0);
+        const by = y + 0.20 + (dy === 1 ? 0.6 : dy === -1 ? -0.5 : 0);
+        ctx.fillStyle = grey(92, l);
+        diamond(ctx, dx ? bx : x + 0.20, dy ? by : y + 0.20,
+          dx ? 0.5 : 0.6, dy ? 0.5 : 0.6);
+        ctx.fill();
+        /* sleepers */
+        ctx.strokeStyle = `rgba(48,42,36,${0.75 * Math.max(l, 0.45)})`;
+        ctx.lineWidth = 2;
+        for (let i = 0; i < 3; i++) {
+          const u = 0.5 + dx * (0.16 + i * 0.16), v = 0.5 + dy * (0.16 + i * 0.16);
+          const a = iso(x + u - (dy ? 0.17 : 0), y + v - (dx ? 0.17 : 0));
+          const b2 = iso(x + u + (dy ? 0.17 : 0), y + v + (dx ? 0.17 : 0));
+          ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b2.x, b2.y); ctx.stroke();
+        }
+        /* the metals */
+        ctx.strokeStyle = `rgba(214,226,242,${0.5 + l * 0.45})`;
+        ctx.lineWidth = 1.5;
+        for (const off of [-0.11, 0.11]) {
+          const a = iso(x + 0.5 + (dy ? off : 0), y + 0.5 + (dx ? off : 0));
+          const b2 = iso(x + 0.5 + dx * 0.5 + (dy ? off : 0), y + 0.5 + dy * 0.5 + (dx ? off : 0));
+          ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b2.x, b2.y); ctx.stroke();
+        }
+      }
+      return;
+    }
+
+    const Z = { solar: 26, battery: 24, hab: 30, isru: 42, composter: 32, reactor: 34, pad: 4 }[type] || 26;
     groundShadow(ctx, x + 0.1, y + 0.1, 0.8, 0.8, Z, sv);
     if (site) return drawScaffold(ctx, x, y, 1, 1, Z, site, l);
 
@@ -539,13 +576,118 @@
         break;
       }
       case 'hab': {
-        box(ctx, x + 0.1, y + 0.22, 0.8, 0.56, Z, '#b9bfcb', l, { stroke: grey(150, l), lw: 1.2 });
-        /* rounded end cap and lit ports */
-        ctx.fillStyle = tone('#cfd5e0', l, 1);
-        ctx.beginPath(); ctx.ellipse(p.x, p.y - Z, TW * 0.30, TH * 0.30, 0, 0, 7); ctx.fill();
-        ctx.fillStyle = '#ffd166';
-        for (let i = -1; i <= 1; i++) {
-          ctx.beginPath(); ctx.arc(p.x + i * 9, p.y - Z * 0.42, 2.2, 0, 7); ctx.fill();
+        /* A buried pressure cylinder: regolith berm, ribbed hull, airlock cap,
+           lit portholes, radiators and a comms mast. */
+        const night = !S.isSunlit(s);
+
+        /* regolith shielding heaped along the flanks */
+        ctx.fillStyle = grey(120, l);
+        box(ctx, x + 0.02, y + 0.10, 0.96, 0.80, 9, '#9a9186', l, { stroke: 'rgba(0,0,0,0.18)' });
+
+        /* hull */
+        box(ctx, x + 0.10, y + 0.26, 0.80, 0.48, Z, '#c2c8d4', l, { stroke: grey(140, l), lw: 1.2 });
+
+        /* crown highlight — reads as a cylinder rather than a crate */
+        const crownA = iso(x + 0.14, y + 0.50), crownB = iso(x + 0.86, y + 0.50);
+        const cg = ctx.createLinearGradient(crownA.x, crownA.y - Z, crownB.x, crownB.y - Z);
+        cg.addColorStop(0, tone('#e4e9f2', l, 1));
+        cg.addColorStop(0.55, tone('#c9cfdb', l, 1));
+        cg.addColorStop(1, tone('#9aa1b0', l, 1));
+        ctx.strokeStyle = cg;
+        ctx.lineWidth = TH * 0.30;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(crownA.x, crownA.y - Z - 3); ctx.lineTo(crownB.x, crownB.y - Z - 3);
+        ctx.stroke();
+        ctx.lineCap = 'butt';
+
+        /* hull ribs */
+        ctx.strokeStyle = `rgba(90,100,118,${0.5 * Math.max(l, 0.5)})`;
+        ctx.lineWidth = 1.3;
+        for (let i = 1; i < 5; i++) {
+          const u = x + 0.10 + (0.80 * i / 5);
+          const a = iso(u, y + 0.26), b2 = iso(u, y + 0.74);
+          ctx.beginPath();
+          ctx.moveTo(a.x, a.y - Z); ctx.lineTo(b2.x, b2.y - Z);
+          ctx.lineTo(b2.x, b2.y - Z * 0.35);
+          ctx.stroke();
+        }
+
+        /* airlock cap on the near end, with a docking ring and chevrons */
+        const cap = iso(x + 0.90, y + 0.74);
+        ctx.fillStyle = tone('#d6dbe6', l, 0.95);
+        ctx.beginPath();
+        ctx.ellipse(cap.x, cap.y - Z * 0.52, TW * 0.10, Z * 0.44, 0, 0, 7);
+        ctx.fill();
+        ctx.strokeStyle = grey(120, l); ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        ctx.ellipse(cap.x, cap.y - Z * 0.52, TW * 0.10, Z * 0.44, 0, 0, 7);
+        ctx.stroke();
+        ctx.fillStyle = night ? '#ffca5f' : tone('#6f7686', l, 1);
+        ctx.beginPath();
+        ctx.ellipse(cap.x, cap.y - Z * 0.50, TW * 0.05, Z * 0.24, 0, 0, 7);
+        ctx.fill();
+        ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 1.1;
+        for (let i = 0; i < 2; i++) {
+          ctx.beginPath();
+          ctx.moveTo(cap.x - 7, cap.y - 4 - i * 4);
+          ctx.lineTo(cap.x, cap.y - 7 - i * 4);
+          ctx.lineTo(cap.x + 7, cap.y - 4 - i * 4);
+          ctx.stroke();
+        }
+
+        /* portholes down the sunward flank, warm and glowing at night */
+        for (let i = 0; i < 4; i++) {
+          const u = x + 0.22 + i * 0.18;
+          const q = iso(u, y + 0.74);
+          const gy = q.y - Z * 0.58;
+          if (night) {
+            const gl = ctx.createRadialGradient(q.x, gy, 1, q.x, gy, 11);
+            gl.addColorStop(0, 'rgba(255,205,110,0.55)');
+            gl.addColorStop(1, 'rgba(255,205,110,0)');
+            ctx.fillStyle = gl;
+            ctx.beginPath(); ctx.arc(q.x, gy, 11, 0, 7); ctx.fill();
+          }
+          ctx.fillStyle = '#ffd166';
+          ctx.beginPath(); ctx.arc(q.x, gy, 2.9, 0, 7); ctx.fill();
+          ctx.strokeStyle = `rgba(70,78,94,${Math.max(l, 0.5)})`; ctx.lineWidth = 1;
+          ctx.beginPath(); ctx.arc(q.x, gy, 3.6, 0, 7); ctx.stroke();
+        }
+
+        /* radiator fins along the spine */
+        ctx.strokeStyle = tone('#aeb6c4', l, 0.9); ctx.lineWidth = 2.2;
+        for (let i = 0; i < 2; i++) {
+          const u = x + 0.34 + i * 0.26;
+          const a = iso(u, y + 0.30), b2 = iso(u, y + 0.70);
+          ctx.beginPath();
+          ctx.moveTo(a.x, a.y - Z - 4); ctx.lineTo(b2.x, b2.y - Z - 10);
+          ctx.stroke();
+        }
+
+        /* comms mast with a beacon that never quite stops blinking */
+        const mast = iso(x + 0.18, y + 0.34);
+        ctx.strokeStyle = grey(170, Math.max(l, 0.5)); ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(mast.x, mast.y - Z); ctx.lineTo(mast.x, mast.y - Z - 20);
+        ctx.stroke();
+        ctx.strokeStyle = grey(150, Math.max(l, 0.5)); ctx.lineWidth = 1.1;
+        ctx.beginPath();
+        ctx.ellipse(mast.x, mast.y - Z - 21, 5.5, 2.4, 0, Math.PI, 0);
+        ctx.stroke();
+        const beat = (Math.sin(Date.now() / 420) + 1) / 2;
+        ctx.fillStyle = `rgba(255,110,90,${0.45 + beat * 0.55})`;
+        ctx.beginPath(); ctx.arc(mast.x, mast.y - Z - 23, 2.4, 0, 7); ctx.fill();
+
+        /* handrail along the walkway side */
+        ctx.strokeStyle = `rgba(210,220,235,${0.35 * Math.max(l, 0.55)})`;
+        ctx.lineWidth = 1;
+        const r1 = iso(x + 0.12, y + 0.86), r2 = iso(x + 0.88, y + 0.86);
+        ctx.beginPath();
+        ctx.moveTo(r1.x, r1.y - 9); ctx.lineTo(r2.x, r2.y - 9);
+        ctx.stroke();
+        for (let i = 0; i <= 4; i++) {
+          const q = iso(x + 0.12 + i * 0.19, y + 0.86);
+          ctx.beginPath(); ctx.moveTo(q.x, q.y); ctx.lineTo(q.x, q.y - 9); ctx.stroke();
         }
         break;
       }
@@ -629,6 +771,53 @@
     ctx.beginPath(); ctx.arc(p.x + 0.5, p.y - 11.2 - bob, 1.4, 0, 7); ctx.fill();
   }
 
+  /* A carriage on the rail. `dx/dy` is the heading, so the body is drawn along
+     whichever axis the train is actually running. */
+  function drawCar(ctx, car, l) {
+    const p = iso(car.x + 0.5, car.y + 0.5);
+    const alongX = Math.abs(car.dx) >= Math.abs(car.dy);
+    const half = 0.27, wide = 0.16;
+    const x0 = car.x + 0.5 - (alongX ? half : wide);
+    const y0 = car.y + 0.5 - (alongX ? wide : half);
+    const w = alongX ? half * 2 : wide * 2;
+    const h = alongX ? wide * 2 : half * 2;
+    const Z = car.lead ? 17 : 14;
+
+    ctx.fillStyle = 'rgba(0,0,0,0.36)';
+    ctx.beginPath(); ctx.ellipse(p.x, p.y + 2, TW * 0.20, TH * 0.16, 0, 0, 7); ctx.fill();
+
+    if (car.lead) {
+      box(ctx, x0, y0, w, h, Z, '#c8ced9', l, { stroke: grey(150, Math.max(l, 0.5)), lw: 1.2 });
+      /* cab glass and a headlight throwing forward */
+      const nose = iso(car.x + 0.5 + (alongX ? Math.sign(car.dx) * 0.24 : 0),
+                       car.y + 0.5 + (alongX ? 0 : Math.sign(car.dy) * 0.24));
+      ctx.fillStyle = 'rgba(120,180,235,0.9)';
+      ctx.fillRect(p.x - 7, p.y - Z - 3, 14, 5);
+      ctx.fillStyle = '#fff6d8';
+      ctx.beginPath(); ctx.arc(nose.x, nose.y - Z * 0.45, 2.6, 0, 7); ctx.fill();
+      const gl = ctx.createRadialGradient(nose.x, nose.y - Z * 0.45, 1, nose.x, nose.y - Z * 0.45, 22);
+      gl.addColorStop(0, 'rgba(255,244,205,0.30)');
+      gl.addColorStop(1, 'rgba(255,244,205,0)');
+      ctx.fillStyle = gl;
+      ctx.beginPath(); ctx.arc(nose.x, nose.y - Z * 0.45, 22, 0, 7); ctx.fill();
+      ctx.fillStyle = `rgba(255,120,90,${0.4 + 0.6 * ((Math.sin(car.blink) + 1) / 2)})`;
+      ctx.beginPath(); ctx.arc(p.x, p.y - Z - 6, 2, 0, 7); ctx.fill();
+    } else {
+      box(ctx, x0, y0, w, h, Z, '#8f96a4', l, { stroke: grey(130, Math.max(l, 0.5)), lw: 1.1 });
+      if (car.cargo) {
+        /* a hopper of produce riding home */
+        box(ctx, x0 + 0.03, y0 + 0.03, w - 0.06, h - 0.06, Z + 7, '#4f9440', l);
+      } else {
+        ctx.fillStyle = 'rgba(190,205,228,0.5)';
+        ctx.fillRect(p.x - 6, p.y - Z - 2, 12, 3);
+      }
+    }
+    /* bogies */
+    ctx.fillStyle = 'rgba(24,28,36,0.9)';
+    ctx.beginPath(); ctx.ellipse(p.x - 6, p.y - 1, 2.6, 1.6, 0, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(p.x + 6, p.y - 1, 2.6, 1.6, 0, 0, 7); ctx.fill();
+  }
+
   /* ---------- frame ---------- */
 
   function draw(ctx, s, ui) {
@@ -668,7 +857,7 @@
     const items = [];
     for (const t of s.map) {
       if (t.t === 'boulder') items.push({ d: t.x + t.y, z: 0, fn: () => drawBoulder(ctx, t, l, sv) });
-      if (t.b && t.b.type === 'track') items.push({ d: t.x + t.y, z: -1, fn: () => drawStruct(ctx, s, t, l, sv) });
+      if (t.b && (t.b.type === 'track' || t.b.type === 'rail')) items.push({ d: t.x + t.y, z: -1, fn: () => drawStruct(ctx, s, t, l, sv) });
       else if (t.b) items.push({ d: t.x + t.y, z: 1, fn: () => drawStruct(ctx, s, t, l, sv) });
     }
     const hoverField = ui.hover ? S.fieldAt(s, S.tileAt(s, ui.hover.x, ui.hover.y)) : null;
@@ -681,6 +870,7 @@
       });
     }
     if (A) for (const a of A.all()) items.push({ d: a.x + a.y, z: 2, fn: () => drawAgent(ctx, a, l) });
+    if (A && A.rail) for (const car of A.rail()) items.push({ d: car.x + car.y, z: 2, fn: () => drawCar(ctx, car, l) });
 
     items.sort((p, q) => (p.d - q.d) || (p.z - q.z));
     for (const it of items) it.fn();
