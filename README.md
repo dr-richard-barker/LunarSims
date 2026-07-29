@@ -104,6 +104,18 @@ The **numbers attached to them are balanced for play, not measured.** Days to
 maturity are in the right region for each crop, and the gas, water and energy
 relationships behave qualitatively as they should, but nothing here should be cited.
 
+## The rest of the arcade
+
+Lunar Farm is one game in a set. The **[CoSE Arcade](https://dr-richard-barker.github.io/cose-arcade/)**
+is the front door; the **[Lunar Arcade](https://dr-richard-barker.github.io/lunar-arcade/)** holds the
+other lunar titles, including
+[Lunar Habitat](https://dr-richard-barker.github.io/lunar-arcade/games/lunar-habitat/) — the
+vertical-builder formula upended, towering up for sunlight or digging down into the shielding — and
+[The Boring Mining Game](https://dr-richard-barker.github.io/lunar-arcade/games/boring-mining/), an ISRU
+swarm where you pilot one drone and lay scent beacons the rest follow.
+
+Those two cover the SimTower and SimAnt shapes, so this repository does not duplicate them.
+
 ## Provenance
 
 Written from scratch. These games take their shape from *SimFarm*, *SimTower* and
