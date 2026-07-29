@@ -4,7 +4,10 @@
   const { K, CROPS, BUILDINGS, UPGRADES, EVENTS, MILESTONES } = window.LF_DATA;
   const S = window.LF_SIM;
   const R = window.LF_RENDER;
-  const SAVE_KEY = 'lunarfarm.save.v5';
+  /* One stable key from now on. The versioned keys are what earlier builds
+     wrote; they are read once, carried forward and then cleared away. */
+  const SAVE_KEY = 'lunarfarm.save';
+  const LEGACY_KEYS = ['lunarfarm.save.v5', 'lunarfarm.save.v4', 'lunarfarm.save.v3'];
 
   const $ = sel => document.querySelector(sel);
   const el = (tag, cls, html) => {
@@ -30,6 +33,9 @@
     isru: '⚗', composter: '♻', reactor: '☢', pad: '◎'
   };
 
+  /* Declared before load() runs: load() writes to it, and a `let` further down
+     the file would still be in its temporal dead zone at that point. */
+  let loadNote = null;
   let s = load() || S.newGame();
   let speed = 1, acc = 0, last = performance.now();
   let tool = { kind: 'op', id: 'inspect' };
@@ -491,8 +497,8 @@
     if (!f.crop) {
       box.innerHTML = `<div class="baytitle"><h2>Grow hall</h2><span class="num">${coord}</span></div>
         <p class="cultivar">${A} tiles under glass, beds flushed and ready.</p>
-        ${meter('Bed conditioning', f.soil === undefined ? 1 : f.soil,
-          (f.soil || 0) > 0.66 ? '#c9a86a' : (f.soil || 0) > 0.33 ? 'var(--warn)' : 'var(--bad)')}
+        ${meter('Bed conditioning', f.soil,
+          f.soil > 0.66 ? '#c9a86a' : f.soil > 0.33 ? 'var(--warn)' : 'var(--bad)')}
         <div class="rows" style="margin-top:10px">
           <div class="row"><span class="k">Lighting draw</span><span class="v">${(A * S.ledKW(s)).toFixed(2)} kW</span></div>
           <div class="row"><span class="k">Service</span><span class="v ${f.serviced ? 'good' : 'bad'}">${f.serviced ? 'ON TRACK NETWORK' : 'NO TRACK'}</span></div>
@@ -501,7 +507,7 @@
       const cond = S.conditionCost(f);
       const cb = el('button', 'act wide',
         `Condition beds (${fmt(cond.credits)} cr · ${Math.ceil(cond.nutrients)} nutrients)`);
-      cb.disabled = (f.soil || 0) >= 0.995;
+      cb.disabled = f.soil >= 0.995;
       cb.onclick = () => act(S.condition(s, f));
       acts.appendChild(cb);
       const btn = el('button', 'act primary wide', 'Sow a crop');
@@ -520,8 +526,8 @@
       ${meter('Health', f.health, f.health > 0.6 ? 'var(--accent)' : f.health > 0.3 ? 'var(--warn)' : 'var(--bad)')}
       ${meter('Moisture', f.moisture, f.moisture < 0.15 ? 'var(--bad)' : '#4aa8ff')}
       ${meter('Nutrient charge', f.feed, f.feed < 0.1 ? 'var(--bad)' : '#7bd88f')}
-      ${meter('Bed conditioning', f.soil === undefined ? 1 : f.soil,
-        (f.soil || 0) > 0.66 ? '#c9a86a' : (f.soil || 0) > 0.33 ? 'var(--warn)' : 'var(--bad)')}
+      ${meter('Bed conditioning', f.soil,
+        f.soil > 0.66 ? '#c9a86a' : f.soil > 0.33 ? 'var(--warn)' : 'var(--bad)')}
       <div class="rows" style="margin-top:12px">
         <div class="row"><span class="k">Hall size</span><span class="v">${A} tiles</span></div>
         <div class="row"><span class="k">Sown</span><span class="v">${daysIn} d ago</span></div>
@@ -529,7 +535,7 @@
         <div class="row"><span class="k">Yield at full health</span><span class="v">${fmt(c.kcal * S.KCAL_SCALE * A)} kcal</span></div>
         <div class="row"><span class="k">Station pays</span><span class="v good">${fmt(c.value * S.VALUE_SCALE * A)} cr</span></div>
         <div class="row"><span class="k">Lamps</span><span class="v ${f.litNow ? 'good' : 'warn'}">${f.litNow ? 'ON' : 'OFF'}</span></div>
-        <div class="row"><span class="k">Beds yielding</span><span class="v ${(f.soil || 0) > 0.66 ? 'good' : 'warn'}">${pct(S.RAW_SOIL + (1 - S.RAW_SOIL) * (f.soil === undefined ? 1 : f.soil))}</span></div>
+        <div class="row"><span class="k">Beds yielding</span><span class="v ${f.soil > 0.66 ? 'good' : 'warn'}">${pct(S.RAW_SOIL + (1 - S.RAW_SOIL) * (f.soil))}</span></div>
         ${f.serviced ? '' : '<div class="row"><span class="k">Service</span><span class="v bad">NO TRACK</span></div>'}
         ${f.infected ? '<div class="row"><span class="k">Status</span><span class="v bad">FUNGAL INFECTION</span></div>' : ''}
         ${f.dead ? '<div class="row"><span class="k">Status</span><span class="v bad">CROP LOST</span></div>' : ''}
@@ -547,7 +553,7 @@
     mk(`Treat (${fmt(120 * A)} cr)`, '', () => act(S.treat(s, f)), !f.infected);
     mk('Clear', '', () => act(S.clear(s, f)));
     const cc = S.conditionCost(f);
-    mk(`Condition (${fmt(cc.credits)} cr)`, '', () => act(S.condition(s, f)), (f.soil || 0) >= 0.995);
+    mk(`Condition (${fmt(cc.credits)} cr)`, '', () => act(S.condition(s, f)), f.soil >= 0.995);
     mk(f.growth >= 1 ? 'Harvest' : 'Not ready', 'primary wide', () => act(S.harvest(s, f)), f.growth < 1);
   }
 
@@ -844,21 +850,63 @@
 
   /* ---------- persistence ---------- */
   function save() {
-    try { localStorage.setItem(SAVE_KEY, JSON.stringify(s)); return true; }
-    catch (err) { return false; }
-  }
-  function load() {
     try {
-      const raw = localStorage.getItem(SAVE_KEY);
-      if (!raw) return null;
-      const o = JSON.parse(raw);
-      return (o && o.version === 5) ? o : null;
+      s.version = S.STATE_VERSION;
+      localStorage.setItem(SAVE_KEY, JSON.stringify(s));
+      return true;
+    } catch (err) { return false; }
+  }
+
+  /* loadNote is declared at the top of this module, because load() runs there. */
+  function load() {
+    let raw = null, legacy = null;
+    try {
+      raw = localStorage.getItem(SAVE_KEY);
+      if (!raw) {
+        for (const k of LEGACY_KEYS) {
+          const v = localStorage.getItem(k);
+          if (v) { raw = v; legacy = k; break; }
+        }
+      }
     } catch (err) { return null; }
+    if (!raw) return null;
+
+    let o = null;
+    try { o = JSON.parse(raw); }
+    catch (err) { loadNote = { why: 'unreadable' }; return null; }
+
+    const res = S.migrate(o);
+    if (!res.ok) { loadNote = res; return null; }
+    /* The old key is not cleared here: it stays as the only copy until the run
+       has been rewritten under the stable one, so closing the tab in between
+       cannot lose it. */
+    if (res.carried || legacy) loadNote = { why: 'carried', from: res.from, legacy };
+    return o;
+  }
+
+  function announceLoad() {
+    if (!loadNote) return;
+    const from = loadNote.from;
+    const said = {
+      carried: `Your run was carried forward from an earlier version of the game${from ? ` (save v${from})` : ''}.`,
+      newer: 'That saved run comes from a newer version of Lunar Farm than this page. Reload to pick up the latest version — a new run has been started meanwhile.',
+      incompatible: 'The saved run is from an early build whose farm was laid out differently, so it could not be carried over. Starting a new one.',
+      unreadable: 'The saved run could not be read, so a new one has been started.'
+    }[loadNote.why];
+    if (!said) return;
+    toast(said, loadNote.why !== 'carried');
+    S.pushLog(s, said);
+    /* Write it forward straight away, then retire the old key — in that order,
+       so the run is never the only copy of nothing. */
+    if (loadNote.why === 'carried' && save() && loadNote.legacy) {
+      try { localStorage.removeItem(loadNote.legacy); } catch (err) {}
+    }
+    loadNote = null;
   }
 
   $('#btnSave').onclick = () => { const ok = save(); toast(ok ? 'Saved to this browser.' : 'Could not save.', !ok); };
   function restart() {
-    localStorage.removeItem(SAVE_KEY);
+    try { [SAVE_KEY, ...LEGACY_KEYS].forEach(k => localStorage.removeItem(k)); } catch (err) {}
     s = S.newGame();
     ui.selected = null; ui.drag = null; ui.line = null; dragStart = null;
     if (window.LF_AGENTS) window.LF_AGENTS.reset();
@@ -985,6 +1033,7 @@
     S.pushLog(s, 'Farm handover complete: one 3×2 grow hall, a habitat, four arrays and two battery banks.');
     S.pushLog(s, 'Drag out more halls with the Grow Hall tool. The sun sets on day 15 — plan for it.');
   }
+  announceLoad();
   buildPalette();
   setTool({ kind: 'op', id: 'inspect' }, OPS[0].hint);
   showTab('info');

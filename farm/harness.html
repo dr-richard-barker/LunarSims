@@ -301,6 +301,53 @@ td.mark{width:34px;text-align:center}
         ];
       } },
 
+    { name: 'An older save is carried forward, not thrown away',
+      why: 'a run stored before bed conditioning must not be silently ruined by loading it',
+      run() {
+        const s = S.newGame();
+        s.credits = 40000;
+        const f = addHall(s, 3, 2, 'romaine');
+        days(s, 20, { tend: true });
+
+        /* forge a save from before soil, railed and the mission-to-date totals */
+        const old = JSON.parse(JSON.stringify(s));
+        old.version = 5;
+        old.fields.forEach(x => { delete x.soil; delete x.railed; });
+        delete old.stats.totalGrown; delete old.stats.totalEaten;
+        old.stats.recent = [1, 2, 3];
+        delete old.auto; delete old.sandbox; delete old.history;
+
+        const res = S.migrate(old);
+        const soilAfter = old.fields[0].soil;
+
+        /* and it has to keep working, not just parse */
+        const beforeGrow = old.fields.find(x => x.crop) ? old.fields.find(x => x.crop).growth : 0;
+        days(old, 6, { tend: true });
+        const grew = (old.fields.find(x => x.crop) || {}).growth > beforeGrow;
+
+        /* a run from a future version must be refused rather than half-read */
+        const future = JSON.parse(JSON.stringify(s));
+        future.version = S.STATE_VERSION + 1;
+        const futureRes = S.migrate(future);
+
+        /* and an early build with no fields array cannot be carried */
+        const ancient = { version: 3, bays: [], day: 12 };
+        const ancientRes = S.migrate(ancient);
+
+        return [
+          ['the old save is accepted', res.ok, true],
+          ['it is marked as carried forward', res.carried, true],
+          ['beds keep the yield they had, not raw dust', soilAfter, 1],
+          ['the stale rolling window is dropped', old.stats.recent, undefined],
+          ['closure totals are seeded from days already lived', old.stats.totalEaten > 0, true],
+          ['missing switches come back as defaults', old.auto === false && old.sandbox === false, true],
+          ['it is stamped at the current version', old.version, S.STATE_VERSION],
+          ['the carried run keeps growing', grew, true],
+          ['a newer save is refused', futureRes.ok === false && futureRes.why, 'newer'],
+          ['an early build is refused', ancientRes.ok === false && ancientRes.why, 'incompatible']
+        ];
+      } },
+
     { name: 'Saving round-trips',
       why: 'a run has to survive JSON, which is how it is stored',
       run() {

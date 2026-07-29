@@ -362,7 +362,7 @@
     for (let ty = 0; ty < f.h; ty++) {
       for (let tx = 0; tx < f.w; tx++) {
         /* raw regolith is pale grey dust; worked beds darken as they condition */
-        const soil = f.soil === undefined ? 1 : f.soil;
+        const soil = f.soil;
         const rr0 = Math.round(126 - 66 * soil);
         const gg0 = Math.round(120 - 70 * soil);
         const bb0 = Math.round(112 - 70 * soil);

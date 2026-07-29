@@ -72,9 +72,70 @@
     return tiles;
   }
 
+  /* Bump when the stored shape changes. Anything older is brought forward by
+     migrate() rather than thrown away. */
+  const STATE_VERSION = 6;
+
+  /* Bring a stored run up to the shape this code expects.
+
+     Defaults are chosen to preserve what the player was actually seeing, not
+     what a new hall would get. A run saved before bed conditioning existed
+     behaved as fully worked ground, so that is what it becomes — starting it at
+     raw dust would punish somebody for loading their own save. */
+  function migrate(o) {
+    if (!o || typeof o !== 'object') return { ok: false, why: 'unreadable' };
+    if ((o.version || 0) > STATE_VERSION) return { ok: false, why: 'newer', from: o.version };
+    /* the earliest builds laid the farm out differently — there is nothing here
+       to carry forward, and pretending otherwise would load a broken run */
+    if (!Array.isArray(o.map) || !Array.isArray(o.fields)) {
+      return { ok: false, why: 'incompatible', from: o.version || 0 };
+    }
+
+    const from = o.version || 0;
+    const def = (obj, k, v) => { if (obj[k] === undefined) obj[k] = v; };
+
+    def(o, 'auto', false); def(o, 'sandbox', false); def(o, 'history', []);
+    def(o, 'litFields', 0); def(o, 'wantFields', 0);
+    def(o, 'litTiles', 0); def(o, 'wantTiles', 0);
+    def(o, 'photoperiod', 16); def(o, 'isruOn', true);
+    def(o, 'up', {}); def(o, 'flags', {}); def(o, 'stats', {});
+    def(o, 'done', {}); def(o, 'log', []); def(o, 'over', null);
+    def(o, 'nextField', o.fields.reduce((m, f) => Math.max(m, f.id || 0), 0) + 1);
+
+    ['dust', 'leak', 'busfault', 'biofilm', 'thermal', 'shutter']
+      .forEach(k => def(o.flags, k, 0));
+    def(o.up, 'led', 0); def(o.up, 'recovery', 0);
+
+    const st = o.stats;
+    def(st, 'harvests', 0); def(st, 'kinds', {}); def(st, 'nightsSurvived', 0);
+    def(st, 'closureStreak', 0); def(st, 'harvestedToday', 0);
+    def(st, 'lastClosure', 0); def(st, 'brownouts', 0); def(st, 'seenNight', false);
+    /* closure used to be a rolling window; it is now measured over the whole
+       mission, so seed the totals from what the run has actually done */
+    if (st.totalGrown === undefined) {
+      st.totalGrown = 0;
+      st.totalEaten = Math.max(0, (o.day || 1) - 1) * dailyNeed(o);
+    }
+    def(st, 'totalEaten', 0);
+    delete st.recent;
+
+    for (const f of o.fields) {
+      def(f, 'soil', 1);            // it behaved as worked ground, so it stays worked
+      def(f, 'serviced', true); def(f, 'railed', false);
+      def(f, 'carbon', 0); def(f, 'warned', false); def(f, 'litNow', false);
+      def(f, 'health', 1); def(f, 'moisture', 0.9); def(f, 'feed', 0.9);
+      def(f, 'growth', 0); def(f, 'infected', false); def(f, 'dead', false);
+      def(f, 'crop', null); def(f, 'plantedDay', o.day || 1);
+    }
+    for (const t of o.map) { def(t, 'b', null); def(t, 'f', null); def(t, 'v', 0.5); }
+
+    o.version = STATE_VERSION;
+    return { ok: true, from, carried: from !== STATE_VERSION };
+  }
+
   function newGame() {
     const s = {
-      version: 5,
+      version: STATE_VERSION,
       hour: 6, day: 1,
       credits: 12000, water: 900, o2: 240, co2: 200, nutrients: 400,
       food: 600000, science: 0, spares: 6, pressure: 100, stored: 120,
@@ -321,7 +382,7 @@
         g *= carbonLimit;
         if (!f.serviced) g *= UNSERVICED_PENALTY;
         if (f.railed) g *= RAIL_BONUS;
-        g *= RAW_SOIL + (1 - RAW_SOIL) * (f.soil === undefined ? 1 : f.soil);
+        g *= RAW_SOIL + (1 - RAW_SOIL) * f.soil;
         if (s.flags.thermal > 0) g *= 0.7;
         if (f.infected) g *= 0.5;
         if (s.pressure < 90) g *= 0.6;
@@ -331,7 +392,7 @@
         const o2 = O2_PER_LIT_HOUR * c.o2 * g * A;
         o2Made += o2; co2Used += o2 * CO2_PER_O2; f.carbon += o2 * CO2_PER_O2;
 
-        f.soil = clamp((f.soil || 0) + SOIL_PER_LIT_HOUR, 0, 1);
+        f.soil = clamp(f.soil + SOIL_PER_LIT_HOUR, 0, 1);
         f.moisture -= (c.water / 24) * 0.020;
         f.feed -= (c.nutrients / 24) * 0.022;
         waterUsed += (c.water / 24) * WATER_PER_TILE * A;
@@ -628,7 +689,7 @@
     s.stats.harvestedToday += kcal;
     const msg = `Harvested ${c.name}: ${kcal.toLocaleString()} kcal, ${pay.toLocaleString()} cr.`;
     if (log) log.push(msg); else pushLog(s, msg);
-    const keptSoil = clamp((f.soil || 0) + worked, 0, 1);
+    const keptSoil = clamp(f.soil + worked, 0, 1);
     clearCrop(f);
     f.soil = keptSoil;
     return null;
@@ -651,13 +712,13 @@
      harvests would eventually do on their own. */
   function condition(s, f) {
     if (!f) return 'Select a grow hall first.';
-    if ((f.soil || 0) >= 0.995) return 'Those beds are fully conditioned.';
+    if (f.soil >= 0.995) return 'Those beds are fully conditioned.';
     const c = conditionCost(f);
     if (!s.sandbox && s.credits < c.credits) return `Conditioning that hall costs ${c.credits.toLocaleString()} credits.`;
     if (s.nutrients < c.nutrients) return `Conditioning that hall needs ${Math.ceil(c.nutrients)} nutrients.`;
     if (!s.sandbox) s.credits -= c.credits;
     s.nutrients -= c.nutrients;
-    f.soil = clamp((f.soil || 0) + 0.30, 0, 1);
+    f.soil = clamp(f.soil + 0.30, 0, 1);
     return null;
   }
 
@@ -787,7 +848,8 @@
   }
 
   window.LF_SIM = {
-    newGame, tick, place, bulldoze, plant, water, feed, treat, harvest, clear, autoManage,
+    newGame, migrate, STATE_VERSION,
+    tick, place, bulldoze, plant, water, feed, treat, harvest, clear, autoManage,
     research, trade, sellFood, sellO2, resolveEvent, condition, conditionCost, RAW_SOIL,
     addField, removeField, checkField, fieldCost, fieldAt, fieldById, fieldTiles, canPlace,
     planted, area, totalTiles, seedCost, serviceSet, fieldRailed,
