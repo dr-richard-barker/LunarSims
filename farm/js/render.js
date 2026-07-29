@@ -92,6 +92,29 @@
       ctx.strokeStyle = o.stroke; ctx.lineWidth = o.lw || 1;
       diamond(ctx, tx, ty, w, h, z); ctx.stroke();
     }
+
+    /* rim light along the two roof edges the sun actually reaches */
+    if (!o.noRim && l > 0.3) {
+      const a = iso(tx, ty);
+      ctx.strokeStyle = `rgba(255,252,238,${0.16 + l * 0.22})`;
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(d.x, d.y - z); ctx.lineTo(a.x, a.y - z); ctx.lineTo(b.x, b.y - z);
+      ctx.stroke();
+    }
+  }
+
+  /* the dark line where a structure meets the ground — cheap ambient occlusion */
+  function contact(ctx, tx, ty, w, h) {
+    const p = iso(tx + w / 2, ty + h / 2);
+    const g = ctx.createRadialGradient(p.x, p.y + TH * 0.1, 2,
+      p.x, p.y + TH * 0.1, Math.max(w, h) * TW * 0.45);
+    g.addColorStop(0, 'rgba(0,0,0,0.34)');
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.ellipse(p.x, p.y + TH * 0.12, (w + 0.5) * TW * 0.44, (h + 0.5) * TH * 0.42, 0, 0, 7);
+    ctx.fill();
   }
 
   function groundShadow(ctx, tx, ty, w, h, z, sv) {
@@ -318,6 +341,7 @@
   function drawField(ctx, s, f, l, sv, hovered, selected) {
     const site = A && A.siteAt(f.x, f.y);
     groundShadow(ctx, f.x, f.y, f.w, f.h, HALL_Z, sv);
+    contact(ctx, f.x, f.y, f.w, f.h);
 
     if (f.litNow) {
       const p = iso(f.x + f.w / 2, f.y + f.h / 2);
@@ -370,7 +394,7 @@
     const glassL = f.litNow ? 'rgba(220,110,190,0.26)' : 'rgba(120,155,195,0.20)';
     box(ctx, f.x, f.y, f.w, f.h, HALL_Z, '#8fb4d8', l, {
       right: glassR, left: glassL,
-      top: f.litNow ? 'rgba(255,150,215,0.17)' : 'rgba(175,205,235,0.13)'
+      top: f.litNow ? 'rgba(255,150,215,0.17)' : 'rgba(175,205,235,0.13)', noRim: true
     });
 
     /* frame: eaves, ridge ribs and corner posts */
@@ -533,6 +557,7 @@
 
     const Z = { solar: 26, battery: 24, hab: 30, isru: 42, composter: 32, reactor: 34, pad: 4 }[type] || 26;
     groundShadow(ctx, x + 0.1, y + 0.1, 0.8, 0.8, Z, sv);
+    contact(ctx, x, y, 1, 1);
     if (site) return drawScaffold(ctx, x, y, 1, 1, Z, site, l);
 
     const p = iso(x + 0.5, y + 0.5);
@@ -736,8 +761,32 @@
 
   /* ---------- agents ---------- */
 
-  function drawAgent(ctx, a, l) {
+  function drawAgent(ctx, a, l, ghost) {
     const p = iso(a.x + 0.5, a.y + 0.5);
+
+    if (ghost) {
+      ctx.fillStyle = GHOST;
+      ctx.strokeStyle = GHOST_EDGE;
+      ctx.lineWidth = 1;
+      if (a.kind === 'rover') {
+        ctx.beginPath(); ctx.ellipse(p.x, p.y - 7, 10, 7, 0, 0, 7); ctx.fill(); ctx.stroke();
+      } else {
+        ctx.beginPath(); ctx.ellipse(p.x, p.y - 6, 3.2, 6.2, 0, 0, 7); ctx.fill(); ctx.stroke();
+        ctx.beginPath(); ctx.arc(p.x, p.y - 12, 2.7, 0, 7); ctx.fill(); ctx.stroke();
+      }
+      return;
+    }
+
+    /* dust kicked up behind anything moving at speed */
+    if (a.kind === 'rover') {
+      for (let i = 1; i <= 3; i++) {
+        const q = iso(a.x + 0.5 - (a.to.x - a.from.x) * i * 0.14,
+                      a.y + 0.5 - (a.to.y - a.from.y) * i * 0.14);
+        ctx.fillStyle = `rgba(196,190,180,${0.13 / i})`;
+        ctx.beginPath(); ctx.ellipse(q.x, q.y, 7 + i * 3, 3 + i, 0, 0, 7); ctx.fill();
+      }
+    }
+
     ctx.fillStyle = 'rgba(0,0,0,0.34)';
     ctx.beginPath(); ctx.ellipse(p.x, p.y + 1, a.kind === 'rover' ? 9 : 4, 3, 0, 0, 7); ctx.fill();
 
@@ -771,9 +820,28 @@
     ctx.beginPath(); ctx.arc(p.x + 0.5, p.y - 11.2 - bob, 1.4, 0, 7); ctx.fill();
   }
 
+  /* Is something tall standing between this spot and the camera? In an
+     isometric painter's algorithm anything on a nearer tile is drawn later and
+     will cover a figure walking behind it, so we test the tiles in front and
+     draw a silhouette instead of letting people vanish into a grey wall. */
+  const SEE_THROUGH = { track: 1, rail: 1, pad: 1 };
+  function occluded(s, ax, ay) {
+    const cx = Math.floor(ax), cy = Math.floor(ay);
+    /* Only solid modules hide anybody. Grow halls are glazed, so a figure behind
+       one already shows through the glass and needs no help. */
+    for (const [dx, dy] of [[1, 0], [0, 1], [1, 1], [2, 0], [0, 2], [2, 1], [1, 2]]) {
+      const t = S.tileAt(s, cx + dx, cy + dy);
+      if (t && t.b && !SEE_THROUGH[t.b.type]) return true;
+    }
+    return false;
+  }
+
+  const GHOST = 'rgba(186,216,255,0.9)';
+  const GHOST_EDGE = 'rgba(120,170,235,0.9)';
+
   /* A carriage on the rail. `dx/dy` is the heading, so the body is drawn along
      whichever axis the train is actually running. */
-  function drawCar(ctx, car, l) {
+  function drawCar(ctx, car, l, ghost) {
     const p = iso(car.x + 0.5, car.y + 0.5);
     const alongX = Math.abs(car.dx) >= Math.abs(car.dy);
     const half = 0.27, wide = 0.16;
@@ -782,6 +850,16 @@
     const w = alongX ? half * 2 : wide * 2;
     const h = alongX ? wide * 2 : half * 2;
     const Z = car.lead ? 17 : 14;
+
+    if (ghost) {
+      ctx.fillStyle = GHOST;
+      ctx.strokeStyle = GHOST_EDGE;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.ellipse(p.x, p.y - Z * 0.5, TW * 0.16, Z * 0.58, 0, 0, 7);
+      ctx.fill(); ctx.stroke();
+      return;
+    }
 
     ctx.fillStyle = 'rgba(0,0,0,0.36)';
     ctx.beginPath(); ctx.ellipse(p.x, p.y + 2, TW * 0.20, TH * 0.16, 0, 0, 7); ctx.fill();
@@ -818,6 +896,46 @@
     ctx.beginPath(); ctx.ellipse(p.x + 6, p.y - 1, 2.6, 1.6, 0, 0, 7); ctx.fill();
   }
 
+  /* Earth hangs motionless over the Marius Hills. Its lit fraction is the
+     opposite of the local lunar day, which is why it is fullest at midnight. */
+  function drawEarth(ctx, s) {
+    const ex = OX + K.COLS * TW * 0.22, ey = 46, er = 40;
+    const phase = ((s.day + s.hour / 24) % K.LUNAR_CYCLE) / K.LUNAR_CYCLE;
+
+    ctx.save();
+    /* atmosphere halo */
+    const halo = ctx.createRadialGradient(ex, ey, er * 0.9, ex, ey, er * 1.9);
+    halo.addColorStop(0, 'rgba(120,170,240,0.20)');
+    halo.addColorStop(1, 'rgba(120,170,240,0)');
+    ctx.fillStyle = halo;
+    ctx.beginPath(); ctx.arc(ex, ey, er * 1.9, 0, 7); ctx.fill();
+
+    ctx.beginPath(); ctx.arc(ex, ey, er, 0, 7); ctx.clip();
+    ctx.fillStyle = '#12386e';
+    ctx.fillRect(ex - er, ey - er, er * 2, er * 2);
+
+    /* continents, oceans and a swirl of cloud — suggestive, not cartographic */
+    ctx.fillStyle = '#2f7a4a';
+    ctx.beginPath(); ctx.ellipse(ex - er * 0.34, ey - er * 0.22, er * 0.40, er * 0.28, 0.5, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(ex + er * 0.28, ey + er * 0.34, er * 0.34, er * 0.22, -0.3, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(ex + er * 0.40, ey - er * 0.44, er * 0.22, er * 0.16, 0.2, 0, 7); ctx.fill();
+    ctx.fillStyle = 'rgba(226,238,255,0.34)';
+    ctx.beginPath(); ctx.ellipse(ex + er * 0.05, ey - er * 0.50, er * 0.62, er * 0.16, 0.24, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(ex - er * 0.18, ey + er * 0.44, er * 0.52, er * 0.14, -0.18, 0, 7); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.55)';
+    ctx.beginPath(); ctx.ellipse(ex, ey + er * 0.92, er * 0.5, er * 0.18, 0, 0, 7); ctx.fill();
+
+    /* the terminator */
+    ctx.fillStyle = 'rgba(2,4,10,0.90)';
+    const off = Math.cos(phase * 2 * Math.PI) * er * 1.55;
+    ctx.beginPath(); ctx.arc(ex + off, ey, er * 1.28, 0, 7); ctx.fill();
+    ctx.restore();
+
+    ctx.strokeStyle = 'rgba(150,195,255,0.30)';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.arc(ex, ey, er, 0, 7); ctx.stroke();
+  }
+
   /* ---------- frame ---------- */
 
   function draw(ctx, s, ui) {
@@ -827,16 +945,23 @@
     /* space around the plate */
     ctx.fillStyle = '#05070d';
     ctx.fillRect(0, 0, W, H);
-    ctx.fillStyle = 'rgba(255,255,255,0.5)';
-    for (let i = 0; i < 90; i++) {
+    for (let i = 0; i < 220; i++) {
       const q = Math.sin(i * 12.9898) * 43758.5453;
       const u = q - Math.floor(q);
       const r = Math.sin(i * 78.233) * 12345.678;
       const v = r - Math.floor(r);
-      ctx.globalAlpha = 0.25 + u * 0.5;
-      ctx.fillRect(u * W, v * H, 1.4, 1.4);
+      const b = Math.sin(i * 3.71) * 0.5 + 0.5;
+      ctx.globalAlpha = 0.18 + b * 0.62;
+      /* a few stars run warm or cool, the rest white */
+      ctx.fillStyle = b > 0.86 ? '#ffd9b0' : b < 0.12 ? '#bcd6ff' : '#ffffff';
+      const size = b > 0.9 ? 2.1 : 1.3;
+      ctx.fillRect(u * W, v * H, size, size);
     }
     ctx.globalAlpha = 1;
+
+    /* Earth, fixed in the lunar sky as it always is, showing the phase opposite
+       to the local day */
+    drawEarth(ctx, s);
 
     /* the plate itself, with a rim so it reads as a solid slab */
     ctx.fillStyle = grey(70, Math.max(l, 0.35));
@@ -874,6 +999,16 @@
 
     items.sort((p, q) => (p.d - q.d) || (p.z - q.z));
     for (const it of items) it.fn();
+
+    /* Anyone hidden behind a module comes back as a silhouette, so the
+       settlement never seems to swallow its own people. */
+    if (A) {
+      ctx.save();
+      ctx.globalAlpha = 0.32;
+      for (const a of A.all()) if (occluded(s, a.x, a.y)) drawAgent(ctx, a, l, true);
+      if (A.rail) for (const car of A.rail()) if (occluded(s, car.x, car.y)) drawCar(ctx, car, l, true);
+      ctx.restore();
+    }
 
     if (!S.isSunlit(s)) {
       ctx.fillStyle = 'rgba(12,22,52,0.30)';

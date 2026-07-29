@@ -52,6 +52,12 @@ Habitats are drawn in full: regolith berms, ribbed hulls, an airlock cap with
 chevrons, lit portholes that glow through the lunar night, radiator fins and a
 comms mast with a blinking beacon.
 
+Earth hangs over the plate, showing the phase opposite to the local lunar day, so
+it is fullest at midnight. Modules sit on soft contact shadows and catch a rim
+light along the roof edges the sun reaches; rovers kick up dust. Anyone who walks
+behind a solid module returns as a pale silhouette rather than vanishing — glazed
+halls need no such help, because you can see straight through them.
+
 ### Extras in the header
 
 - **Auto-manage** hands the daily tending to the crew: they water, feed, treat,
