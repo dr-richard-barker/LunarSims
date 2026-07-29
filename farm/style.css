@@ -131,6 +131,11 @@ main{flex:1 1 auto;display:flex;min-height:0}
   max-width:100%;max-height:calc(100% - 30px);min-height:0;
   border-radius:8px;border:1px solid var(--line);cursor:crosshair;
   box-shadow:0 10px 40px rgba(0,0,0,.5);
+  /* the canvas handles its own panning and pinching, so the browser must not
+     also scroll or double-tap-zoom the page out from under it */
+  touch-action:none;
+  -webkit-user-select:none;user-select:none;
+  -webkit-tap-highlight-color:transparent;
 }
 .statusbar{
   flex:0 0 auto;width:100%;max-width:100%;padding:5px 12px;border-radius:6px;
@@ -322,6 +327,22 @@ button{font-family:var(--sans)}
 .toast.bad{border-color:var(--bad);color:var(--bad)}
 
 /* ---------- narrow screens ---------- */
+/* ---------- touch and small screens ---------- */
+@media (pointer:coarse){
+  /* thumbs need bigger targets than a mouse does */
+  .tool{padding:10px 9px}
+  .tool .n{font-size:11.5px}
+  .mode{padding:7px 10px;font-size:10.5px}
+  .sp{padding:7px 12px;font-size:12px}
+  .tab{padding:12px 4px;font-size:11px}
+  .act{padding:12px 8px;font-size:13px}
+  .ghost{padding:10px;font-size:12px}
+  .xclose{width:38px;height:38px;font-size:24px}
+  .crop{padding:13px 12px}
+  .choice{padding:14px 15px}
+  .statusbar{white-space:normal;font-size:11.5px}
+}
+
 @media (max-width:1180px){
   body{overflow:auto}
   main{flex-direction:column}

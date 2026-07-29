@@ -51,7 +51,10 @@ Three things drive the difficulty:
 The plot is drawn in 2:1 isometric projection: extruded structures lit by the real
 sun angle, long shadows that swing round as the lunar day passes, and glazed halls
 you can see the canopy through. **Scroll to zoom, drag with the right button to
-pan** (arrow keys and `+`/`-` also work). Zoom in and the settlement is alive —
+pan** (arrow keys and `+`/`-` also work). **On touch:** one finger builds when a
+build tool is up and otherwise drags the map, a tap uses the current tool, and two
+fingers pinch to zoom and pan together. One pointer-based code path serves mouse,
+pen and touch alike. Zoom in and the settlement is alive —
 suited crew walking the track network, rovers hauling between modules, freight
 trains working the rail with their wagons swinging properly through the corners,
 and build bots throwing sparks over anything newly raised until it tops out.
