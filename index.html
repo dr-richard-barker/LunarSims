@@ -6,6 +6,15 @@
 <title>Lunar Sims — classic simulation games, reimagined on the Moon</title>
 <meta name="description" content="Original browser simulation games set on the lunar surface, in the spirit of the classic Maxis sims. Lunar Farm is playable now.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🌘</text></svg>">
+<script>
+  (function() {
+    let theme = localStorage.getItem('cose_theme');
+    if (!theme) {
+      theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    }
+    document.documentElement.setAttribute('data-theme', theme);
+  })();
+</script>
 <style>
 :root{
   --bg:#080a10; --panel:#11141c; --panel-2:#161a24; --line:#232838;
@@ -13,6 +22,11 @@
   --accent:#6ee7a0; --accent-2:#8ab4ff; --led:#ff5fbd;
   --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
   --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+}
+html[data-theme="light"] {
+  --bg:#ffffff; --panel:#f7f9fc; --panel-2:#eef2f6; --line:#e5e9f0;
+  --ink:#1a2230; --ink-soft:#5a6473; --ink-faint:#8a8a8a;
+  --accent:#1a7f37; --accent-2:#3b6ea5; --led:#ff5fbd;
 }
 *{box-sizing:border-box}
 body{
@@ -70,6 +84,10 @@ footer a{color:var(--ink-soft)}
 </style>
 </head>
 <body>
+
+<div style="max-width:940px; margin: 16px auto 0; padding: 0 22px; display: flex; justify-content: flex-end; position: absolute; left: 0; right: 0; z-index: 10;">
+  <button id="themeToggleBtn" onclick="toggleTheme()" style="background: var(--panel); border: 1px solid var(--line); border-radius: 8px; color: var(--ink); padding: 6px 12px; cursor: pointer; font-family: var(--mono); font-size: 12px; font-weight: 600;" title="Toggle Theme">🌓</button>
+</div>
 
 <header class="top">
   <div class="wrap">
@@ -204,5 +222,27 @@ footer a{color:var(--ink-soft)}
   <a href="https://github.com/dr-richard-barker/LunarSims">Source on GitHub</a>
 </footer>
 
+<script>
+  function toggleTheme() {
+    const htmlEl = document.documentElement;
+    const currentTheme = htmlEl.getAttribute('data-theme') || 'dark';
+    const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+    
+    htmlEl.setAttribute('data-theme', newTheme);
+    localStorage.setItem('cose_theme', newTheme);
+    
+    document.getElementById('themeToggleBtn').textContent = newTheme === 'dark' ? '☀️' : '🌙';
+  }
+
+  function initThemeIcon() {
+    const currentTheme = document.documentElement.getAttribute('data-theme') || 'dark';
+    const btn = document.getElementById('themeToggleBtn');
+    if (btn) {
+      btn.textContent = currentTheme === 'dark' ? '☀️' : '🌙';
+    }
+  }
+  
+  initThemeIcon();
+</script>
 </body>
 </html>
