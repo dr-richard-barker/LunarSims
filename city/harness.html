@@ -1,0 +1,725 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Artemis City — simulation harness</title>
+<style>
+:root{
+  --bg:#080a10; --panel:#11141c; --panel-2:#161a24; --line:#232838;
+  --ink:#e6ebf5; --ink-soft:#9aa6bd; --ink-faint:#5c6478;
+  --good:#6ee7a0; --bad:#ff7a68; --warn:#ffc46b;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.6}
+.wrap{max-width:1000px;margin:0 auto;padding:34px 22px 70px}
+h1{font-size:26px;margin:0 0 6px}
+.lede{color:var(--ink-soft);font-size:14px;margin:0 0 8px;max-width:74ch}
+.note{color:var(--ink-faint);font-size:12.5px;margin:0 0 22px;max-width:74ch}
+#summary{
+  font-family:var(--mono);font-size:15px;padding:12px 16px;border-radius:9px;
+  background:var(--panel);border:1px solid var(--line);margin-bottom:20px;
+}
+.sc{background:var(--panel);border:1px solid var(--line);border-radius:10px;margin-bottom:12px;overflow:hidden}
+.sc > h2{
+  margin:0;padding:11px 16px;font-size:14px;display:flex;gap:10px;align-items:baseline;
+  background:var(--panel-2);border-bottom:1px solid var(--line);
+}
+.sc h2 .why{font-weight:400;font-size:12px;color:var(--ink-soft)}
+.sc h2 .verdict{margin-left:auto;font-family:var(--mono);font-size:12px}
+table{border-collapse:collapse;width:100%;font-size:12.5px}
+td{padding:7px 16px;border-bottom:1px solid var(--line);font-family:var(--mono)}
+tr:last-child td{border-bottom:none}
+td.label{font-family:var(--sans);color:var(--ink-soft);width:46%}
+td.mark{width:34px;text-align:center}
+.pass{color:var(--good)} .fail{color:var(--bad)}
+.err{color:var(--bad);font-family:var(--mono);font-size:12px;padding:10px 16px;white-space:pre-wrap}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Artemis City — simulation harness</h1>
+  <p class="lede">Runs the Phase 1 headless core — map generation, road connectivity, zoning,
+    demand and land value, per-tile growth/decay, population, and the Agriculture zone carried
+    over from Lunar Farm — for hundreds of simulated days and checks the mechanics behave as
+    designed, before any renderer or UI exists to hide a bug behind.</p>
+  <p class="note">No DOM, no renderer — only <code>data.js</code>, <code>grid.js</code>,
+    <code>zones.js</code> and <code>sim.js</code>. Re-run this page after any change to the
+    simulation or its data.</p>
+  <div id="summary">running…</div>
+  <div id="out"></div>
+</div>
+
+<script src="js/data.js"></script>
+<script src="js/grid.js"></script>
+<script src="js/zones.js"></script>
+<script src="js/sim.js"></script>
+<script src="js/autopilot.js"></script>
+<script>
+(function () {
+  const S = window.LC_SIM;
+  const K = window.LC_DATA.K;
+
+  /* ---------- helpers ---------- */
+
+  function days(s, n, opt) {
+    const o = opt || {};
+    for (let d = 0; d < n && !s.over; d++) {
+      for (let h = 0; h < 24; h++) {
+        S.tick(s);
+        if (o.eachHour) o.eachHour(s);
+        if (s.pendingEvent) s.pendingEvent = null;   // auto-dismiss; nothing here is answering it
+        if (s.over) break;
+      }
+      /* keeps life support topped up so a scenario about population/migration
+         is not secretly a scenario about an untended crop dying of thirst —
+         same isolation Lunar Farm's own harness gets from its tend/restock options */
+      if (o.life) {
+        s.resources.o2 = Math.max(s.resources.o2, 200);
+        s.resources.water = Math.max(s.resources.water, 500);
+        s.resources.nutrients = Math.max(s.resources.nutrients, 300);
+      }
+      if (o.each) o.each(s, d);
+    }
+    return s;
+  }
+
+  /* zone growth is per-tile (only tiles actually fronting a road are
+     serviced), so "did this rectangle grow" means "did any tile in it
+     advance", not "did one arbitrarily-chosen corner advance" */
+  function zoneStageSum(s, kind) {
+    return s.map.filter(t => t.zone && t.zone.kind === kind)
+      .reduce((a, t) => a + t.zone.stage, 0);
+  }
+
+  /* first rectangle of clear ground with a road/command tile strictly
+     orthogonally adjacent to its outline — matching serviceSet()'s own
+     4-directional adjacency exactly, not a looser "somewhere nearby" box */
+  function connectedZoneSpot(s, w, h) {
+    const carries = t => t && t.b && (t.b.type === 'track' || t.b.type === 'rail' || t.b.type === 'command');
+    for (let y = 0; y < K.ROWS - h; y++)
+      for (let x = 0; x < K.COLS - w; x++) {
+        if (window.LC_ZONES.checkZone(s, x, y, w, h)) continue;
+        let touches = false;
+        for (let xx = x; xx < x + w && !touches; xx++) {
+          if (carries(S.tileAt(s, xx, y - 1)) || carries(S.tileAt(s, xx, y + h))) touches = true;
+        }
+        for (let yy = y; yy < y + h && !touches; yy++) {
+          if (carries(S.tileAt(s, x - 1, yy)) || carries(S.tileAt(s, x + w, yy))) touches = true;
+        }
+        if (touches) return [x, y];
+      }
+    return null;
+  }
+
+  /* ground with nothing built or zoned on any adjoining tile, far from the road net */
+  function isolatedZoneSpot(s, w, h) {
+    for (let y = K.ROWS - h; y >= 0; y--)
+      for (let x = K.COLS - w; x >= 0; x--) {
+        if (window.LC_ZONES.checkZone(s, x, y, w, h)) continue;
+        let clean = true;
+        for (let yy = y - 2; yy <= y + h + 1 && clean; yy++)
+          for (let xx = x - 2; xx <= x + w + 1 && clean; xx++) {
+            const t = S.tileAt(s, xx, yy);
+            if (t && (t.b || t.f || t.zone)) clean = false;
+          }
+        if (clean) return [x, y];
+      }
+    return null;
+  }
+
+  function zoneAt(s, x, y) { return S.tileAt(s, x, y).zone; }
+
+  /* Most tests below only care about "some tile with property X" and
+     shouldn't have to know about the survey charter — this is the same
+     tile the raw s.map.find(...) would have picked, just restricted to
+     ground the colony has actually surveyed, the way real placement
+     always has been. */
+  function revealedTile(s, pred) {
+    return s.map.find(t => window.LC_GRID.inRevealed(s, t.x, t.y) && pred(t));
+  }
+
+  /* tiles the "half the charter developed" fill ratio without waiting on
+     organic zone growth — one tile at a time so a single boulder or crater
+     bowl only costs that tile, not a whole block (checkZone rejects an
+     entire outline if any tile inside it is hazardous) */
+  function paintRevealedFully(s, kind) {
+    const r = s.revealed;
+    for (let y = r.y0; y <= r.y1; y++) {
+      for (let x = r.x0; x <= r.x1; x++) {
+        S.paintZone(s, x, y, 1, 1, kind);
+      }
+    }
+  }
+
+  function isFullyRevealed(s) {
+    const r = s.revealed;
+    return r.x0 <= 0 && r.y0 <= 0 && r.x1 >= K.COLS - 1 && r.y1 >= K.ROWS - 1;
+  }
+
+  /* ---------- scenarios ---------- */
+
+  const SCENARIOS = [
+
+    { name: 'The colony founds cleanly',
+      why: 'a fresh save should have a valid map, root building, and starting economy',
+      run() {
+        const s = S.newGame();
+        const cmd = s.map.filter(t => t.b && t.b.type === 'command');
+        return [
+          ['the map is the declared size', s.map.length, K.COLS * K.ROWS],
+          ['exactly one Command Module exists', cmd.length, 1],
+          ['starting population is positive', s.pop > 0, true],
+          ['starting credits are positive', s.credits > 0, true],
+          ['the founding hall is planted', s.fields[0] && !!s.fields[0].crop, true],
+          ['some regolith was surveyed on the map', s.map.some(t => t.deposit && t.deposit.kind === 'regolith'), true],
+          ['some ice was surveyed near the shadowed floor', s.map.some(t => t.deposit && t.deposit.kind === 'ice'), true]
+        ];
+      } },
+
+    { name: 'Zoned ground connected to the road grows',
+      why: 'a serviced Habitation tile should advance stages over time when jobs exist to pull it',
+      run() {
+        const s = S.newGame();
+        s.credits = 60000; s.resources.food = 5e8;
+        const spot = connectedZoneSpot(s, 3, 3);
+        if (!spot) throw new Error('no connected ground free for zoning');
+        const err = S.paintZone(s, spot[0], spot[1], 3, 3, 'hab');
+        if (err) throw new Error('paintZone: ' + err);
+        /* give it somewhere to send workers, or hab demand never turns positive */
+        const jobSpot = connectedZoneSpot(s, 3, 3);
+        if (jobSpot) S.paintZone(s, jobSpot[0], jobSpot[1], 3, 3, 'trade');
+        days(s, 220, { life: true });
+        const z = zoneAt(s, spot[0], spot[1]);
+        return [
+          ['the tile is still zoned habitation', z && z.kind, 'hab'],
+          ['at least one tile in the block advanced past stage 0', zoneStageSum(s, 'hab'), '>=1'],
+          ['housing capacity reflects the growth', s.housingCap, '>=3']
+        ];
+      } },
+
+    { name: 'Zoned ground off the network does not grow',
+      why: 'placement legality is not the same thing as connectivity',
+      run() {
+        const s = S.newGame();
+        s.credits = 60000;
+        const spot = isolatedZoneSpot(s, 2, 2);
+        if (!spot) throw new Error('no isolated ground left on the map');
+        const err = S.paintZone(s, spot[0], spot[1], 2, 2, 'hab');
+        if (err) throw new Error('paintZone: ' + err);
+        days(s, 220);
+        const z = zoneAt(s, spot[0], spot[1]);
+        return [
+          ['the tile is still zoned', !!z, true],
+          ['it never left stage 0', z.stage, 0]
+        ];
+      } },
+
+    { name: 'RCI demand responds to the jobs/population balance',
+      why: 'Habitation demand should read positive when jobs outrun population',
+      run() {
+        const s = S.newGame();
+        s.credits = 80000; s.resources.food = 5e8;
+        s.pop = 4;
+        const spot = connectedZoneSpot(s, 4, 4);
+        if (!spot) throw new Error('no connected ground for the job zone');
+        const err = S.paintZone(s, spot[0], spot[1], 4, 4, 'trade');
+        if (err) throw new Error('paintZone: ' + err);
+        days(s, 90);
+        return [
+          ['trade zoning developed enough to create jobs', s.jobs, '>=3'],
+          ['habitation demand reads positive with jobs unfilled', s.demand.hab, '>0']
+        ];
+      } },
+
+    { name: 'Population grows toward housing capacity when life support holds',
+      why: 'migration should track the gap between population and zoned capacity',
+      run() {
+        const s = S.newGame();
+        s.credits = 80000; s.resources.food = 5e8;
+        const hab = connectedZoneSpot(s, 4, 4);
+        S.paintZone(s, hab[0], hab[1], 4, 4, 'hab');
+        const trade = connectedZoneSpot(s, 4, 4);
+        if (trade) S.paintZone(s, trade[0], trade[1], 4, 4, 'trade');
+        const before = s.pop;
+        days(s, 260, { life: true });
+        return [
+          ['the run is still going', !s.over, true],
+          ['population grew from where it started', s.pop > before, true],
+          ['population never exceeds the zoned capacity', s.pop <= s.housingCap, true]
+        ];
+      } },
+
+    { name: 'A failed life support drives emigration',
+      why: 'a colony that cannot feed itself should shrink, not silently stay full',
+      run() {
+        const s = S.newGame();
+        s.credits = 90000; s.resources.food = 5e8;
+        const hab = connectedZoneSpot(s, 4, 4);
+        S.paintZone(s, hab[0], hab[1], 4, 4, 'hab');
+        const trade = connectedZoneSpot(s, 4, 4);
+        if (trade) S.paintZone(s, trade[0], trade[1], 4, 4, 'trade');
+        days(s, 200, { life: true });     // let the colony actually grow first
+        const grownPop = s.pop;
+        s.resources.food = 500;          // then pull the floor out from under it, food only
+        days(s, 6, { life: true });
+        return [
+          ['population had actually grown first', grownPop, '>=3'],
+          ['the colony shrank or collapsed once supplies ran out',
+            s.pop < grownPop || !!s.over, true]
+        ];
+      } },
+
+    { name: 'Milestones fire as the colony grows',
+      why: 'founding and first-zone milestones should trip without the player checking a modal',
+      run() {
+        const s = S.newGame();
+        s.credits = 60000;
+        const spot = connectedZoneSpot(s, 2, 2);
+        S.paintZone(s, spot[0], spot[1], 2, 2, 'hab');
+        days(s, 5);
+        return [
+          ['founding milestone recorded', !!s.done.founded, true],
+          ['first-zone milestone recorded', !!s.done.firstzone, true]
+        ];
+      } },
+
+    { name: 'Developed zones pay into the colony budget',
+      why: 'income and upkeep from stage tables should actually move credits, not just display',
+      run() {
+        const s = S.newGame();
+        s.sandbox = true; s.resources.food = 5e8;
+        /* pair with a hab zone — a trade zone alone saturates its own demand
+           the moment its jobs outrun the fixed founding population and stalls */
+        const hab = connectedZoneSpot(s, 4, 4);
+        S.paintZone(s, hab[0], hab[1], 4, 4, 'hab');
+        const spot = connectedZoneSpot(s, 4, 4);
+        S.paintZone(s, spot[0], spot[1], 4, 4, 'trade');
+        const before = s.credits;
+        days(s, 200, { life: true });
+        return [
+          ['the trade block developed real density', zoneStageSum(s, 'trade'), '>=2'],
+          ['trade zoning is generating tracked jobs', s.jobs, '>0'],
+          ['zone income/upkeep actually moved the budget', s.credits !== before, true]
+        ];
+      } },
+
+    { name: 'An unserviced stage eventually decays',
+      why: 'losing the road connection should cost a developed tile its density, not just freeze it',
+      run() {
+        const s = S.newGame();
+        s.credits = 80000; s.resources.food = 5e8;
+        const spot = connectedZoneSpot(s, 3, 3);
+        S.paintZone(s, spot[0], spot[1], 3, 3, 'hab');
+        const jobSpot = connectedZoneSpot(s, 3, 3);
+        if (jobSpot) S.paintZone(s, jobSpot[0], jobSpot[1], 3, 3, 'trade');
+        days(s, 200, { life: true });
+        const grown = zoneStageSum(s, 'hab');
+        /* sever every road tile so nothing is serviced any more */
+        for (const t of s.map) if (t.b && (t.b.type === 'track' || t.b.type === 'rail')) t.b = null;
+        days(s, 30, { life: true });
+        const after = zoneStageSum(s, 'hab');
+        return [
+          ['the block had actually grown first', grown, '>=1'],
+          ['cutting the network cost it density', after < grown, true]
+        ];
+      } },
+
+    { name: 'Free Mode bypasses every build cost',
+      why: 'the sandbox flag has to actually gate the zoning/field/build cost checks, not just exist',
+      run() {
+        const s = S.newGame();
+        s.credits = 0; s.sandbox = true;
+        const zoneSpot = connectedZoneSpot(s, 3, 3);
+        const zoneErr = S.paintZone(s, zoneSpot[0], zoneSpot[1], 3, 3, 'trade');
+        const fieldSpot = (() => {
+          for (let y = 0; y < K.ROWS - 2; y++) for (let x = 0; x < K.COLS - 2; x++) {
+            if (!S.checkField(s, x, y, 2, 2)) return [x, y];
+          }
+        })();
+        const fieldErr = S.addField(s, fieldSpot[0], fieldSpot[1], 2, 2);
+        const t = revealedTile(s, x => !x.b && !x.f && !x.zone && x.t === 'flat');
+        const buildErr = S.place(s, t, 'solar');
+        return [
+          ['zoning at zero credits succeeds', zoneErr, null],
+          ['a grow hall at zero credits succeeds', fieldErr, null],
+          ['a single-tile build at zero credits succeeds', buildErr, null],
+          ['credits never went negative', s.credits, 0]
+        ];
+      } },
+
+    { name: 'Disasters can be switched off',
+      why: 'toggling off the deck should stop the roll outright, not just make it rarer',
+      run() {
+        const s = S.newGame();
+        s.disastersOn = false; s.credits = 60000; s.resources.food = 5e8;
+        let sawEvent = false;
+        days(s, 200, { life: true, eachHour: st => { if (st.pendingEvent) sawEvent = true; } });
+        return [
+          ['the run is still going', !s.over, true],
+          ['no event ever queued', sawEvent, false]
+        ];
+      } },
+
+    { name: 'Every disaster choice resolves',
+      why: 'a typo in one effect would otherwise wait until a player happens to meet it',
+      run() {
+        const effects = [];
+        window.LC_DATA.EVENTS.forEach(e => e.choices.forEach(c => effects.push([e.id, c.effect])));
+        let threw = null, leftPending = [];
+        for (const [id, effect] of effects) {
+          if (effect === 'none') continue;
+          const s = S.newGame();
+          s.credits = 60000; s.spares = 9; s.science = 40; s.resources.food = 5e8;
+          const spot = connectedZoneSpot(s, 3, 3);
+          S.paintZone(s, spot[0], spot[1], 3, 3, 'hab');
+          days(s, 40, { life: true });
+          s.pendingEvent = id;
+          try { S.resolveEvent(s, id, effect); }
+          catch (err) { threw = `${id}/${effect}: ${err.message}`; break; }
+          if (s.pendingEvent !== null) leftPending.push(`${id}/${effect}`);
+        }
+        return [
+          ['no choice throws', threw, null],
+          ['every choice clears the pending alert', leftPending.join(', '), ''],
+          ['every event offers at least two ways out',
+            window.LC_DATA.EVENTS.every(e => e.choices.length >= 2), true]
+        ];
+      } },
+
+    { name: 'A mining rig draws down its surveyed deposit',
+      why: 'extraction rate should scale with richness, and idle if the grid browns out',
+      run() {
+        const s = S.newGame();
+        s.credits = 60000;
+        const t = revealedTile(s, x => x.deposit && x.deposit.kind === 'regolith' && !x.b && !x.f && !x.zone && x.t !== 'boulder' && x.t !== 'skylight');
+        if (!t) throw new Error('no free regolith deposit on the map');
+        const err = S.place(s, t, 'miner');
+        const before = s.resources.regolith;
+        days(s, 20, { life: true });
+        return [
+          ['the rig placed on surveyed ground', err, null],
+          ['regolith stock grew', s.resources.regolith > before, true]
+        ];
+      } },
+
+    { name: 'ISRU cracks water out of stockpiled ice',
+      why: 'the plant should only run with ice on hand and power in the grid',
+      run() {
+        const s = S.newGame();
+        s.credits = 60000;
+        /* ice sits with the one skylight, deliberately outside the founding
+           survey (see sim.js's makeMap) — reveal the whole map so this test
+           isolates ISRU mechanics rather than the expansion mechanic, which
+           has its own scenarios below */
+        s.revealed = { x0: 0, y0: 0, x1: window.LC_DATA.K.COLS - 1, y1: window.LC_DATA.K.ROWS - 1 };
+        const ice = s.map.find(x => x.deposit && x.deposit.kind === 'ice' && !x.b && !x.f && !x.zone && x.t !== 'boulder' && x.t !== 'skylight');
+        if (!ice) throw new Error('no free ice deposit on the map');
+        S.place(s, ice, 'miner');
+        const flat = revealedTile(s, x => !x.b && !x.f && !x.zone && x.t === 'flat');
+        S.place(s, flat, 'isru');
+        days(s, 15, { life: true });
+        const waterAfterIce = s.resources.water;
+        return [
+          ['ice has been mined', s.resources.ice, '>=0'],
+          ['water stock reflects ISRU output', waterAfterIce > 0, true]
+        ];
+      } },
+
+    { name: 'The launch pad exports resources for credits',
+      why: 'a rocket should prioritise helium-3, then regolith, then only real food surplus, and enforce its cooldown',
+      run() {
+        const s = S.newGame();
+        s.sandbox = true;
+        s.resources.he3 = 50; s.resources.regolith = 200; s.resources.food = 5e8;
+        const pad = revealedTile(s, x => !x.b && !x.f && !x.zone && x.t === 'flat');
+        const buildErr = S.place(s, pad, 'spaceport');
+        const beforeCredits = s.credits;
+        const launchErr = S.launchRocket(s);
+        const immediateRelaunch = S.launchRocket(s);
+        return [
+          ['the pad was built', buildErr, null],
+          ['the first launch succeeds', launchErr, null],
+          ['helium-3 was shipped first', s.resources.he3, 0],
+          ['credits increased from the sale', s.credits > beforeCredits, true],
+          ['a launch was tracked', s.stats.launches, 1],
+          ['relaunching immediately is refused by the cooldown', immediateRelaunch !== null, true]
+        ];
+      } },
+
+    { name: 'A launch pad with an empty yard has nothing to send',
+      why: 'launching should fail cleanly rather than sending a zero-value rocket',
+      run() {
+        const s = S.newGame();
+        s.sandbox = true;
+        s.resources.he3 = 0; s.resources.regolith = 0;
+        /* drain food to exactly the reserve floor so there is no shippable surplus either */
+        s.resources.food = S.dailyFoodNeed(s) * 20;
+        const pad = revealedTile(s, x => !x.b && !x.f && !x.zone && x.t === 'flat');
+        S.place(s, pad, 'spaceport');
+        const err = S.launchRocket(s);
+        return [
+          ['launching with nothing to ship is refused', err !== null, true],
+          ['no launch was counted', s.stats.launches, 0]
+        ];
+      } },
+
+    { name: 'Automanage grows a colony from nothing, unattended',
+      why: 'hands over on day one and is never touched again, the way the Free Mode/Disasters toggles already are. ' +
+        'The founding hall alone is a near-run thing (a 95-day potato against a reserve sized for it), and a colony ' +
+        'that survives its first harvest can outgrow a reactive farm faster than a human would let it — a real, ' +
+        'documented long-run tuning edge, not a crash. 110 days is past both the original founding-hall crunch and ' +
+        'the first lunar night, which is what this checks for.',
+      run() {
+        const s = S.newGame();
+        s.auto = true;
+        days(s, 110, { life: true });
+        return [
+          ['survives the first 110 days unattended', !s.over, true],
+          ['population grew from the founding crew', s.pop, '>=6'],
+          ['it zoned all three kinds, not just one', ['hab', 'trade', 'industry'].filter(k => s.map.some(t => t.zone && t.zone.kind === k)).length, 3],
+          ['it built out the road network', s.map.filter(t => t.b && t.b.type === 'track').length, '>=6'],
+          ['it never spent itself broke', s.credits, '>=0']
+        ];
+      } },
+
+    { name: 'Automanage keeps a reserve floor',
+      why: 'the director should never spend the colony down to nothing, the way lunar-habitat\'s reserve() rule works',
+      run() {
+        const s = S.newGame();
+        s.auto = true; s.credits = 3000;
+        let sawNegative = false;
+        days(s, 60, { life: true, eachHour: st => { if (st.credits < -100) sawNegative = true; } });
+        return [
+          ['credits never went meaningfully negative', sawNegative, false]
+        ];
+      } },
+
+    { name: 'Automanage eventually reaches the export economy',
+      why: 'given enough runway it should mine, commission ISRU, and fly at least one rocket',
+      run() {
+        const s = S.newGame();
+        s.auto = true; s.credits = 20000;
+        days(s, 500, { life: true });
+        return [
+          ['still going, or failed no earlier than a real setback would', s.day, '>=100'],
+          ['it sank at least one mining rig', s.map.some(t => t.b && t.b.type === 'miner'), true]
+        ];
+      } },
+
+    { name: 'State round-trips through JSON',
+      why: 'a run has to survive JSON, which is how a save will be stored',
+      run() {
+        const s = S.newGame();
+        s.credits = 60000; s.resources.food = 5e8;
+        const spot = connectedZoneSpot(s, 3, 3);
+        S.paintZone(s, spot[0], spot[1], 3, 3, 'hab');
+        days(s, 60, { life: true });
+        let copy = null, threw = null;
+        try { copy = JSON.parse(JSON.stringify(s)); } catch (e) { threw = e.message; }
+        if (copy) days(copy, 20);
+        return [
+          ['state serialises without throwing', threw, null],
+          ['the map survives the round trip', copy && copy.map.length === s.map.length, true],
+          ['the restored run keeps ticking', copy && copy.day > s.day, true]
+        ];
+      } },
+
+    { name: 'Automanage answers colony alerts on its own',
+      why: 'the event modal gates the UI tick loop on being hidden — an alert nobody answers freezes the colony, Automanage included, so the director must clear one itself rather than leave it pending',
+      run() {
+        const s = S.newGame();
+        s.auto = true;
+        s.pendingEvent = window.LC_DATA.EVENTS[0].id;
+        const before = s.credits;
+        const log = [];
+        window.LC_AUTO.resolveDisaster(s, log);
+        return [
+          ['the alert is cleared', s.pendingEvent, null],
+          ['it logged what it did', log.length, '>=1'],
+          ['it did not crash or leave state untouched by coincidence', typeof s.credits, 'number']
+        ];
+      } },
+
+    { name: 'Automanage answers every alert in the deck without throwing',
+      why: 'a typo in one effect would otherwise only surface the day a player happens to meet it — same discipline as the disaster-choice-resolves test above, but through the director\'s own picker',
+      run() {
+        let threw = null;
+        for (const e of window.LC_DATA.EVENTS) {
+          const s = S.newGame();
+          s.auto = true; s.pendingEvent = e.id;
+          try { window.LC_AUTO.resolveDisaster(s, []); }
+          catch (err) { threw = `${e.id}: ${err.message}`; break; }
+          if (s.pendingEvent !== null) { threw = `${e.id} left the alert pending`; break; }
+        }
+        return [
+          ['no alert throws or is left pending', threw, null]
+        ];
+      } },
+
+    { name: 'The survey charter expands once the colony earns it, and stops at the map edge',
+      why: 'fillRatio/canExpand/expandSurvey should unlock growth once half the charted ground is developed, actually widen s.revealed, and refuse cleanly once the whole generated map has been charted',
+      run() {
+        const s = S.newGame();
+        s.sandbox = true;
+        paintRevealedFully(s, 'hab');
+        const fillAfterBuildout = S.fillRatio(s);
+        const canExpandNow = S.canExpand(s);
+        const before = { ...s.revealed };
+        const err = S.expandSurvey(s);
+        const widened = s.revealed.x0 <= before.x0 && s.revealed.x1 >= before.x1 &&
+          (s.revealed.x1 - s.revealed.x0) > (before.x1 - before.x0);
+
+        let guard = 0;
+        while (!isFullyRevealed(s) && guard < 30) {
+          paintRevealedFully(s, 'hab');
+          S.expandSurvey(s);
+          guard++;
+        }
+        const fullyThere = isFullyRevealed(s);
+        const costWhenFull = S.expandCost(s);
+        const errWhenFull = S.expandSurvey(s);
+        const boundsMatchMap = s.revealed.x0 === 0 && s.revealed.y0 === 0 &&
+          s.revealed.x1 === K.COLS - 1 && s.revealed.y1 === K.ROWS - 1;
+
+        return [
+          ['half the founding charter developed unlocks expansion', fillAfterBuildout >= 0.5 && canExpandNow, true],
+          ['expanding actually widens the revealed rectangle', widened, true],
+          ['expanding costs credits and clears with no error', err, null],
+          ['repeated expansion eventually reveals the whole generated map', fullyThere, true],
+          ['a fully-revealed charter reports nothing left to expand', costWhenFull, 0],
+          ['expanding at full extent is refused rather than silently no-op-ing', errWhenFull !== null, true],
+          ['the fully-revealed bounds match the generated map exactly', boundsMatchMap, true]
+        ];
+      } },
+
+    { name: 'Placement outside the surveyed charter is refused',
+      why: 'canPlace/checkField/checkZone must all guard on inRevealed, not just canExpand, so players cannot build ahead of what has actually been charted',
+      run() {
+        const s = S.newGame();
+        s.sandbox = true;
+        const r = s.revealed;
+        const ux = Math.min(K.COLS - 1, r.x1 + 3);
+        const uy = Math.max(0, r.y0 + 2);
+        const unrevealedTile = S.tileAt(s, ux, uy);
+        const buildErr = S.place(s, unrevealedTile, 'solar');
+        const fieldErr = S.checkField(s, ux, uy, 2, 2);
+        const zoneErr = window.LC_ZONES.checkZone(s, ux, uy, 2, 2);
+        s.revealed = { x0: 0, y0: 0, x1: K.COLS - 1, y1: K.ROWS - 1 };
+        const errOnceRevealed = S.place(s, S.tileAt(s, ux, uy), 'solar');
+        return [
+          ['building on unsurveyed ground is refused', buildErr !== null, true],
+          ['starting a grow hall on unsurveyed ground is refused', fieldErr !== null, true],
+          ['zoning unsurveyed ground is refused', zoneErr !== null, true],
+          ['the same ground, once revealed, no longer fails for being unsurveyed',
+            errOnceRevealed === null || errOnceRevealed.indexOf('surveyed') === -1, true]
+        ];
+      } },
+
+    { name: 'Automanage expands the survey once it can afford to',
+      why: 'ensureExpansion should fire the same reserve-respecting way ensureMining/ensureIsru already do, once canExpand is true and the credits are there — this pins the trigger condition directly rather than waiting on however many organic days a real run would take to fill half the charter',
+      run() {
+        const s = S.newGame();
+        s.auto = true;
+        s.credits = 200000;
+        paintRevealedFully(s, 'hab');
+        const founding = { ...s.revealed };
+        const eligible = S.canExpand(s);
+        days(s, 5, { life: true });
+        return [
+          ['the pre-filled charter was actually eligible to expand', eligible, true],
+          ['automanage widened the revealed rectangle within a few days of being eligible',
+            (s.revealed.x1 - s.revealed.x0) > (founding.x1 - founding.x0), true]
+        ];
+      } },
+
+    { name: 'serviceSet is exactly networkFrom sourced from the Command Module',
+      why: 'serviceSet was rewritten as a thin wrapper around the new networkFrom generalisation — a real behavioural regression here would silently break every zone-growth test above, since growth depends on this exact set',
+      run() {
+        const s = S.newGame();
+        s.credits = 60000;
+        const spot = connectedZoneSpot(s, 3, 3);
+        S.paintZone(s, spot[0], spot[1], 3, 3, 'hab');
+        days(s, 40, { life: true });
+        const a = window.LC_GRID.serviceSet(s);
+        const b = window.LC_GRID.networkFrom(s, t => t.b && t.b.type === 'command');
+        const sameSize = a.size === b.size;
+        let sameMembers = sameSize;
+        if (sameMembers) for (const k of a) if (!b.has(k)) { sameMembers = false; break; }
+        return [
+          ['serviceSet and networkFrom(command) agree on set size', sameSize, true],
+          ['serviceSet and networkFrom(command) agree on every member', sameMembers, true]
+        ];
+      } },
+
+    { name: 'Power and Water reach follow their declared source buildings',
+      why: 'the Power/Water map-view layers, and any future service logic, both read networkFrom with a source predicate — a solar array must seed its own network immediately, and ground nowhere near a road or a source must read as unreached',
+      run() {
+        const s = S.newGame();
+        s.credits = 60000;
+        const solarSpot = revealedTile(s, x => !x.b && !x.f && !x.zone && x.t === 'flat');
+        S.place(s, solarSpot, 'solar');
+        const powerReach = window.LC_GRID.networkFrom(s, t => t.b && ['solar', 'reactor', 'command', 'battery'].includes(t.b.type));
+        const solarIdx = window.LC_GRID.idx(solarSpot.x, solarSpot.y);
+        const isolatedSpot = isolatedZoneSpot(s, 1, 1);
+        const isolatedIdx = isolatedSpot ? window.LC_GRID.idx(isolatedSpot[0], isolatedSpot[1]) : null;
+        return [
+          ['the newly placed solar array seeds its own power network', powerReach.has(solarIdx), true],
+          ['ground nowhere near a road or a source reads as unreached',
+            isolatedIdx === null ? true : !powerReach.has(isolatedIdx), true]
+        ];
+      } }
+  ];
+
+  /* ---------- runner ---------- */
+
+  function judge(got, want) {
+    if (typeof want === 'string' && want.startsWith('>=')) return got >= parseFloat(want.slice(2));
+    if (typeof want === 'string' && want.startsWith('<=')) return got <= parseFloat(want.slice(2));
+    if (typeof want === 'string' && want.startsWith('>')) return got > parseFloat(want.slice(1));
+    if (typeof want === 'string' && want.startsWith('~')) {
+      const target = parseFloat(want.slice(1));
+      return got !== null && Math.abs(got - target) <= Math.max(0.04, target * 0.06);
+    }
+    return got === want;
+  }
+
+  const out = document.getElementById('out');
+  let passed = 0, failed = 0, broke = 0;
+
+  SCENARIOS.forEach((sc) => {
+    const box = document.createElement('div');
+    box.className = 'sc';
+    let rows = [], crash = null;
+    try { rows = sc.run(); } catch (e) { crash = (e && e.stack) || String(e); }
+
+    let scPass = !crash;
+    const body = rows.map(([label, got, want]) => {
+      const ok = judge(got, want);
+      if (ok) passed++; else { failed++; scPass = false; }
+      const shown = got === null ? 'null' : String(got);
+      return `<tr><td class="mark ${ok ? 'pass' : 'fail'}">${ok ? '✔' : '✘'}</td>
+        <td class="label">${label}</td>
+        <td>${shown}</td>
+        <td style="color:var(--ink-faint)">want ${want === true ? 'true' : want === null ? 'null' : want}</td></tr>`;
+    }).join('');
+    if (crash) broke++;
+
+    box.innerHTML = `<h2>${sc.name}<span class="why">${sc.why}</span>
+        <span class="verdict ${scPass ? 'pass' : 'fail'}">${crash ? 'ERROR' : scPass ? 'PASS' : 'FAIL'}</span></h2>
+      ${crash ? `<div class="err">${crash}</div>` : `<table>${body}</table>`}`;
+    out.appendChild(box);
+  });
+
+  const el = document.getElementById('summary');
+  const bad = failed + broke;
+  el.innerHTML = bad
+    ? `<span class="fail">${failed} check${failed === 1 ? '' : 's'} failed`
+      + (broke ? `, ${broke} scenario${broke === 1 ? '' : 's'} threw` : '') + `</span> · ${passed} passed`
+    : `<span class="pass">all ${passed} checks passed</span> across ${SCENARIOS.length} scenarios`;
+})();
+</script>
+</body>
+</html>

@@ -148,6 +148,87 @@ farm/
   js/ui.js          tools, camera, panels, main loop, saving
 ```
 
+## Artemis City
+
+`city/` — you found a colony on the rim of Shackleton crater, near-permanent sun
+for the array field and the permanently shadowed floor below holding the water
+ice the whole Artemis program is chasing.
+
+Where Lunar Farm is one plot with one purpose, Artemis City is a SimCity2000-style
+zoning game: you paint ground, not finished buildings, and the colony develops it
+on its own.
+
+- **Zone Habitation, Trade or Industrial** ground by dragging a rectangle. Each
+  tile inside grows independently through five stages of density, as long as it
+  is serviced by a road reaching the Command Module, demand for that zone type is
+  positive, and the land underneath it — terrain, hazard proximity, closeness to
+  a grow hall — supports it. The three zones chase each other the way a real RCI
+  loop does: Habitation wants jobs to outrun population, Trade and Industry each
+  want population to outrun their own capacity.
+- **The Agriculture zone is not a zone** — it is Lunar Farm's grow hall, ported
+  directly: drag out a hall, sow it, water, feed, harvest. It is the one thing
+  that feeds the colony rather than developing on its own, and it uses the same
+  soil-conditioning mechanic as `farm/` and ten of its thirteen real spaceflight
+  crops.
+- **Drag out road and rail** with the same press-drag-release, longer-axis-first
+  tool as Lunar Farm's track.
+- **Mine what the survey found.** Regolith, ice and helium-3 are surveyed in at
+  founding — ice concentrated on the permanently shadowed floor, helium-3 rare
+  and patchy on sun-exposed ground, matching the real geology as far as a
+  playable map allows. A Mining Rig only sits on a surveyed deposit and draws
+  from it at a rate set by richness; an ISRU plant cracks water out of stockpiled
+  ice.
+- **Build the Launch Pad** and fly rockets to Earth: each launch loads
+  helium-3 first, then bulk regolith, then any food genuinely surplus to a
+  twenty-day reserve, and converts the payload to credits on a cooldown.
+- **Ten solar-flare-to-moonquake colony alerts**, each a choice rather than a
+  dice roll, and a charter of milestones tracking the colony's growth from its
+  first zoned tile to its tenth rocket.
+
+Three switches sit in the header, same shape as Lunar Farm's:
+
+- **Free Mode** waives every cost, for experimenting with layouts.
+- **Disasters** turns the random-event deck off entirely, if you would rather
+  build without it.
+- **Automanage** hands the colony to a director that zones, roads, powers,
+  mines and farms it without you — adapted from the priority-ladder autopilot
+  in [Lunar Habitat](https://dr-richard-barker.github.io/lunar-arcade/games/lunar-habitat/).
+  It survives its first hundred-plus days unattended and builds a real, if
+  imperfect, city; a population boom released all at once by a long-suppressed
+  migration backlog can still outrun it in the long run, which is a real,
+  documented tuning edge rather than a hidden one.
+
+Same **Report** dashboard and **League** scoring as Lunar Farm, reading the
+colony's own telemetry — population, housing capacity, jobs, credits, food,
+oxygen, water and stored power over time.
+
+### Testing
+
+Same discipline as `farm/`: `city/js/{data,grid,zones,sim,autopilot}.js` have no
+DOM references, so `city/harness.html` drives the whole simulation — map
+generation, road connectivity, zoning and land value, population and migration,
+Free Mode, the disaster deck, mining and the export economy, and the Automanage
+director — headlessly, over hundreds of simulated days. Re-run it after any
+change to those five files.
+
+### Layout
+
+```
+city/
+  index.html        game shell, help text
+  harness.html       headless simulation tests — open it in a browser
+  style.css
+  js/data.js         zones, buildings, deposits, events, milestones
+  js/grid.js          road-network connectivity (BFS from the Command Module)
+  js/zones.js          RCI-style demand, land value, per-tile growth/decay
+  js/sim.js             the simulation — one tick is one hour
+  js/autopilot.js        the Automanage director
+  js/render.js             isometric canvas renderer, procedural throughout
+  js/dashboard.js           the report dashboard
+  js/league.js               scoring, the league table, export and import
+  js/ui.js                    tools, camera, panels, main loop, saving
+```
+
 ## On the crop list
 
 The crops are real ones: `'Outredgeous'` red romaine, mizuna and Tokyo Bekana from
@@ -163,23 +244,28 @@ relationships behave qualitatively as they should, but nothing here should be ci
 
 ## The rest of the arcade
 
-Lunar Farm is one game in a set. The **[CoSE Arcade](https://dr-richard-barker.github.io/cose-arcade/)**
-is the front door; the **[Lunar Arcade](https://dr-richard-barker.github.io/lunar-arcade/)** holds the
+Lunar Farm and Artemis City are two games in a set. The
+**[CoSE Arcade](https://dr-richard-barker.github.io/cose-arcade/)** is the front door;
+the **[Lunar Arcade](https://dr-richard-barker.github.io/lunar-arcade/)** holds the
 other lunar titles, including
 [Lunar Habitat](https://dr-richard-barker.github.io/lunar-arcade/games/lunar-habitat/) — the
-vertical-builder formula upended, towering up for sunlight or digging down into the shielding — and
+vertical-builder formula upended, towering up for sunlight or digging down into the shielding, and
+the direct source of Artemis City's Automanage director — and
 [The Boring Mining Game](https://dr-richard-barker.github.io/lunar-arcade/games/boring-mining/), an ISRU
 swarm where you pilot one drone and lay scent beacons the rest follow.
 
 Those two cover the SimTower and SimAnt shapes, so this repository does not duplicate them. The
-arcade's own **Regolith Farm** concept has been folded into this game rather than built separately —
-its regolith-into-soil premise is the bed-conditioning mechanic above.
+arcade's own **Regolith Farm** concept has been folded into Lunar Farm rather than built
+separately — its regolith-into-soil premise is the bed-conditioning mechanic above.
 
 ## Provenance
 
-Written from scratch. These games take their shape from *SimFarm*, *SimTower* and
-*SimAnt* (Maxis, 1993–94) and share no code, art or data with them. None of those
-games is distributed in this repository.
+Written from scratch. Lunar Farm takes its shape from *SimFarm* (Maxis, 1993) and Artemis City
+from *SimCity 2000* (Maxis, 1993) — an open-source SimCity2000 clone, [OpenSC2K](https://github.com/nicholas-ochoa/OpenSC2K),
+was surveyed early on as a possible base and rejected: it is GPL-3.0, its own simulation was never
+finished, and its art pipeline requires proprietary game files that cannot be redistributed. Nothing
+here shares code, art or data with any Maxis game, and none of those games is distributed in this
+repository.
 
 ## Licence
 

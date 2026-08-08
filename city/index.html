@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Artemis City — Shackleton Rim Colony</title>
+<meta name="description" content="A lunar city-building sim in the spirit of SimCity 2000: zone a colony on the rim of Shackleton crater, mine the permanently shadowed floor below for ice, and launch rockets home.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🏙️</text></svg>">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="hud">
+  <div class="brand">
+    <span class="mark">🏙️</span>
+    <div>
+      <strong>ARTEMIS CITY</strong>
+      <small>Shackleton Rim Colony</small>
+    </div>
+  </div>
+  <div class="chips" id="chips"></div>
+  <div class="clockbox">
+    <div class="clock"><span id="dayN">Day 1</span> <span id="clockT">06:00</span></div>
+    <div class="phase" id="phase">—</div>
+    <div class="speeds">
+      <button data-speed="0" class="sp">❚❚</button>
+      <button data-speed="1" class="sp on">1×</button>
+      <button data-speed="4" class="sp">4×</button>
+      <button data-speed="12" class="sp">12×</button>
+    </div>
+    <div class="modes">
+      <button id="btnAuto" class="mode" title="Let a colony director build and manage growth on its own">Automanage</button>
+      <button id="btnReport" class="mode" title="Telemetry report">Report</button>
+      <button id="btnLeague" class="mode" title="Scores from past runs">League</button>
+      <button id="btnDisasters" class="mode on" title="Toggle the disaster deck on or off">Disasters</button>
+      <button id="btnSandbox" class="mode" title="Build anything at no cost">Free Mode</button>
+    </div>
+  </div>
+</header>
+
+<main>
+  <nav class="palette">
+    <div class="palgroup">
+      <h4>Operate</h4>
+      <div class="tools" id="opTools"></div>
+    </div>
+    <div class="palgroup">
+      <h4>Roads</h4>
+      <div class="tools" id="roadsTools"></div>
+    </div>
+    <div class="palgroup">
+      <h4>Zones</h4>
+      <div class="tools" id="zonesTools"></div>
+    </div>
+    <div class="palgroup">
+      <h4>Power</h4>
+      <div class="tools" id="powerTools"></div>
+    </div>
+    <div class="palgroup">
+      <h4>Mining &amp; Spaceport</h4>
+      <div class="tools" id="miningTools"></div>
+    </div>
+  </nav>
+
+  <section class="stage">
+    <div class="seg" id="viewBar">
+      <button data-view="zones" class="on">Zones</button>
+      <button data-view="roads">Roads</button>
+      <button data-view="power">Power</button>
+      <button data-view="water">Water</button>
+      <button data-view="value">Land Value</button>
+      <button data-view="density">Density</button>
+      <button data-view="resources">Resources</button>
+    </div>
+    <canvas id="cv"></canvas>
+    <div class="statusbar"><span id="toolHint">Inspect — click any tile to read it.</span><span id="viewLegend"></span></div>
+  </section>
+
+  <aside class="panel">
+    <nav class="tabs">
+      <button class="tab on" data-tab="info">Tile</button>
+      <button class="tab" data-tab="colony">Colony</button>
+      <button class="tab" data-tab="goals">Charter</button>
+      <button class="tab" data-tab="log">Log</button>
+    </nav>
+    <div class="tabpane on" id="pane-info">
+      <div id="tileDetail" class="empty">Click a tile on the surface.</div>
+      <div class="actions" id="tileActions"></div>
+    </div>
+    <div class="tabpane" id="pane-colony"></div>
+    <div class="tabpane" id="pane-goals"></div>
+    <div class="tabpane" id="pane-log"></div>
+    <footer class="panelfoot">
+      <button id="btnHelp" class="ghost">How to play</button>
+      <button id="btnSave" class="ghost">Save</button>
+      <button id="btnReset" class="ghost danger">New colony</button>
+    </footer>
+  </aside>
+</main>
+
+<div class="modal" id="mPlant" hidden>
+  <div class="sheet wide">
+    <button class="xclose" data-close>&times;</button>
+    <h2>Seed stock</h2>
+    <p class="lede" id="plantLede">Choose what goes in the hall.</p>
+    <div class="croplist" id="cropList"></div>
+    <div class="sheetfoot"><button class="ghost" data-close>Cancel</button></div>
+  </div>
+</div>
+
+<div class="modal" id="mEvent" hidden>
+  <div class="sheet">
+    <div class="eyebrow">Colony alert</div>
+    <h2 id="evTitle"></h2>
+    <p id="evText"></p>
+    <div class="choices" id="evChoices"></div>
+  </div>
+</div>
+
+<div class="modal" id="mHelp" hidden>
+  <div class="sheet wide scroll">
+    <button class="xclose" data-close>&times;</button>
+    <h2>How to play</h2>
+
+    <h3>The short version</h3>
+    <p>You are founding a lunar city on the rim of Shackleton crater — near-constant sun for
+      the array field, and the permanently shadowed floor below holding the water ice the
+      whole Artemis program is chasing. Zone ground for people to live and work in, run roads
+      to keep it serviced, and the city grows itself: you are not placing finished buildings,
+      you are setting the conditions for density to rise on its own.</p>
+
+    <h3>Zoning, not building</h3>
+    <p>Drag out <strong>Habitation</strong>, <strong>Trade</strong> or <strong>Industrial</strong>
+      zoning over open ground. Each tile inside develops independently, advancing through five
+      stages of density as long as it is serviced by a road reaching the Command Module, demand
+      for that zone type is positive, and the land value underneath it — terrain, hazard
+      proximity, closeness to a grow hall — supports it. Losing the road connection for too long
+      costs a tile its density, the same way real neglect would.</p>
+
+    <h3>The three zones chase each other</h3>
+    <p>Habitation wants jobs to outrun population. Trade and Industry each want population to
+      outrun their own capacity. Zone only housing and nobody has anywhere to work; zone only
+      industry and nobody is there to staff it. A city that grows evenly needs all three.</p>
+
+    <h3>Agriculture is not a zone</h3>
+    <p>The <strong>Grow Hall</strong> tool works exactly like Lunar Farm: drag out a hall, plant
+      one crop across the whole footprint, tend it, harvest it. It is the one building that
+      feeds the colony directly rather than developing on its own — the same closed-loop
+      farming this city grew out of.</p>
+
+    <h3>Mining and the launch pad</h3>
+    <p>The survey has already found regolith, ice and helium-3 out there — the Tile panel shows
+      what is under your cursor. A <strong>Mining Rig</strong> only sits on surveyed ground and
+      draws from whatever is there; an <strong>ISRU plant</strong> cracks water out of stockpiled
+      ice. Once you have a yard worth shipping, raise the <strong>Launch Pad</strong> and launch:
+      it loads helium-3 first, then regolith, then any real food surplus, and converts the
+      payload to credits on a cooldown — a rocket to Earth, same as the real cadence.</p>
+
+    <h3>The three switches</h3>
+    <p><strong>Free Mode</strong> waives every cost, for experimenting with layouts.
+      <strong>Disasters</strong> toggles the random-event deck — solar flares, micrometeorite
+      strikes, moonquakes and the rest — off entirely if you would rather build without them.
+      <strong>Automanage</strong> hands the colony to a director that builds and grows it for you.</p>
+
+    <h3>Credits</h3>
+    <p>An original game, in the spirit of Maxis' <em>SimCity 2000</em> (1993) but sharing no
+      code or art with it — the simulation, rendering and every number here are written from
+      scratch. It continues directly from Lunar Farm: the crop roster, soil-conditioning
+      mechanic and closed-loop life support are the same, just one zone among several now.</p>
+
+    <div class="sheetfoot"><button class="ghost" data-close>Close</button></div>
+  </div>
+</div>
+
+<div class="modal" id="mOver" hidden>
+  <div class="sheet">
+    <div class="eyebrow">Run ended</div>
+    <h2 id="overTitle">The colony failed</h2>
+    <p id="overText"></p>
+    <div id="overStats" class="statgrid"></div>
+    <div class="sheetfoot">
+      <button class="ghost" id="overLeague">File to the league</button>
+      <button class="primary" id="overRestart">Start again</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="mReport" hidden>
+  <div class="sheet report scroll">
+    <button class="xclose" data-close>&times;</button>
+    <div id="reportBody"></div>
+    <div class="sheetfoot"><button class="ghost" data-close>Close</button></div>
+  </div>
+</div>
+
+<div class="modal" id="mLeague" hidden>
+  <div class="sheet report scroll">
+    <button class="xclose" data-close>&times;</button>
+    <div id="leagueBody"></div>
+    <div class="sheetfoot"><button class="ghost" data-close>Close</button></div>
+  </div>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+<div class="dtip" id="dtip" hidden></div>
+
+<script src="js/data.js"></script>
+<script src="js/grid.js"></script>
+<script src="js/zones.js"></script>
+<script src="js/sim.js"></script>
+<script src="js/autopilot.js"></script>
+<script src="js/render.js"></script>
+<script src="js/dashboard.js"></script>
+<script src="js/league.js"></script>
+<script src="js/ui.js"></script>
+</body>
+</html>
