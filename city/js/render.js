@@ -256,6 +256,12 @@
 
   const ZONE_COLOUR = { hab: '#5fc9ff', trade: '#ffb84d', industry: '#c98bff' };
 
+  /* A stable per-tile pick among 3 shape/prop variants, reusing the same
+     t.v per-tile seed the terrain speckle already reads — so a block of
+     same-kind, same-stage zone tiles doesn't render as identical copies of
+     one building, the way a city of dozens of hab pods otherwise would. */
+  const variant = t => Math.floor(((t.v * 977) % 1) * 3);
+
   /* ---------- roads ---------- */
 
   function drawRoad(ctx, s, t, l) {
@@ -349,9 +355,10 @@
 
   const ZONE_Z = st => 14 + st * 13;
 
-  function drawZoneBuilding(ctx, t, l, sv, night) {
+  function drawZoneBuilding(ctx, s, t, l, sv, night) {
     const { x, y, zone: z } = t;
     const Z = ZONE_Z(z.stage);
+    const v = variant(t);
     groundShadow(ctx, x + 0.08, y + 0.08, 0.84, 0.84, Z, sv);
     contact(ctx, x, y, 1, 1);
     const base = ZONE_COLOUR[z.kind];
@@ -359,10 +366,17 @@
     if (z.kind === 'hab') {
       box(ctx, x + 0.16, y + 0.16, 0.68, 0.68, Z, '#c7cdd9', l,
         { stroke: grey(150, l), lw: 1.1, top: tone(base, l, 0.5) });
+      /* a porch/airlock nub even at bare stage 1, so a freshly-grown tile
+         reads as a small module rather than an unmarked box */
+      if (z.stage >= 1) {
+        const px = x + (v === 0 ? 0.10 : 0.80), py = y + (v === 1 ? 0.10 : 0.80);
+        box(ctx, px - 0.06, py - 0.06, 0.12, 0.12, Z * 0.5, '#aab1c0', l, { noRim: true });
+      }
       if (z.stage >= 2) {
+        const winCount = 2 + (v % 2);
         ctx.strokeStyle = `rgba(90,100,118,${0.5 * Math.max(l, 0.5)})`; ctx.lineWidth = 1.1;
-        for (let i = 1; i < 3; i++) {
-          const u = x + 0.16 + 0.68 * i / 3;
+        for (let i = 1; i < winCount + 1; i++) {
+          const u = x + 0.16 + 0.68 * i / (winCount + 1);
           const a = iso(u, y + 0.16), b = iso(u, y + 0.84);
           ctx.beginPath(); ctx.moveTo(a.x, a.y - Z); ctx.lineTo(b.x, b.y - Z * 0.4); ctx.stroke();
         }
@@ -377,6 +391,17 @@
           ctx.fillStyle = '#ffd166';
           ctx.beginPath(); ctx.arc(q.x, gy, 2.3, 0, 7); ctx.fill();
         }
+        /* a thin ground-level walkway to any same-stage-or-further hab
+           neighbour — reads as a connected district rather than isolated
+           pods once a block has grown in together */
+        ctx.strokeStyle = `rgba(160,170,190,${0.35 * Math.max(l, 0.5)})`; ctx.lineWidth = 1.6;
+        for (const [dx, dy] of [[1, 0], [0, 1]]) {
+          const n = s && S.tileAt(s, x + dx, y + dy);
+          if (!n || !n.zone || n.zone.kind !== 'hab' || n.zone.stage < 2) continue;
+          const a = iso(x + 0.5 + dx * 0.16, y + 0.5 + dy * 0.16);
+          const b = iso(x + 0.5 + dx * 0.84, y + 0.5 + dy * 0.84);
+          ctx.beginPath(); ctx.moveTo(a.x, a.y - 2); ctx.lineTo(b.x, b.y - 2); ctx.stroke();
+        }
       }
       if (z.stage >= 4) {
         const mast = iso(x + 0.22, y + 0.22);
@@ -389,7 +414,8 @@
       box(ctx, x + 0.14, y + 0.14, 0.72, 0.72, Z * 0.85, '#b8ab95', l,
         { stroke: grey(140, l), lw: 1.1, top: tone('#3a5a7a', l, 0.7) });
       if (z.stage >= 2) {
-        box(ctx, x + 0.06, y + 0.60, 0.22, 0.22, Z * 0.35, base, l, { noRim: true });
+        const ax = v === 2 ? 0.72 : 0.06;
+        box(ctx, x + ax, y + 0.60, 0.22, 0.22, Z * 0.35, base, l, { noRim: true });
         if (night) {
           ctx.fillStyle = `rgba(255,184,77,${0.5 + beat(900) * 0.3})`;
           const q = iso(x + 0.5, y + 0.86);
@@ -398,6 +424,17 @@
       }
       if (z.stage >= 3) {
         box(ctx, x + 0.70, y + 0.10, 0.20, 0.20, Z * 0.3, base, l, { noRim: true });
+        /* a lit marquee sign over the entrance — the exchange floor's
+           storefront, distinct from the plain awning glow above */
+        const mq = iso(x + 0.30 + v * 0.06, y + 0.10);
+        ctx.fillStyle = night ? `rgba(255,209,102,${0.55 + beat(700) * 0.25})` : 'rgba(200,210,225,0.5)';
+        ctx.fillRect(mq.x - 10, mq.y - Z * 0.95, 20, 4);
+        /* a loading-dock crate stack at the back corner */
+        const cq = iso(x + 0.14, y + 0.86);
+        ctx.fillStyle = shade(base, -25);
+        ctx.fillRect(cq.x - 6, cq.y - Z * 0.22 - 6, 12, 6);
+        ctx.fillStyle = shade(base, -10);
+        ctx.fillRect(cq.x - 5, cq.y - Z * 0.22 - 11, 10, 5);
       }
     } else { // industry
       box(ctx, x + 0.20, y + 0.20, 0.60, 0.60, Z * 0.8, '#8f96a3', l,
@@ -419,10 +456,22 @@
           ctx.fillRect(q.x - 6, q.y - Z * 0.65, 6, 6);
         }
         ctx.restore();
+        /* a second stack, offset by variant so a row of stage-3+ tiles
+           doesn't read as one repeated silhouette */
+        const p2 = iso(x + 0.24 + v * 0.06, y + 0.18);
+        ctx.strokeStyle = tone(base, l, 0.75); ctx.lineWidth = 2.2;
+        ctx.beginPath(); ctx.moveTo(p2.x, p2.y); ctx.lineTo(p2.x, p2.y - Z * 0.52); ctx.stroke();
+        /* a stockpile of raw material at the base, same technique as the
+           mining rig's spoil pile */
+        const sp = iso(x + 0.82, y + 0.82);
+        ctx.fillStyle = shade('#9a9086', -20);
+        ctx.beginPath(); ctx.ellipse(sp.x, sp.y, 10, 4.6, 0, 0, 7); ctx.fill();
+        ctx.fillStyle = '#9a9086';
+        ctx.beginPath(); ctx.ellipse(sp.x, sp.y - 2.5, 7, 3.4, 0, 0, 7); ctx.fill();
       }
       if (z.stage >= 4) {
         const p = iso(x + 0.82, y + 0.18);
-        const flick = 0.5 + beat(180) * 0.5;
+        const flick = 0.5 + beat(180 + v * 70) * 0.5;
         ctx.fillStyle = `rgba(255,140,80,${0.5 * flick})`;
         ctx.beginPath(); ctx.ellipse(p.x, p.y - Z * 0.9 - 6, 4, 8 * flick, 0, 0, 7); ctx.fill();
         ctx.fillStyle = `rgba(255,209,102,${0.7 * flick})`;
@@ -859,7 +908,7 @@
         fillDiamond(ctx, tx + 0.05, ty + 0.05, 0.9, 0.9);
         drawSurveyStake(ctx, t, light, t.zone.kind);
       } else {
-        drawZoneBuilding(ctx, t, light, sv, night);
+        drawZoneBuilding(ctx, s, t, light, sv, night);
       }
     });
 

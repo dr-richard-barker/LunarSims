@@ -175,7 +175,8 @@ td.mark{width:34px;text-align:center}
           ['starting credits are positive', s.credits > 0, true],
           ['the founding hall is planted', s.fields[0] && !!s.fields[0].crop, true],
           ['some regolith was surveyed on the map', s.map.some(t => t.deposit && t.deposit.kind === 'regolith'), true],
-          ['some ice was surveyed near the shadowed floor', s.map.some(t => t.deposit && t.deposit.kind === 'ice'), true]
+          ['some ice was surveyed near the shadowed floor', s.map.some(t => t.deposit && t.deposit.kind === 'ice'), true],
+          ['disasters are off by default — the player opts in, not out', s.disastersOn, false]
         ];
       } },
 
@@ -669,6 +670,204 @@ td.mark{width:34px;text-align:center}
           ['the newly placed solar array seeds its own power network', powerReach.has(solarIdx), true],
           ['ground nowhere near a road or a source reads as unreached',
             isolatedIdx === null ? true : !powerReach.has(isolatedIdx), true]
+        ];
+      } },
+
+    { name: 'The self-sufficiency signal combines power, food and the daily books',
+      why: 'each leg is read from data the sim already computes elsewhere (s.brownoutNow, the food reserve, the zone income/upkeep tally) — this pins the combination logic directly against a real developed colony rather than hoping a long organic run happens to land in every state on the day it is sampled',
+      run() {
+        const s = S.newGame();
+        s.sandbox = true; s.resources.food = 5e8;
+        const hab = connectedZoneSpot(s, 4, 4);
+        S.paintZone(s, hab[0], hab[1], 4, 4, 'hab');
+        const trade = connectedZoneSpot(s, 4, 4);
+        S.paintZone(s, trade[0], trade[1], 4, 4, 'trade');
+        days(s, 200, { life: true });
+
+        s.brownoutNow = false; s.resources.food = S.dailyFoodNeed(s) * 20;
+        S.endOfDay(s, []);
+        const healthy = s.history[s.history.length - 1].selfSufficient;
+
+        s.brownoutNow = true; s.resources.food = S.dailyFoodNeed(s) * 20;
+        S.endOfDay(s, []);
+        const powerFail = s.history[s.history.length - 1].selfSufficient;
+
+        s.brownoutNow = false; s.resources.food = 10;
+        S.endOfDay(s, []);
+        const foodFail = s.history[s.history.length - 1].selfSufficient;
+
+        return [
+          ['power holding, fed, and the books positive reads self-sufficient', healthy, true],
+          ['a browned-out grid is not self-sufficient even if fed and solvent', powerFail, false],
+          ['a starving colony is not self-sufficient even with power and income', foodFail, false]
+        ];
+      } },
+
+    { name: 'The self-sufficiency milestone trips at exactly ten straight days',
+      why: 'a streak read from history should trip exactly at ten, not one day early, late, or across a broken streak — pins the boundary directly on the milestone\'s own predicate rather than trusting a long run to land on it',
+      run() {
+        const ms = window.LC_DATA.MILESTONES.find(m => m.id === 'selfsufficient10');
+        const s = S.newGame();
+        s.history = [];
+        for (let i = 0; i < 9; i++) s.history.push({ d: i, selfSufficient: true });
+        const before = ms.done(s);
+        s.history.push({ d: 9, selfSufficient: true });
+        const after = ms.done(s);
+        s.history[4].selfSufficient = false;
+        const broken = ms.done(s);
+        return [
+          ['nine consecutive days is not yet ten', before, false],
+          ['ten consecutive self-sufficient days trips it', after, true],
+          ['a single broken day in the last ten keeps it from tripping', broken, false]
+        ];
+      } },
+
+    { name: 'Automanage pauses further zoning once established but losing money, and keeps chasing revenue',
+      why: 'growZoning should pause when the trailing credit trend has gone negative post-established — more zoning only adds upkeep to books already going backwards — and this has to be an active pause, not just "nothing to zone": the identical setup with a healthy trend must still zone normally, and mining pursuit must be unaffected either way',
+      run() {
+        function setup() {
+          const s = S.newGame();
+          s.auto = true; s.credits = 50000; s.day = 40; // sunlit half of the cycle, and > 20
+          for (let i = 0; i < 6; i++) {
+            const t = revealedTile(s, x => !x.b && !x.f && !x.zone && x.t === 'flat');
+            if (t) S.place(s, t, 'solar');
+          }
+          return s;
+        }
+        const sBad = setup();
+        sBad.history = [];
+        for (let i = 0; i < 7; i++) sBad.history.push({ d: i, credits: 20000 - i * 200 });
+        const establishedNow = sBad.day > 20 && S.generation(sBad).total > S.gridDemand(sBad).total * 1.4;
+        const zonedBefore = sBad.map.filter(t => t.zone).length;
+        window.LC_AUTO.autoManage(sBad, []);
+        const zonedAfterBad = sBad.map.filter(t => t.zone).length;
+        const minedAfterBad = S.count(sBad, 'miner');
+
+        const sGood = setup();
+        sGood.history = [];
+        for (let i = 0; i < 7; i++) sGood.history.push({ d: i, credits: 20000 + i * 200 });
+        window.LC_AUTO.autoManage(sGood, []);
+        const zonedAfterGood = sGood.map.filter(t => t.zone).length;
+
+        return [
+          ['the scenario actually reached "established"', establishedNow, true],
+          ['a negative trend keeps it from adding new zoning this step', zonedAfterBad, zonedBefore],
+          ['the identical setup with a healthy trend still zones normally', zonedAfterGood, '>0'],
+          ['mining pursuit is unaffected by the credit trend', minedAfterBad, '>=1']
+        ];
+      } },
+
+    { name: 'Upgrades cost credits, refuse when unaffordable, and are free under Free Mode',
+      why: 'buyUpgrade follows the same validate-then-cost-check shape as every other purchase in this game — pin the contract directly rather than trusting it by inspection',
+      run() {
+        const s = S.newGame();
+        s.credits = 0;
+        const errPoor = S.buyUpgrade(s, 'dust_shield');
+        s.credits = 60000;
+        const before = s.credits;
+        const errOk = S.buyUpgrade(s, 'led_retrofit');
+        const spent = before - s.credits;
+        const errDup = S.buyUpgrade(s, 'led_retrofit');
+
+        const s2 = S.newGame();
+        s2.sandbox = true; s2.credits = 0;
+        const errFree = S.buyUpgrade(s2, 'dust_shield');
+
+        return [
+          ['buying without enough credits is refused', errPoor !== null, true],
+          ['buying with enough credits succeeds', errOk, null],
+          ['buying actually spent the listed cost', spent, S.upgradeById('led_retrofit').cost],
+          ['buying an already-owned upgrade again is refused', errDup !== null, true],
+          ['buying costs nothing under Free Mode', errFree, null],
+          ['Free Mode buying left credits untouched', s2.credits, 0]
+        ];
+      } },
+
+    { name: 'Each upgrade\'s effect is actually wired, not just purchasable',
+      why: 'a typo in one effect\'s wiring would otherwise only surface the day a player happens to own it and meet the condition — same discipline already applied to the disaster deck',
+      run() {
+        // dust_shield
+        const sDust = S.newGame(); sDust.credits = 60000; sDust.flags.dust = 5;
+        const dustBefore = S.dustFactor(sDust);
+        S.buyUpgrade(sDust, 'dust_shield');
+        const dustAfter = S.dustFactor(sDust);
+
+        // led_retrofit
+        const sLed = S.newGame(); sLed.credits = 60000;
+        const litBefore = S.gridDemand(sLed).lit;
+        S.buyUpgrade(sLed, 'led_retrofit');
+        const litAfter = S.gridDemand(sLed).lit;
+
+        // condensate_recovery
+        const sWater = S.newGame(); sWater.credits = 60000;
+        const wf = sWater.fields[0];
+        wf.moisture = 0.2;
+        const w0 = sWater.resources.water;
+        S.water(sWater, wf);
+        const spentBefore = w0 - sWater.resources.water;
+        S.buyUpgrade(sWater, 'condensate_recovery');
+        wf.moisture = 0.2;
+        const w1 = sWater.resources.water;
+        S.water(sWater, wf);
+        const spentAfter = w1 - sWater.resources.water;
+
+        // regolith_shielding
+        function seedZones(s, n) {
+          let c = 0;
+          for (const t of s.map) {
+            if (c >= n) break;
+            if (!t.b && !t.f && !t.zone && t.t === 'flat') { t.zone = { kind: 'hab', stage: 2, growth: 0, unserviced: 0, decay: 0 }; c++; }
+          }
+        }
+        const sFlareA = S.newGame(); seedZones(sFlareA, 8);
+        S.resolveEvent(sFlareA, 'spe', 'spe_ride');
+        const hitWithout = sFlareA.map.filter(t => t.zone && t.zone.stage === 1).length;
+        const sFlareB = S.newGame(); sFlareB.credits = 60000;
+        S.buyUpgrade(sFlareB, 'regolith_shielding'); seedZones(sFlareB, 8);
+        S.resolveEvent(sFlareB, 'spe', 'spe_ride');
+        const hitWith = sFlareB.map.filter(t => t.zone && t.zone.stage === 1).length;
+
+        // auto_irrigation
+        const sIrr = S.newGame(); sIrr.credits = 60000; sIrr.resources.food = 5e8;
+        const cmd = sIrr.map.find(t => t.b && t.b.type === 'command');
+        const cx = cmd.x, cy = cmd.y;
+        S.place(sIrr, S.tileAt(sIrr, cx + 1, cy + 1), 'track');
+        S.addField(sIrr, cx + 1, cy + 2, 2, 2);
+        const f2 = sIrr.fields[sIrr.fields.length - 1];
+        S.plant(sIrr, f2, 'romaine');
+        S.tick(sIrr);
+        const irrServiced = f2.serviced;
+        f2.moisture = 0.5;
+        S.tick(sIrr);
+        const dropsWithout = f2.moisture < 0.5;
+        S.buyUpgrade(sIrr, 'auto_irrigation');
+        f2.moisture = 0.5;
+        S.tick(sIrr);
+        const heldWithUpgrade = f2.moisture === 0.5;
+
+        // mining_efficiency
+        const sMine = S.newGame(); sMine.credits = 60000;
+        const mt = revealedTile(sMine, x => x.deposit && x.deposit.kind === 'regolith' && !x.b && !x.f && !x.zone && x.t !== 'boulder' && x.t !== 'skylight');
+        S.place(sMine, mt, 'miner');
+        const r0 = sMine.resources.regolith;
+        S.tick(sMine);
+        const gainedWithout = sMine.resources.regolith - r0;
+        S.buyUpgrade(sMine, 'mining_efficiency');
+        const r1 = sMine.resources.regolith;
+        S.tick(sMine);
+        const gainedWith = sMine.resources.regolith - r1;
+
+        return [
+          ['dust still degrades output before the upgrade is owned', dustBefore < 1, true],
+          ['dust_shield neutralises solar dust degradation', dustAfter, 1],
+          ['led_retrofit measurably reduces lit-hall grid demand', litAfter < litBefore, true],
+          ['the led_retrofit reduction is close to the stated 15%', litAfter / litBefore, '~0.85'],
+          ['condensate_recovery reduces water spent per top-up', spentAfter < spentBefore, true],
+          ['the test hall was actually road-serviced, for the flare/irrigation checks to mean anything', irrServiced, true],
+          ['regolith_shielding roughly halves flare damage', hitWith < hitWithout, true],
+          ['without auto_irrigation a serviced hall still drains moisture', dropsWithout, true],
+          ['auto_irrigation stops a serviced hall\'s moisture from draining', heldWithUpgrade, true],
+          ['mining_efficiency increases extraction rate by ~25%', gainedWith / gainedWithout, '~1.25']
         ];
       } }
   ];

@@ -157,6 +157,27 @@ const BUILDINGS = [
     desc: 'Build it, load it, launch it. Loads whatever is in the yard — helium-3 first, then regolith, then any food surplus — and converts it to credits on a cooldown, same as a real launch cadence.' }
 ];
 
+/* Colony-wide equipment, bought once rather than placed on a tile — same
+   shape as Lunar Farm's own UPGRADES (farm/js/data.js), re-described for a
+   colony instead of a single farm plot. Five of six echo Lunar Farm's own
+   upgrade shapes; mining_efficiency is new, grounded in a mechanic Lunar
+   Farm doesn't have. Each effect hooks a value the simulation already
+   computes — see sim.js's hasUpgrade() call sites for exactly where. */
+const UPGRADES = [
+  { id: 'dust_shield', name: 'Electrodynamic Dust Shield', cost: 3200, key: 'U',
+    desc: 'Sheds regolith fines off the arrays. Dust events no longer degrade solar output.' },
+  { id: 'led_retrofit', name: 'Deep-Red LED Retrofit', cost: 3600, key: 'U',
+    desc: 'Cuts grow-hall lighting draw by 15%. The single biggest win against the lunar night.' },
+  { id: 'condensate_recovery', name: 'Condensate Recovery', cost: 4000, key: 'U',
+    desc: 'Better humidity capture across every serviced module. A few extra points of water recovered from the loop.' },
+  { id: 'regolith_shielding', name: 'Regolith Overburden', cost: 6000, key: 'U',
+    desc: 'Bagged regolith heaped over the zoned districts. Halves the structural damage from flares and moonquakes.' },
+  { id: 'auto_irrigation', name: 'Automatic Irrigation Loop', cost: 4200, key: 'U',
+    desc: 'Serviced grow halls water and feed themselves. No more walking the rows.' },
+  { id: 'mining_efficiency', name: 'Improved Drill Bits', cost: 5200, key: 'U',
+    desc: 'Harder cutting heads on every rig. +25% extraction rate from every deposit already being mined.' }
+];
+
 /* Deposits are surveyed in at map generation and mined in a later pass.
    Distribution follows the real geology as far as a playable map allows:
    regolith is everywhere, ice concentrates in permanent shadow, helium-3 is
@@ -268,7 +289,9 @@ const MILESTONES = [
   { id: 'tenlaunches', text: 'Fly ten rockets to Earth', done: s => s.stats.launches >= 10 },
   { id: 'firstexpansion', text: 'Expand the survey charter beyond its founding bounds',
     done: s => s.revealed && (s.revealed.x1 - s.revealed.x0 + 1) > K.REVEAL_HALF_W * 2 + 1 },
+  { id: 'selfsufficient10', text: 'Hold power surplus, a fed colony and net-positive income for ten straight days',
+    done: s => s.history.length >= 10 && s.history.slice(-10).every(h => h.selfSufficient) },
   { id: 'year', text: 'Run the colony for a full Earth year', done: s => s.day >= 365 }
 ];
 
-window.LC_DATA = { K, CROPS, ZONES, BUILDINGS, DEPOSITS, EVENTS, MILESTONES };
+window.LC_DATA = { K, CROPS, ZONES, BUILDINGS, UPGRADES, DEPOSITS, EVENTS, MILESTONES };

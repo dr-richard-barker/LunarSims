@@ -32,7 +32,7 @@
       <button id="btnAuto" class="mode" title="Let a colony director build and manage growth on its own">Automanage</button>
       <button id="btnReport" class="mode" title="Telemetry report">Report</button>
       <button id="btnLeague" class="mode" title="Scores from past runs">League</button>
-      <button id="btnDisasters" class="mode on" title="Toggle the disaster deck on or off">Disasters</button>
+      <button id="btnDisasters" class="mode" title="Toggle the disaster deck on or off">Disasters</button>
       <button id="btnSandbox" class="mode" title="Build anything at no cost">Free Mode</button>
     </div>
   </div>
@@ -59,6 +59,10 @@
     <div class="palgroup">
       <h4>Mining &amp; Spaceport</h4>
       <div class="tools" id="miningTools"></div>
+    </div>
+    <div class="palgroup">
+      <h4>Upgrades</h4>
+      <div class="tools" id="upgradesTools"></div>
     </div>
   </nav>
 
@@ -156,10 +160,25 @@
       it loads helium-3 first, then regolith, then any real food surplus, and converts the
       payload to credits on a cooldown — a rocket to Earth, same as the real cadence.</p>
 
+    <h3>Going self-sufficient</h3>
+    <p>The Colony tab tracks a straight answer to "is this actually working": a day counts as
+      self-sufficient when the grid held without browning out, the larder has more than five
+      days of food ahead of it, and the zoned districts brought in more than they cost to run.
+      Hold that for ten straight days and the charter records it. <strong>Automanage</strong>
+      chases the same goal once established — a colony whose books are trending backwards gets
+      its zoning and survey expansion throttled in favour of the mining/ISRU/launch economy that
+      actually pays for itself, rather than spending the founding stash down slower.</p>
+
+    <h3>Upgrades</h3>
+    <p>Colony-wide equipment, bought once rather than placed on a tile — dust shielding for the
+      arrays, a lighting retrofit for the grow halls, better water recovery, blast shielding
+      against flares and moonquakes, self-tending grow halls, and harder drill bits for every
+      mining rig already sunk. Free under Free Mode, same as everything else.</p>
+
     <h3>The three switches</h3>
     <p><strong>Free Mode</strong> waives every cost, for experimenting with layouts.
       <strong>Disasters</strong> toggles the random-event deck — solar flares, micrometeorite
-      strikes, moonquakes and the rest — off entirely if you would rather build without them.
+      strikes, moonquakes and the rest — off by default; flip it on for a harder run.
       <strong>Automanage</strong> hands the colony to a director that builds and grows it for you.</p>
 
     <h3>Credits</h3>

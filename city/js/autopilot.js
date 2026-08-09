@@ -19,6 +19,16 @@
   const dist = (a, b) => Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
   const cmdTile = s => s.map.find(t => t.b && t.b.type === 'command');
 
+  /* Average daily credit delta over the trailing week, read straight from
+     s.history — the same ledger the Colony tab's self-sufficiency streak
+     reads, so the director and the player are looking at the same number. */
+  function creditTrend(s) {
+    const h = s.history;
+    if (h.length < 2) return 0;
+    const span = h.slice(-7);
+    return (span[span.length - 1].credits - span[0].credits) / (span.length - 1);
+  }
+
   function openTile(s, pred) {
     let best = null, bestD = Infinity, cmd = cmdTile(s);
     for (const t of s.map) {
@@ -299,17 +309,6 @@
     if (daysOfFood(s) < 15) return;
     ensurePower(s);
     extendRoads(s);
-    /* Housing capacity that outruns the farm just means migration lands a
-       population the colony can't feed, all at once, the moment the
-       reserve clears the crisis line — a slower-building disaster than a
-       stalled expansion, but the same disaster. Only keep zoning for more
-       colonists once the farm can already carry the ones it has. */
-    const totalTiles = s.fields.reduce((a, f) => a + f.w * f.h, 0);
-    if (totalTiles >= s.pop * 2.5) growZoning(s);
-    /* A charter that's run out of room caps the colony for good — expand it
-       the moment it's earned (half the surveyed ground developed) and
-       affordable, same reserve discipline as everything else here. */
-    if (S.canExpand(s) && afford(s, S.expandCost(s))) S.expandSurvey(s);
     /* The export economy is a late-game reach, not a bootstrap priority —
        an ISRU plant alone draws as much power as the entire founding grid.
        Only go after mining once the colony can actually carry the load:
@@ -317,6 +316,27 @@
        night. Chasing exports before that is how a 3kW plant tips a
        6-kW-generation colony into a permanent brownout. */
     const established = s.day > 20 && S.generation(s).total > S.gridDemand(s).total * 1.4;
+    /* Housing capacity that outruns the farm just means migration lands a
+       population the colony can't feed, all at once, the moment the
+       reserve clears the crisis line — a slower-building disaster than a
+       stalled expansion, but the same disaster. Only keep zoning for more
+       colonists once the farm can already carry the ones it has.
+       Once established, growth itself has to earn its keep too: a negative
+       trailing credit trend means the colony is spending down its founding
+       stash faster than zones and exports replace it, and more zoning or a
+       wider charter only adds upkeep to books already going backwards. In
+       that state, chase the revenue side (mining/ISRU/the export pad)
+       instead of adding more consumers of the grid — the actual path to
+       paying for itself, not just spending the stash down slower. Before
+       "established" this guard is always open (!established short-
+       circuits true), so none of the early bootstrap sequencing changes. */
+    const growingHealthily = !established || creditTrend(s) >= -5;
+    const totalTiles = s.fields.reduce((a, f) => a + f.w * f.h, 0);
+    if (growingHealthily && totalTiles >= s.pop * 2.5) growZoning(s);
+    /* A charter that's run out of room caps the colony for good — expand it
+       the moment it's earned (half the surveyed ground developed) and
+       affordable, same reserve discipline as everything else here. */
+    if (growingHealthily && S.canExpand(s) && afford(s, S.expandCost(s))) S.expandSurvey(s);
     if (!established) return;
     ensureMining(s);
     ensureIsru(s);

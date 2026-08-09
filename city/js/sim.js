@@ -9,7 +9,7 @@
    never the reverse, so it can be driven headlessly by harness.html. */
 
 (function () {
-  const { K, CROPS, ZONES, BUILDINGS, DEPOSITS, EVENTS, MILESTONES } = window.LC_DATA;
+  const { K, CROPS, ZONES, BUILDINGS, UPGRADES, DEPOSITS, EVENTS, MILESTONES } = window.LC_DATA;
   const GRID = window.LC_GRID;
   const ZONESYS = window.LC_ZONES;
 
@@ -131,15 +131,16 @@
   }
 
   /* bump whenever a save's shape changes in a way old saves won't have —
-     e.g. the growable-map charter (s.revealed) added here, which older
-     saves lack entirely and would otherwise crash the renderer on load */
-  const STATE_VERSION = 2;
+     e.g. the growable-map charter (s.revealed) added here, then the
+     Upgrades roster's s.upgrades, both of which older saves lack entirely
+     and would otherwise crash the renderer/UI on load */
+  const STATE_VERSION = 3;
 
   function newGame() {
     const s = {
       version: STATE_VERSION, hour: 6, day: 1,
       credits: 20000,
-      sandbox: false, disastersOn: true, auto: false,
+      sandbox: false, disastersOn: false, auto: false, upgrades: [],
       map: makeMap(83), fields: [], nextField: 1,
       pop: 3, housingCap: 0, jobs: 0,
       resources: { o2: 240, co2: 180, water: 900, nutrients: 400, food: 850000,
@@ -302,6 +303,22 @@
     return null;
   }
 
+  /* ---------- upgrades (colony-wide, not placed on a tile) ---------- */
+
+  const upgradeById = id => UPGRADES.find(u => u.id === id);
+  const hasUpgrade = (s, id) => s.upgrades.includes(id);
+
+  function buyUpgrade(s, id) {
+    const U = upgradeById(id);
+    if (!U) return 'Unknown upgrade.';
+    if (hasUpgrade(s, id)) return 'Already fitted.';
+    const cost = s.sandbox ? 0 : U.cost;
+    if (s.credits < cost) return `${U.name} costs ${cost.toLocaleString()} credits.`;
+    s.credits -= cost;
+    s.upgrades.push(id);
+    return null;
+  }
+
   /* ---------- queries ---------- */
 
   const tileAt = GRID.tileAt;
@@ -318,8 +335,9 @@
     return Math.sin(phase * 2 * Math.PI);
   }
   const isSunlit = s => sunElevation(s) > 0.02;
-  const ledKW = s => K.LED_KW;
-  const dustFactor = s => clamp(1 - (s.flags.dust || 0) * 0.12, 0.4, 1);
+  const ledKW = s => hasUpgrade(s, 'led_retrofit') ? K.LED_KW * 0.85 : K.LED_KW;
+  const dustFactor = s => hasUpgrade(s, 'dust_shield') ? 1 : clamp(1 - (s.flags.dust || 0) * 0.12, 0.4, 1);
+  const recovery = s => hasUpgrade(s, 'condensate_recovery') ? Math.min(0.95, BASE_RECOVERY + 0.08) : BASE_RECOVERY;
 
   function lightsOn(s) {
     if (s.flags.shutter > 0) return false;
@@ -350,6 +368,18 @@
 
   const co2Cap = s => 260;
   const dailyFoodNeed = s => s.pop * K.POP_KCAL;
+
+  /* Trailing run of consecutive self-sufficient days, read straight off
+     history rather than kept as a separate counter — nothing to fall out
+     of sync, and it self-corrects the instant a day breaks the streak. */
+  function selfSuffStreak(s) {
+    let n = 0;
+    for (let i = s.history.length - 1; i >= 0; i--) {
+      if (!s.history[i].selfSufficient) break;
+      n++;
+    }
+    return n;
+  }
 
   /* ---------- the hourly tick ---------- */
 
@@ -395,6 +425,12 @@
       const A = area(f);
       const rate = 1 / (c.days * s.photoperiod);
       f.serviced = fieldServiced(s, f, touching);
+      /* Automatic Irrigation Loop: a serviced hall tops itself up rather
+         than draining down to wait on the player — it still draws from the
+         shared colony water/nutrient stock exactly as before (waterUsed/
+         nutrUsed below are untouched), this just skips the local reservoir
+         decay that would otherwise need a manual Water/Feed visit. */
+      const autoTended = f.serviced && hasUpgrade(s, 'auto_irrigation');
 
       if (f.litNow) {
         let g = 1;
@@ -411,13 +447,17 @@
         const o2 = O2_PER_LIT_HOUR * c.o2 * g * A;
         o2Made += o2; co2Used += o2 * CO2_PER_O2; f.carbon += o2 * CO2_PER_O2;
         f.soil = clamp(f.soil + SOIL_PER_LIT_HOUR, 0, 1);
-        f.moisture -= (c.water / 24) * 0.020;
-        f.feed -= (c.nutrients / 24) * 0.022;
+        if (!autoTended) {
+          f.moisture -= (c.water / 24) * 0.020;
+          f.feed -= (c.nutrients / 24) * 0.022;
+        }
         waterUsed += (c.water / 24) * WATER_PER_TILE * A;
         nutrUsed += (c.nutrients / 24) * 0.25 * A;
       } else {
-        f.moisture -= 0.0035;
-        f.feed -= 0.0015;
+        if (!autoTended) {
+          f.moisture -= 0.0035;
+          f.feed -= 0.0015;
+        }
         waterUsed += (c.water / 24) * WATER_PER_TILE * A * 0.15;
       }
       f.moisture = clamp(f.moisture, 0, 1);
@@ -436,9 +476,10 @@
 
     /* --- mining and ISRU: idle during a brownout, like everything else --- */
     if (!brownout) {
+      const mineRate = MINE_RATE_PER_DAY * (hasUpgrade(s, 'mining_efficiency') ? 1.25 : 1);
       for (const t of s.map) {
         if (t.b && t.b.type === 'miner' && t.deposit) {
-          s.resources[t.deposit.kind] += (MINE_RATE_PER_DAY * t.deposit.richness) / 24;
+          s.resources[t.deposit.kind] += (mineRate * t.deposit.richness) / 24;
         }
       }
       if (count(s, 'isru') && s.resources.ice > 0) {
@@ -458,7 +499,7 @@
     s.resources.co2 = clamp(s.resources.co2, 0, co2Cap(s));
 
     waterUsed += s.pop * K.POP_WATER / 24;
-    s.resources.water = Math.max(0, s.resources.water - waterUsed * (1 - BASE_RECOVERY));
+    s.resources.water = Math.max(0, s.resources.water - waterUsed * (1 - recovery(s)));
     s.resources.nutrients = Math.max(0, s.resources.nutrients - nutrUsed);
     if (s.resources.nutrients <= 0) for (const f of crops) f.feed = Math.min(f.feed, 0.05);
     s.resources.food -= dailyFoodNeed(s) / 24;
@@ -517,9 +558,21 @@
       }
     }
 
-    for (const m of MILESTONES) {
-      if (!s.done[m.id] && m.done(s)) { s.done[m.id] = s.day; log.push(`Milestone: ${m.text}.`); }
-    }
+    /* A colony is "self-sufficient" for a day when its grid held through the
+       day without browning out, it has more than five days of food ahead
+       of it, and today's zone income covered today's zone upkeep — three
+       things the sim already computes, just never combined into one signal
+       before. Power specifically reads s.brownoutNow rather than comparing
+       raw generation to demand: solar alone reads zero every lunar night by
+       design, and a battery bank carrying the colony through the dark is
+       genuine self-sufficiency, not a gap — brownoutNow already accounts
+       for stored charge the same way the HUD's own power chip does. This is
+       the same definition the Colony tab's streak and Automanage's
+       established-colony goal both read, so player, dashboard and director
+       are all looking at the same number. */
+    const selfSufficient = !s.brownoutNow
+      && s.resources.food > dailyFoodNeed(s) * 5
+      && (tally.income - tally.upkeep) >= 0;
 
     s.history.push({
       d: s.day, pop: s.pop, jobs: s.jobs, housingCap: s.housingCap,
@@ -528,9 +581,17 @@
       o2: Math.round(s.resources.o2), water: Math.round(s.resources.water),
       power: Math.round(s.stored), demandHab: Math.round(demand.hab * 100) / 100,
       demandTrade: Math.round(demand.trade * 100) / 100, demandInd: Math.round(demand.industry * 100) / 100,
-      sun: isSunlit(s) ? 1 : 0
+      sun: isSunlit(s) ? 1 : 0, selfSufficient
     });
     if (s.history.length > 400) s.history.shift();
+
+    /* Checked after today's history entry is pushed — the new
+       selfsufficient10 milestone reads s.history's trailing window, and a
+       milestone should see today's own day the moment it lands, not one
+       day late. */
+    for (const m of MILESTONES) {
+      if (!s.done[m.id] && m.done(s)) { s.done[m.id] = s.day; log.push(`Milestone: ${m.text}.`); }
+    }
   }
 
   /* ---------- player actions ---------- */
@@ -627,7 +688,7 @@
     if (!f || !f.crop || f.dead) return 'Nothing planted there.';
     const need = (1 - f.moisture) * 4 * area(f);
     if (s.resources.water < need) return 'Not enough water in the loop.';
-    s.resources.water -= need * (1 - BASE_RECOVERY);
+    s.resources.water -= need * (1 - recovery(s));
     f.moisture = 1;
     return null;
   }
@@ -716,7 +777,7 @@
     switch (effect) {
       case 'spe_shelter': s.flags.shutter = 12; L('Colony sheltered through the flare. Twelve hours of lost grid load.'); break;
       case 'spe_ride': {
-        const hit = randomDeveloped(s, 3);
+        const hit = randomDeveloped(s, hasUpgrade(s, 'regolith_shielding') ? 2 : 3);
         for (const t of hit) { t.zone.stage = Math.max(0, t.zone.stage - 1); t.zone.growth = 0.3; }
         L(`Rode out the flare. Radiation damage cost ${hit.length} tile${hit.length === 1 ? '' : 's'} a stage of development.`);
         break;
@@ -741,7 +802,7 @@
         else { s.credits -= 1200; L('District braced ahead of the aftershocks. No damage taken.'); }
         break;
       case 'quake_ignore': {
-        const hit = randomDeveloped(s, 2);
+        const hit = randomDeveloped(s, hasUpgrade(s, 'regolith_shielding') ? 1 : 2);
         for (const t of hit) { t.zone.stage = Math.max(0, t.zone.stage - 1); t.zone.growth = 0.3; }
         L(`Foundations shifted. ${hit.length} tile${hit.length === 1 ? '' : 's'} lost a stage of development.`);
         break;
@@ -807,10 +868,11 @@
     addField, removeField, checkField, fieldCost, fieldAt, fieldById, fieldTiles,
     paintZone, unzone, zoneCost,
     fillRatio, canExpand, expandCost, expandSurvey,
+    hasUpgrade, buyUpgrade, upgradeById,
     planted, area, totalTiles, seedCost,
     cropById, buildById, zoneDataById, clamp, tileAt, built, count,
     generation, gridDemand, storageCap, isSunlit, sunElevation, lightsOn, dustFactor,
-    dailyFoodNeed, pushLog, resolveEvent, patchLeak, launchRocket, spaceportTile,
+    dailyFoodNeed, selfSuffStreak, pushLog, resolveEvent, patchLeak, launchRocket, spaceportTile,
     KCAL_SCALE, VALUE_SCALE, ARRAY_KW, BATTERY_KWH, MAX_FIELD, MAX_ZONE, LAUNCH_CAPACITY, LAUNCH_COOLDOWN
   };
 })();

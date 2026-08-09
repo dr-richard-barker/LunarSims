@@ -100,6 +100,31 @@
     });
   }
 
+  /* Upgrades are a colony-wide one-off purchase, not a tile tool — clicking
+     one buys it immediately rather than entering the drag/line/place state
+     machine the rest of the palette uses. */
+  function upgradeRow(u) {
+    const owned = S.hasUpgrade(s, u.id);
+    const cost = s.sandbox ? 0 : u.cost;
+    const div = document.createElement('button');
+    div.className = 'tool' + (owned ? ' on' : '');
+    div.disabled = owned;
+    div.innerHTML = `<span class="g">${owned ? '✔' : '🛠'}</span><span class="n">${u.name}</span><span class="k">${owned ? 'Owned' : cost.toLocaleString()}</span>`;
+    div.title = u.desc || '';
+    div.onclick = () => {
+      const err = S.buyUpgrade(s, u.id);
+      if (err) toast(err, true); else toast(`${u.name} fitted.`);
+      buildUpgradesPalette(); save();
+    };
+    return div;
+  }
+
+  function buildUpgradesPalette() {
+    const el = document.getElementById('upgradesTools');
+    el.innerHTML = '';
+    D.UPGRADES.forEach(u => el.appendChild(upgradeRow(u)));
+  }
+
   function setHint() {
     const t = currentTool();
     const el = document.getElementById('toolHint');
@@ -338,6 +363,8 @@
     const fill = S.fillRatio(s);
     const canExpand = S.canExpand(s);
     const cost = S.expandCost(s);
+    const streak = S.selfSuffStreak(s);
+    const todaySS = s.history.length ? !!s.history[s.history.length - 1].selfSufficient : false;
     el.innerHTML = `
       <h3 class="sec">Survey charter</h3>
       ${meter('Ground developed', fill, canExpand ? 'good' : 'accent')}
@@ -356,6 +383,12 @@
       ${meter('Habitation', (s.demand.hab + 1) / 2)}
       ${meter('Trade', (s.demand.trade + 1) / 2)}
       ${meter('Industry', (s.demand.industry + 1) / 2)}
+      <h3 class="sec">Self-Sufficiency</h3>
+      ${meter('Streak toward ten days', Math.min(1, streak / 10), streak >= 10 ? 'good' : 'accent')}
+      <div class="rows">
+        <div class="row"><span class="k">Today</span><span class="v${todaySS ? ' good' : ''}">${todaySS ? 'Self-sufficient' : 'Not yet'}</span></div>
+        <div class="row"><span class="k">Current streak</span><span class="v">${streak} day${streak === 1 ? '' : 's'}</span></div>
+      </div>
       <h3 class="sec">Power</h3>
       <div class="rows">
         <div class="row"><span class="k">Generation</span><span class="v">${gen.total.toFixed(1)} kW</span></div>
@@ -511,7 +544,7 @@
   }
   document.getElementById('btnAuto').onclick = () => { s.auto = !s.auto; markModes(); save(); };
   document.getElementById('btnDisasters').onclick = () => { s.disastersOn = !s.disastersOn; markModes(); save(); };
-  document.getElementById('btnSandbox').onclick = () => { s.sandbox = !s.sandbox; markModes(); save(); };
+  document.getElementById('btnSandbox').onclick = () => { s.sandbox = !s.sandbox; markModes(); buildUpgradesPalette(); save(); };
   document.getElementById('btnReport').onclick = openReport;
   document.getElementById('btnLeague').onclick = () => openLeague();
 
@@ -541,10 +574,10 @@
   document.getElementById('btnSave').onclick = () => { save(); toast('Colony saved.'); };
   document.getElementById('btnReset').onclick = () => {
     if (!confirm('Start a new colony? This clears the current save.')) return;
-    s = S.newGame(); ui.selected = null; markModes(); save(); renderAll();
+    s = S.newGame(); ui.selected = null; markModes(); buildUpgradesPalette(); save(); renderAll();
   };
   document.getElementById('overRestart').onclick = () => {
-    s = S.newGame(); ui.selected = null; markModes(); save(); renderAll();
+    s = S.newGame(); ui.selected = null; markModes(); buildUpgradesPalette(); save(); renderAll();
     document.getElementById('mOver').hidden = true;
   };
   document.getElementById('overLeague').onclick = () => {
@@ -603,6 +636,6 @@
   }
   frame.tick = 0;
 
-  buildPalette(); setHint(); markModes(); renderAll();
+  buildPalette(); buildUpgradesPalette(); setHint(); markModes(); renderAll();
   requestAnimationFrame(t => { last = t; requestAnimationFrame(frame); });
 })();

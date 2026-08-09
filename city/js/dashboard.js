@@ -79,7 +79,7 @@
     const industry = s.map.filter(t => t.zone && t.zone.kind === 'industry' && t.zone.stage > 0).length;
     return { now, days: s.day, pop: s.pop, housingCap: s.housingCap, jobs: s.jobs || 0,
              hab, trade, industry, harvests: s.stats.harvests, launches: s.stats.launches || 0,
-             sunlit: S.isSunlit(s) };
+             sunlit: S.isSunlit(s), selfSuffStreak: S.selfSuffStreak(s) };
   }
 
   function narrative(s, f) {
@@ -88,6 +88,9 @@
     lines.push(`Developed ground: ${f.hab} habitation tile${f.hab === 1 ? '' : 's'}, ${f.trade} trade tile${f.trade === 1 ? '' : 's'}, ${f.industry} industrial tile${f.industry === 1 ? '' : 's'}. The Agriculture zone has brought in ${f.harvests} harvest${f.harvests === 1 ? '' : 's'} to date.`);
     lines.push(`Reserves: ${f.now.food.toFixed(1)} days of food, ${fmtNum(f.now.o2)} kg oxygen, ${fmtNum(f.now.water)} L water, ${fmtNum(f.now.power)} kWh stored. Treasury holds ${fmtNum(f.now.credits)} credits.`);
     if (f.launches) lines.push(`${f.launches} rocket${f.launches === 1 ? '' : 's'} launched to Earth.`);
+    lines.push(f.selfSuffStreak > 0
+      ? `Self-sufficient — power surplus, fed, and net-positive income — for ${f.selfSuffStreak} straight day${f.selfSuffStreak === 1 ? '' : 's'}.`
+      : `Not currently self-sufficient: at least one of power, food or the daily books is running a deficit.`);
     const flags = [];
     if (f.now.food < 10) flags.push('food reserve below advisory threshold');
     if (f.now.o2 < 60) flags.push('oxygen reserve low');
@@ -110,7 +113,8 @@
       ['Days run', f.days],
       ['Population', f.pop],
       ['Harvests', f.harvests],
-      ['Launches', f.launches]
+      ['Launches', f.launches],
+      ['Self-sufficient streak', f.selfSuffStreak + 'd']
     ].map(([k, v]) => `<div class="dstat"><b>${v}</b><span>${k}</span></div>`).join('');
 
     return `

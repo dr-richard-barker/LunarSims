@@ -184,19 +184,30 @@ on its own.
 - **Ten solar-flare-to-moonquake colony alerts**, each a choice rather than a
   dice roll, and a charter of milestones tracking the colony's growth from its
   first zoned tile to its tenth rocket.
+- **Six colony-wide Upgrades**, bought once rather than placed on a tile —
+  dust shielding, a grow-hall lighting retrofit, better water recovery,
+  blast shielding, self-tending grow halls, and harder mining-rig drill bits.
+  Free under Free Mode, same as everything else.
+- **A self-sufficiency signal**, read off the same numbers the sim already
+  tracks: a day counts when the grid held without browning out, the larder
+  has more than five days of food ahead of it, and the zoned districts
+  brought in more than they cost. Hold it ten straight days for a milestone.
 
 Three switches sit in the header, same shape as Lunar Farm's:
 
 - **Free Mode** waives every cost, for experimenting with layouts.
-- **Disasters** turns the random-event deck off entirely, if you would rather
-  build without it.
+- **Disasters** turns the random-event deck off entirely — off by default,
+  so a first-time colony isn't opting out of anything, only in.
 - **Automanage** hands the colony to a director that zones, roads, powers,
   mines and farms it without you — adapted from the priority-ladder autopilot
   in [Lunar Habitat](https://dr-richard-barker.github.io/lunar-arcade/games/lunar-habitat/).
   It survives its first hundred-plus days unattended and builds a real, if
   imperfect, city; a population boom released all at once by a long-suppressed
   migration backlog can still outrun it in the long run, which is a real,
-  documented tuning edge rather than a hidden one.
+  documented tuning edge rather than a hidden one. Once established, it also
+  chases the self-sufficiency signal above — a colony whose books are
+  trending backwards gets its zoning and survey expansion throttled in
+  favour of the mining/ISRU/launch economy that actually pays for itself.
 
 Same **Report** dashboard and **League** scoring as Lunar Farm, reading the
 colony's own telemetry — population, housing capacity, jobs, credits, food,
