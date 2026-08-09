@@ -34,7 +34,7 @@
       milestones: Object.keys(s.done).length,
       credits: Math.round(s.credits),
       science: s.science,
-      auto: !!s.auto,
+      auto: !!(s.autoCity || s.autoExpand),
       sandbox: !!s.sandbox,
       ending: ended || (s.over ? s.over : 'Filed while still running')
     };

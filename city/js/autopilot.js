@@ -298,50 +298,72 @@
     if (log) log.push(`Automanage answered "${e.title}": ${pick.label}.`);
   }
 
-  /* ---------- entry point ---------- */
+  /* ---------- established / growingHealthily: shared by both toggles ---------- */
 
-  function autoManage(s, log) {
+  /* The export economy is a late-game reach, not a bootstrap priority — an
+     ISRU plant alone draws as much power as the entire founding grid. Only
+     go after mining once the colony can actually carry the load: daytime
+     generation comfortably ahead of demand, and past its first night.
+     Chasing exports before that is how a 3kW plant tips a 6-kW-generation
+     colony into a permanent brownout. */
+  const established = s => s.day > 20 && S.generation(s).total > S.gridDemand(s).total * 1.4;
+
+  /* Growth itself has to earn its keep once established: a negative
+     trailing credit trend means the colony is spending down its founding
+     stash faster than zones and exports replace it, and more zoning or a
+     wider charter only adds upkeep to books already going backwards. In
+     that state, chase the revenue side (mining/ISRU/the export pad) instead
+     of adding more consumers of the grid — the actual path to paying for
+     itself, not just spending the stash down slower. Before "established"
+     this guard is always open (!established short-circuits true), so none
+     of the early bootstrap sequencing changes. Read independently by both
+     autoManageCity (for growZoning) and autoManageExpansion (for
+     expandSurvey) — a City-only or Expansion-only run still gets the same
+     "don't grow past what you can afford" discipline on its own half. */
+  const growingHealthily = s => !established(s) || creditTrend(s) >= -5;
+
+  /* ---------- entry points ---------- */
+
+  /* Day-to-day operations: keep the colony fed, powered, roaded and
+     zoning — everything short of widening the survey charter or chasing
+     the export economy. Colony alerts are answered here too, since an
+     unanswered one freezes the tick loop outright (see resolveDisaster's
+     own note) and a player who only wants City automation still expects
+     the colony to keep running unattended. */
+  function autoManageCity(s, log) {
     resolveDisaster(s, log);
     tendFarm(s, log);
     /* An empty larder is a faster death than a stalled expansion — don't
-       let roads, zoning or mining compete with the emergency field for the
-       same credits while food is critically short. */
+       let roads or zoning compete with the emergency field for the same
+       credits while food is critically short. */
     if (daysOfFood(s) < 15) return;
     ensurePower(s);
     extendRoads(s);
-    /* The export economy is a late-game reach, not a bootstrap priority —
-       an ISRU plant alone draws as much power as the entire founding grid.
-       Only go after mining once the colony can actually carry the load:
-       daytime generation comfortably ahead of demand, and past its first
-       night. Chasing exports before that is how a 3kW plant tips a
-       6-kW-generation colony into a permanent brownout. */
-    const established = s.day > 20 && S.generation(s).total > S.gridDemand(s).total * 1.4;
     /* Housing capacity that outruns the farm just means migration lands a
        population the colony can't feed, all at once, the moment the
        reserve clears the crisis line — a slower-building disaster than a
        stalled expansion, but the same disaster. Only keep zoning for more
-       colonists once the farm can already carry the ones it has.
-       Once established, growth itself has to earn its keep too: a negative
-       trailing credit trend means the colony is spending down its founding
-       stash faster than zones and exports replace it, and more zoning or a
-       wider charter only adds upkeep to books already going backwards. In
-       that state, chase the revenue side (mining/ISRU/the export pad)
-       instead of adding more consumers of the grid — the actual path to
-       paying for itself, not just spending the stash down slower. Before
-       "established" this guard is always open (!established short-
-       circuits true), so none of the early bootstrap sequencing changes. */
-    const growingHealthily = !established || creditTrend(s) >= -5;
+       colonists once the farm can already carry the ones it has. */
     const totalTiles = s.fields.reduce((a, f) => a + f.w * f.h, 0);
-    if (growingHealthily && totalTiles >= s.pop * 2.5) growZoning(s);
+    if (growingHealthily(s) && totalTiles >= s.pop * 2.5) growZoning(s);
+  }
+
+  /* Growing the charter and the export economy — the two things a colony
+     can do without once it's simply running, which is exactly why a player
+     might want this off while leaving day-to-day operations on. */
+  function autoManageExpansion(s, log) {
+    /* Same food-crisis guard as City — expansion spending has no business
+       competing with an emergency field either. */
+    if (daysOfFood(s) < 15) return;
     /* A charter that's run out of room caps the colony for good — expand it
        the moment it's earned (half the surveyed ground developed) and
        affordable, same reserve discipline as everything else here. */
-    if (growingHealthily && S.canExpand(s) && afford(s, S.expandCost(s))) S.expandSurvey(s);
-    if (!established) return;
+    if (growingHealthily(s) && S.canExpand(s) && afford(s, S.expandCost(s))) S.expandSurvey(s);
+    if (!established(s)) return;
     ensureMining(s);
     ensureIsru(s);
     ensureSpaceport(s, log);
   }
 
-  window.LC_AUTO = { autoManage, resolveDisaster };
+  window.LC_AUTO = { autoManageCity, autoManageExpansion, resolveDisaster };
 })();

@@ -131,16 +131,17 @@
   }
 
   /* bump whenever a save's shape changes in a way old saves won't have —
-     e.g. the growable-map charter (s.revealed) added here, then the
-     Upgrades roster's s.upgrades, both of which older saves lack entirely
-     and would otherwise crash the renderer/UI on load */
-  const STATE_VERSION = 3;
+     e.g. the growable-map charter (s.revealed), the Upgrades roster's
+     s.upgrades, and now the single s.auto flag splitting into
+     s.autoCity/s.autoExpand, none of which older saves have and would
+     otherwise crash the renderer/UI on load */
+  const STATE_VERSION = 4;
 
   function newGame() {
     const s = {
       version: STATE_VERSION, hour: 6, day: 1,
       credits: 20000,
-      sandbox: false, disastersOn: false, auto: false, upgrades: [],
+      sandbox: false, disastersOn: false, autoCity: false, autoExpand: false, upgrades: [],
       map: makeMap(83), fields: [], nextField: 1,
       pop: 3, housingCap: 0, jobs: 0,
       resources: { o2: 240, co2: 180, water: 900, nutrients: 400, food: 850000,
@@ -518,8 +519,11 @@
 
   function endOfDay(s, log) {
     /* Automanage is a separate, optional module (autopilot.js) that loads
-       after this file — late-bound so sim.js never depends on it existing. */
-    if (s.auto && window.LC_AUTO) window.LC_AUTO.autoManage(s, log);
+       after this file — late-bound so sim.js never depends on it existing.
+       City operations and survey/export expansion are independent
+       toggles, each gating its own half. */
+    if (s.autoCity && window.LC_AUTO) window.LC_AUTO.autoManageCity(s, log);
+    if (s.autoExpand && window.LC_AUTO) window.LC_AUTO.autoManageExpansion(s, log);
 
     const touching = GRID.serviceSet(s);
     const { tally, demand } = ZONESYS.growthTick(s, touching);

@@ -22,6 +22,7 @@
 (function () {
   const { K, ZONES, DEPOSITS, CROPS } = window.LC_DATA;
   const S = window.LC_SIM, GRID = window.LC_GRID, ZONESYS = window.LC_ZONES;
+  const A = window.LC_AGENTS;
 
   const TW = 128, TH = 64;             // tile footprint on screen
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -46,6 +47,17 @@
   const grey = (v, l) => {
     const b = clamp(v * l, 0, 255);
     return `rgb(${Math.round(b)},${Math.round(b * 0.995)},${Math.round(b * 1.035)})`;
+  };
+  /* Regolith-specific: reads warm grey/tan under direct sun rather than the
+     cool blue-grey grey() gives spacecraft steel — R leads, B trails. Used
+     only for terrain, never for built structures, which stay neutral. The
+     +18 floor keeps low-sun-angle ground from ever reading too dim to see
+     as ground — night still goes properly dark (lightOf's own 0.10 night
+     floor dominates that arithmetic), this only lifts the low end of the
+     *daytime* range. */
+  const regolith = (v, l) => {
+    const b = clamp(v * l + 18, 0, 255);
+    return `rgb(${Math.round(clamp(b * 1.06, 0, 255))},${Math.round(clamp(b * 0.97, 0, 255))},${Math.round(clamp(b * 0.85, 0, 255))})`;
   };
   function shade(hex, amt) {
     const n = parseInt(hex.slice(1), 16);
@@ -120,6 +132,62 @@
     }
   }
 
+  /* A hemispherical dome over a tile rectangle — the moon-colony counterpart
+     to box(), used everywhere a pressurised habitat module sits on the
+     surface. A regolith-berm skirt (piled shielding, reusing the terrain's
+     own regolith() tone) grounds it, three tapering ellipse layers stand in
+     for a curved shell too cheap to actually render in 3D (darkest/widest
+     at the base, brightest/narrowest at the apex, the way a rounded surface
+     catches more direct light near its crown), and a glassy viewport ring
+     sits partway up. Returns the dome's own screen centre and radii so
+     callers can hang trim off the real geometry instead of guessing. */
+  function dome(ctx, tx, ty, w, h, z, col, l, opts) {
+    const o = opts || {};
+    const cx = tx + w / 2, cy = ty + h / 2;
+    const p = iso(cx, cy);
+    const rx = w * (TW / 2) * 0.92, ry = h * (TH / 2) * 0.92;
+
+    if (!o.noSkirt) {
+      ctx.fillStyle = regolith(150, l);
+      ctx.beginPath(); ctx.ellipse(p.x, p.y + TH * 0.06, rx * 1.24, ry * 1.24, 0, 0, 7); ctx.fill();
+    }
+
+    const layers = [
+      { f: 0.0, rf: 1.00, shade: 0.55 },
+      { f: 0.5, rf: 0.78, shade: 0.82 },
+      { f: 1.0, rf: 0.48, shade: 1.06 }
+    ];
+    for (const ly of layers) {
+      ctx.fillStyle = tone(col, l, ly.shade);
+      ctx.beginPath();
+      ctx.ellipse(p.x, p.y - z * ly.f, rx * ly.rf, ry * ly.rf, 0, 0, 7);
+      ctx.fill();
+    }
+
+    if (!o.noRing) {
+      ctx.strokeStyle = o.ring || `rgba(190,225,255,${0.32 + l * 0.3})`;
+      ctx.lineWidth = 1.3;
+      ctx.beginPath();
+      ctx.ellipse(p.x, p.y - z * 0.6, rx * 0.68, ry * 0.68, 0, 0, 7);
+      ctx.stroke();
+    }
+
+    if (!o.noRim && l > 0.3) {
+      ctx.strokeStyle = `rgba(255,252,238,${0.15 + l * 0.22})`;
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.ellipse(p.x, p.y - z * 0.86, rx * 0.46, ry * 0.46, 0, Math.PI * 1.08, Math.PI * 1.82);
+      ctx.stroke();
+    }
+
+    if (o.stroke) {
+      ctx.strokeStyle = o.stroke; ctx.lineWidth = o.lw || 1;
+      ctx.beginPath(); ctx.ellipse(p.x, p.y + TH * 0.06, rx * 1.24, ry * 1.24, 0, 0, 7); ctx.stroke();
+    }
+
+    return { p, rx, ry };
+  }
+
   /* cheap ambient occlusion where a structure meets the ground */
   function contact(ctx, tx, ty, w, h) {
     const p = iso(tx + w / 2, ty + h / 2);
@@ -156,10 +224,14 @@
 
   /* Unsurveyed ground — deliberately flat and dark, no speckle or deposit
      hints, so a player panning past the charter's edge sees that there is
-     more world out there without it spoiling what's in it. */
+     more world out there without it spoiling what's in it. Warm-dark
+     rather than the sky's own cool near-black, though: this is unlit
+     rock, not vacuum, and a whole screen of it reading identical to the
+     starfield is what made an early, mostly-unsurveyed colony look like
+     it was floating in space rather than standing on a surface. */
   function drawFogTile(ctx, t, l) {
     const { x, y } = t;
-    ctx.fillStyle = 'rgba(8,10,16,0.9)';
+    ctx.fillStyle = 'rgba(38,31,25,0.92)';
     fillDiamond(ctx, x, y, 1, 1);
     if (((t.v * 137) % 1) < 0.06) {
       const p = iso(x + 0.5, y + 0.5);
@@ -171,7 +243,7 @@
   function drawTerrainTile(ctx, t, l, sv) {
     const { x, y } = t;
     if (t.t === 'skylight') {
-      ctx.fillStyle = grey(112, l);
+      ctx.fillStyle = regolith(150, l);
       fillDiamond(ctx, x, y, 1, 1);
       ctx.fillStyle = '#04060b';
       fillDiamond(ctx, x + 0.08, y + 0.08, 0.84, 0.84);
@@ -180,12 +252,32 @@
       return;
     }
 
-    ctx.fillStyle = grey(t.t === 'rough' ? 150 : t.t === 'boulder' ? 156 : 158, l);
+    /* Base albedo is pushed well above the old steel-grey baseline and
+       warm-tinted via regolith() rather than grey() — real regolith is dim
+       in absolute terms (~12% reflectance) but reads unmistakably bright
+       and lunar next to a true-black vacuum sky; the old values sat close
+       enough to the sky's own near-black that the ground read as more
+       sky than surface. */
+    ctx.fillStyle = regolith(t.t === 'rough' ? 238 : t.t === 'boulder' ? 242 : 250, l);
     fillDiamond(ctx, x, y, 1, 1);
+
+    /* One soft, low-contrast mottled patch per tile — undulating ground,
+       not a flat painted plane. Sign and offset come from the tile's own
+       seed so it is stable across frames rather than a shimmer. Biased
+       toward the lighter variant now that the base fill is bright enough
+       that the darkening version reads as an actual shadowed dip rather
+       than as murk. */
+    {
+      const lighter = ((t.v * 331) % 1) < 0.65;
+      const mu = 0.2 + ((t.v * 811) % 60) / 100, mw = 0.2 + ((t.v * 457) % 60) / 100;
+      const q = iso(x + mu, y + mw);
+      ctx.fillStyle = lighter ? 'rgba(255,250,236,0.07)' : 'rgba(0,0,0,0.035)';
+      ctx.beginPath(); ctx.ellipse(q.x, q.y, TW * 0.22, TH * 0.22, 0, 0, 7); ctx.fill();
+    }
 
     if (t.t === 'crater') {
       const p = iso(x + 0.5, y + 0.5);
-      ctx.fillStyle = grey(128, l);
+      ctx.fillStyle = regolith(205, l);
       ctx.beginPath(); ctx.ellipse(p.x, p.y + TH / 2, TW * 0.4, TH * 0.4, 0, 0, 7); ctx.fill();
       if (sv) {
         ctx.save();
@@ -196,7 +288,7 @@
         ctx.fill();
         ctx.restore();
       }
-      ctx.strokeStyle = grey(196, l); ctx.lineWidth = 1.5;
+      ctx.strokeStyle = regolith(252, l); ctx.lineWidth = 1.5;
       ctx.beginPath(); ctx.ellipse(p.x, p.y + TH / 2, TW * 0.4, TH * 0.4, 0, 0, 7); ctx.stroke();
       return;
     }
@@ -209,7 +301,7 @@
       const u = ((t.v * 977 + i * 131) % 100) / 100;
       const w = ((t.v * 613 + i * 271) % 100) / 100;
       const q = iso(x + u * 0.86 + 0.07, y + w * 0.86 + 0.07);
-      ctx.fillStyle = ((t.v * 100 + i) % 2) < 1 ? 'rgba(0,0,0,0.10)' : 'rgba(255,255,255,0.06)';
+      ctx.fillStyle = ((t.v * 100 + i) % 2) < 1 ? 'rgba(0,0,0,0.12)' : 'rgba(255,250,240,0.14)';
       ctx.fillRect(q.x - 1, q.y - 1, 2, 2);
     }
 
@@ -219,9 +311,9 @@
         const w = 0.22 + ((t.v * 430 + i * 90) % 56) / 100;
         const p = iso(x + u, y + w);
         const r = 7 + ((t.v * 100 + i * 33) % 7);
-        ctx.fillStyle = grey(124, l);
+        ctx.fillStyle = regolith(190, l);
         ctx.beginPath(); ctx.ellipse(p.x, p.y - r * 0.5, r, r * 0.86, 0, 0, 7); ctx.fill();
-        ctx.fillStyle = grey(206, l);
+        ctx.fillStyle = regolith(252, l);
         ctx.beginPath(); ctx.ellipse(p.x - r * 0.3, p.y - r * 0.8, r * 0.45, r * 0.38, 0, 0, 7); ctx.fill();
       }
     }
@@ -264,32 +356,79 @@
 
   /* ---------- roads ---------- */
 
-  function drawRoad(ctx, s, t, l) {
+  function drawRoad(ctx, s, t, l, night) {
     const { x, y } = t;
     const railed = t.b.type === 'rail';
-    ctx.fillStyle = tone(railed ? '#3a3f4c' : '#5a5248', l, 1);
-    fillDiamond(ctx, x + 0.09, y + 0.09, 0.82, 0.82);
     const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]].filter(([dx, dy]) => {
       const n = S.tileAt(s, x + dx, y + dy);
       return n && (n.b || n.f || n.zone);
     });
     const legs = dirs.length ? dirs : [[1, 0], [-1, 0]];
     const c = iso(x + 0.5, y + 0.5);
-    ctx.strokeStyle = railed ? `rgba(214,226,242,${0.5 + l * 0.4})` : 'rgba(255,255,255,0.18)';
-    ctx.lineWidth = railed ? 1.6 : 1.6;
-    if (!railed) ctx.setLineDash([6, 5]);
-    for (const [dx, dy] of legs) {
-      const e = iso(x + 0.5 + dx * 0.5, y + 0.5 + dy * 0.5);
-      ctx.beginPath(); ctx.moveTo(c.x, c.y); ctx.lineTo(e.x, e.y); ctx.stroke();
-    }
-    ctx.setLineDash([]);
+
+    /* Rail stays exposed line-and-ties — visually distinct from the
+       pressurised tube below, same as an open-air siding next to a
+       sealed corridor. */
     if (railed) {
+      ctx.fillStyle = tone('#3a3f4c', l, 1);
+      fillDiamond(ctx, x + 0.09, y + 0.09, 0.82, 0.82);
+      ctx.strokeStyle = `rgba(214,226,242,${0.5 + l * 0.4})`;
+      ctx.lineWidth = 1.6;
+      for (const [dx, dy] of legs) {
+        const e = iso(x + 0.5 + dx * 0.5, y + 0.5 + dy * 0.5);
+        ctx.beginPath(); ctx.moveTo(c.x, c.y); ctx.lineTo(e.x, e.y); ctx.stroke();
+      }
       ctx.strokeStyle = `rgba(48,42,36,${0.7 * Math.max(l, 0.45)})`; ctx.lineWidth = 2;
       for (const [dx, dy] of legs) {
         const a = iso(x + 0.5 + dx * 0.32 - (dy ? 0.14 : 0), y + 0.5 + dy * 0.32 - (dx ? 0.14 : 0));
         const b2 = iso(x + 0.5 + dx * 0.32 + (dy ? 0.14 : 0), y + 0.5 + dy * 0.32 + (dx ? 0.14 : 0));
         ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b2.x, b2.y); ctx.stroke();
       }
+      return;
+    }
+
+    /* Surface road: a raised, pressurised tunnel-tube rather than a painted
+       lane — a berm shadow underneath, a lit tube wall on each connected
+       leg with periodic ribs, and a dim amber seam light down the centre
+       that brightens at night. The 4-directional connectivity check above
+       is untouched, so junctions still read exactly as they did before. */
+    ctx.fillStyle = 'rgba(0,0,0,0.16)';
+    fillDiamond(ctx, x + 0.07, y + 0.07, 0.86, 0.86);
+    ctx.fillStyle = tone('#8a8478', l, 1);
+    fillDiamond(ctx, x + 0.12, y + 0.12, 0.76, 0.76);
+
+    for (const [dx, dy] of legs) {
+      const e = iso(x + 0.5 + dx * 0.5, y + 0.5 + dy * 0.5);
+      const nx = dy ? 0.09 : 0, ny = dx ? 0.09 : 0; // perpendicular offset for the tube walls
+      const wallA1 = iso(x + 0.5 + nx, y + 0.5 + ny), wallA2 = iso(x + 0.5 + dx * 0.5 + nx, y + 0.5 + dy * 0.5 + ny);
+      const wallB1 = iso(x + 0.5 - nx, y + 0.5 - ny), wallB2 = iso(x + 0.5 + dx * 0.5 - nx, y + 0.5 + dy * 0.5 - ny);
+      ctx.strokeStyle = tone('#c9c0a8', l, 1); ctx.lineWidth = 1.4;
+      ctx.beginPath(); ctx.moveTo(wallA1.x, wallA1.y - 3); ctx.lineTo(wallA2.x, wallA2.y - 3); ctx.stroke();
+      ctx.strokeStyle = tone('#5a5548', l, 0.9); ctx.lineWidth = 1.4;
+      ctx.beginPath(); ctx.moveTo(wallB1.x, wallB1.y - 3); ctx.lineTo(wallB2.x, wallB2.y - 3); ctx.stroke();
+
+      /* ribs, evenly spaced along the run */
+      ctx.strokeStyle = `rgba(30,28,24,${0.4 * Math.max(l, 0.5)})`; ctx.lineWidth = 1.1;
+      for (let i = 1; i <= 2; i++) {
+        const u = i / 3;
+        const rp = iso(x + 0.5 + dx * 0.5 * u, y + 0.5 + dy * 0.5 * u);
+        const r1 = { x: rp.x + (wallA1.x - wallB1.x) * 0.5, y: rp.y - 3 + (wallA1.y - wallB1.y) * 0.5 };
+        const r2 = { x: rp.x - (wallA1.x - wallB1.x) * 0.5, y: rp.y - 3 - (wallA1.y - wallB1.y) * 0.5 };
+        ctx.beginPath(); ctx.moveTo(r1.x, r1.y); ctx.lineTo(r2.x, r2.y); ctx.stroke();
+      }
+
+      /* seam light down the centre — dim by day, glowing amber at night */
+      const sp = iso(x + 0.5 + dx * 0.32, y + 0.5 + dy * 0.32);
+      ctx.fillStyle = night ? `rgba(255,196,90,${0.55 + beat(600) * 0.25})` : 'rgba(255,214,150,0.35)';
+      ctx.beginPath(); ctx.arc(sp.x, sp.y - 3, night ? 1.6 : 1.1, 0, 7); ctx.fill();
+    }
+
+    /* an occasional maintenance hatch, placed by the tile's own seed rather
+       than every tile, so the tube reads as infrastructure, not wallpaper */
+    if (((t.v * 233) % 1) < 0.1) {
+      ctx.fillStyle = tone('#6f6a5c', l, 1);
+      ctx.strokeStyle = tone('#c9c0a8', l, 0.8); ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.rect(c.x - 4, c.y - 3 - 4, 8, 8); ctx.fill(); ctx.stroke();
     }
   }
 
@@ -353,7 +492,26 @@
 
   /* ---------- zone buildings (habitation / trade / industry, stage 1-4) ---------- */
 
-  const ZONE_Z = st => 14 + st * 13;
+  const ZONE_Z = st => 20 + st * 12;
+
+  /* Dome footprint(s) for a zoned tile, in tile-fraction coordinates: one
+     centred dome while a tile is still a starter module, a small cluster
+     once it's developed enough to read as more than that. Cluster layout
+     picked by variant(t) so neighbouring same-stage tiles don't all grow
+     identically. The first entry is always the primary dome — the one
+     trim (windows, beacons, signage) hangs off. */
+  function domeLayout(stage, v) {
+    if (stage <= 2) {
+      const w = stage === 1 ? 0.52 : 0.64;
+      return [{ x: 0.5 - w / 2, y: 0.5 - w / 2, w, h: w }];
+    }
+    const layouts = [
+      [{ x: 0.40, y: 0.36, w: 0.46, h: 0.46 }, { x: 0.04, y: 0.14, w: 0.36, h: 0.36 }, { x: 0.44, y: 0.02, w: 0.32, h: 0.32 }],
+      [{ x: 0.34, y: 0.32, w: 0.48, h: 0.48 }, { x: 0.42, y: 0.66, w: 0.34, h: 0.34 }, { x: 0.02, y: 0.44, w: 0.32, h: 0.32 }],
+      [{ x: 0.30, y: 0.30, w: 0.44, h: 0.44 }, { x: 0.60, y: 0.10, w: 0.32, h: 0.32 }, { x: 0.10, y: 0.58, w: 0.34, h: 0.34 }]
+    ];
+    return layouts[v % layouts.length];
+  }
 
   function drawZoneBuilding(ctx, s, t, l, sv, night) {
     const { x, y, zone: z } = t;
@@ -362,34 +520,33 @@
     groundShadow(ctx, x + 0.08, y + 0.08, 0.84, 0.84, Z, sv);
     contact(ctx, x, y, 1, 1);
     const base = ZONE_COLOUR[z.kind];
+    const layout = domeLayout(z.stage, v);
+    const shellCol = z.kind === 'hab' ? '#c7cdd9' : z.kind === 'trade' ? '#b8ab95' : '#8f96a3';
+
+    let primary = null;
+    layout.forEach((d, i) => {
+      const dz = i === 0 ? Z : Z * 0.72;
+      const geo = dome(ctx, x + d.x, y + d.y, d.w, d.h, dz, shellCol, l, {
+        stroke: grey(140, l), lw: 1, ring: `rgba(${z.kind === 'hab' ? '190,225,255' : z.kind === 'trade' ? '255,214,150' : '210,200,255'},${0.3 + l * 0.28})`
+      });
+      if (i === 0) primary = { ...geo, z: dz };
+    });
 
     if (z.kind === 'hab') {
-      box(ctx, x + 0.16, y + 0.16, 0.68, 0.68, Z, '#c7cdd9', l,
-        { stroke: grey(150, l), lw: 1.1, top: tone(base, l, 0.5) });
-      /* a porch/airlock nub even at bare stage 1, so a freshly-grown tile
-         reads as a small module rather than an unmarked box */
-      if (z.stage >= 1) {
-        const px = x + (v === 0 ? 0.10 : 0.80), py = y + (v === 1 ? 0.10 : 0.80);
-        box(ctx, px - 0.06, py - 0.06, 0.12, 0.12, Z * 0.5, '#aab1c0', l, { noRim: true });
-      }
+      /* window dots ringing the primary dome once it's more than a bare
+         shell, brighter and glowing amber at night */
       if (z.stage >= 2) {
-        const winCount = 2 + (v % 2);
-        ctx.strokeStyle = `rgba(90,100,118,${0.5 * Math.max(l, 0.5)})`; ctx.lineWidth = 1.1;
-        for (let i = 1; i < winCount + 1; i++) {
-          const u = x + 0.16 + 0.68 * i / (winCount + 1);
-          const a = iso(u, y + 0.16), b = iso(u, y + 0.84);
-          ctx.beginPath(); ctx.moveTo(a.x, a.y - Z); ctx.lineTo(b.x, b.y - Z * 0.4); ctx.stroke();
-        }
-        for (let i = 0; i < 2; i++) {
-          const q = iso(x + 0.32 + i * 0.36, y + 0.84);
-          const gy = q.y - Z * 0.5;
+        const winCount = 3 + (v % 2);
+        for (let i = 0; i < winCount; i++) {
+          const ang = (i / winCount) * Math.PI * 2 + v;
+          const q = { x: primary.p.x + Math.cos(ang) * primary.rx * 0.72, y: primary.p.y - primary.z * 0.62 + Math.sin(ang) * primary.ry * 0.4 };
           if (night) {
-            const gl = ctx.createRadialGradient(q.x, gy, 1, q.x, gy, 9);
+            const gl = ctx.createRadialGradient(q.x, q.y, 1, q.x, q.y, 8);
             gl.addColorStop(0, 'rgba(255,205,110,0.5)'); gl.addColorStop(1, 'rgba(255,205,110,0)');
-            ctx.fillStyle = gl; ctx.beginPath(); ctx.arc(q.x, gy, 9, 0, 7); ctx.fill();
+            ctx.fillStyle = gl; ctx.beginPath(); ctx.arc(q.x, q.y, 8, 0, 7); ctx.fill();
           }
           ctx.fillStyle = '#ffd166';
-          ctx.beginPath(); ctx.arc(q.x, gy, 2.3, 0, 7); ctx.fill();
+          ctx.beginPath(); ctx.arc(q.x, q.y, 2, 0, 7); ctx.fill();
         }
         /* a thin ground-level walkway to any same-stage-or-further hab
            neighbour — reads as a connected district rather than isolated
@@ -404,78 +561,61 @@
         }
       }
       if (z.stage >= 4) {
-        const mast = iso(x + 0.22, y + 0.22);
+        const mast = { x: primary.p.x - primary.rx * 0.3, y: primary.p.y - primary.z };
         ctx.strokeStyle = grey(170, Math.max(l, 0.5)); ctx.lineWidth = 1.2;
-        ctx.beginPath(); ctx.moveTo(mast.x, mast.y - Z); ctx.lineTo(mast.x, mast.y - Z - 12); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(mast.x, mast.y); ctx.lineTo(mast.x, mast.y - 12); ctx.stroke();
         ctx.fillStyle = `rgba(255,110,90,${0.4 + beat(500) * 0.5})`;
-        ctx.beginPath(); ctx.arc(mast.x, mast.y - Z - 13, 1.9, 0, 7); ctx.fill();
+        ctx.beginPath(); ctx.arc(mast.x, mast.y - 13, 1.9, 0, 7); ctx.fill();
       }
     } else if (z.kind === 'trade') {
-      box(ctx, x + 0.14, y + 0.14, 0.72, 0.72, Z * 0.85, '#b8ab95', l,
-        { stroke: grey(140, l), lw: 1.1, top: tone('#3a5a7a', l, 0.7) });
       if (z.stage >= 2) {
-        const ax = v === 2 ? 0.72 : 0.06;
-        box(ctx, x + ax, y + 0.60, 0.22, 0.22, Z * 0.35, base, l, { noRim: true });
+        const q = { x: primary.p.x + primary.rx * (v === 2 ? 0.8 : -0.8), y: primary.p.y - primary.z * 0.3 };
+        box(ctx, x + (v === 2 ? 0.78 : 0.02), y + 0.62, 0.2, 0.2, Z * 0.32, base, l, { noRim: true });
         if (night) {
           ctx.fillStyle = `rgba(255,184,77,${0.5 + beat(900) * 0.3})`;
-          const q = iso(x + 0.5, y + 0.86);
-          ctx.fillRect(q.x - 14, q.y - Z * 0.5, 28, 3);
+          ctx.fillRect(q.x - 14, q.y, 28, 3);
         }
       }
       if (z.stage >= 3) {
-        box(ctx, x + 0.70, y + 0.10, 0.20, 0.20, Z * 0.3, base, l, { noRim: true });
         /* a lit marquee sign over the entrance — the exchange floor's
            storefront, distinct from the plain awning glow above */
-        const mq = iso(x + 0.30 + v * 0.06, y + 0.10);
+        const mq = { x: primary.p.x + v * 4 - 6, y: primary.p.y - primary.z - 6 };
         ctx.fillStyle = night ? `rgba(255,209,102,${0.55 + beat(700) * 0.25})` : 'rgba(200,210,225,0.5)';
-        ctx.fillRect(mq.x - 10, mq.y - Z * 0.95, 20, 4);
+        ctx.fillRect(mq.x - 10, mq.y, 20, 4);
         /* a loading-dock crate stack at the back corner */
         const cq = iso(x + 0.14, y + 0.86);
         ctx.fillStyle = shade(base, -25);
-        ctx.fillRect(cq.x - 6, cq.y - Z * 0.22 - 6, 12, 6);
+        ctx.fillRect(cq.x - 6, cq.y - 6, 12, 6);
         ctx.fillStyle = shade(base, -10);
-        ctx.fillRect(cq.x - 5, cq.y - Z * 0.22 - 11, 10, 5);
+        ctx.fillRect(cq.x - 5, cq.y - 11, 10, 5);
       }
     } else { // industry
-      box(ctx, x + 0.20, y + 0.20, 0.60, 0.60, Z * 0.8, '#8f96a3', l,
-        { stroke: grey(120, l), lw: 1.2 });
       if (z.stage >= 2) {
-        const p = iso(x + 0.5, y + 0.18);
         ctx.strokeStyle = tone(base, l, 1); ctx.lineWidth = 3;
-        ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x, p.y - Z * 0.7); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(primary.p.x, primary.p.y - primary.z);
+        ctx.lineTo(primary.p.x, primary.p.y - primary.z - 18); ctx.stroke();
       }
       if (z.stage >= 3) {
-        ctx.save();
-        diamond(ctx, x + 0.14, y + 0.78, 0.72, 0.16, Z * 0.62);
-        ctx.clip();
-        ctx.fillStyle = '#1a1a1a';
-        const p0 = iso(x, y); ctx.fillRect(p0.x - TW, p0.y - Z, TW * 2, TH);
-        ctx.fillStyle = '#ffd166';
-        for (let i = 0; i < 4; i++) {
-          const q = iso(x + 0.14 + i * 0.18, y + 0.8);
-          ctx.fillRect(q.x - 6, q.y - Z * 0.65, 6, 6);
-        }
-        ctx.restore();
         /* a second stack, offset by variant so a row of stage-3+ tiles
            doesn't read as one repeated silhouette */
-        const p2 = iso(x + 0.24 + v * 0.06, y + 0.18);
+        const p2x = primary.p.x + primary.rx * 0.4 + v * 3, p2y = primary.p.y - primary.z * 0.7;
         ctx.strokeStyle = tone(base, l, 0.75); ctx.lineWidth = 2.2;
-        ctx.beginPath(); ctx.moveTo(p2.x, p2.y); ctx.lineTo(p2.x, p2.y - Z * 0.52); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(p2x, p2y); ctx.lineTo(p2x, p2y - 14); ctx.stroke();
         /* a stockpile of raw material at the base, same technique as the
            mining rig's spoil pile */
-        const sp = iso(x + 0.82, y + 0.82);
+        const sp = iso(x + 0.85, y + 0.85);
         ctx.fillStyle = shade('#9a9086', -20);
         ctx.beginPath(); ctx.ellipse(sp.x, sp.y, 10, 4.6, 0, 0, 7); ctx.fill();
         ctx.fillStyle = '#9a9086';
         ctx.beginPath(); ctx.ellipse(sp.x, sp.y - 2.5, 7, 3.4, 0, 0, 7); ctx.fill();
       }
       if (z.stage >= 4) {
-        const p = iso(x + 0.82, y + 0.18);
+        const p = { x: primary.p.x + primary.rx * 0.5, y: primary.p.y - primary.z * 1.1 };
         const flick = 0.5 + beat(180 + v * 70) * 0.5;
         ctx.fillStyle = `rgba(255,140,80,${0.5 * flick})`;
-        ctx.beginPath(); ctx.ellipse(p.x, p.y - Z * 0.9 - 6, 4, 8 * flick, 0, 0, 7); ctx.fill();
+        ctx.beginPath(); ctx.ellipse(p.x, p.y - 6, 4, 8 * flick, 0, 0, 7); ctx.fill();
         ctx.fillStyle = `rgba(255,209,102,${0.7 * flick})`;
-        ctx.beginPath(); ctx.ellipse(p.x, p.y - Z * 0.9 - 4, 2, 5 * flick, 0, 0, 7); ctx.fill();
+        ctx.beginPath(); ctx.ellipse(p.x, p.y - 4, 2, 5 * flick, 0, 0, 7); ctx.fill();
       }
     }
   }
@@ -488,8 +628,14 @@
     const { x, y } = t;
     const Z = STRUCT_Z.command;
 
-    /* regolith shielding heaped along the flanks */
-    box(ctx, x + 0.02, y + 0.10, 0.96, 0.80, Z * 0.22, '#9a9186', l, { stroke: 'rgba(0,0,0,0.18)' });
+    /* regolith-berm skirt, same flattened-ellipse language the zone domes
+       use, so the hero structure and the district around it read as one
+       consistent colony rather than two different art styles */
+    {
+      const bp = iso(x + 0.5, y + 0.62);
+      ctx.fillStyle = regolith(150, l);
+      ctx.beginPath(); ctx.ellipse(bp.x, bp.y, TW * 0.5, TH * 0.46, 0, 0, 7); ctx.fill();
+    }
     /* hull */
     box(ctx, x + 0.10, y + 0.26, 0.80, 0.48, Z, '#c7cdd9', l, { stroke: grey(140, l), lw: 1.3 });
 
@@ -509,9 +655,10 @@
       ctx.beginPath(); ctx.moveTo(a.x, a.y - Z); ctx.lineTo(b.x, b.y - Z); ctx.lineTo(b.x, b.y - Z * 0.35); ctx.stroke();
     }
 
-    /* airlock cap with docking ring and chevrons */
+    /* airlock cap with docking ring and chevrons — same blue-glass viewport
+       tint the zone domes use, so the ring language matches city-wide */
     const cap = iso(x + 0.90, y + 0.74);
-    ctx.fillStyle = tone('#d6dbe6', l, 0.95);
+    ctx.fillStyle = `rgba(190,225,255,${0.5 + l * 0.35})`;
     ctx.beginPath(); ctx.ellipse(cap.x, cap.y - Z * 0.52, TW * 0.075, Z * 0.42, 0, 0, 7); ctx.fill();
     ctx.strokeStyle = grey(120, l); ctx.lineWidth = 1.4;
     ctx.beginPath(); ctx.ellipse(cap.x, cap.y - Z * 0.52, TW * 0.075, Z * 0.42, 0, 0, 7); ctx.stroke();
@@ -773,6 +920,72 @@
     }
   }
 
+  /* ---------- crew and rover traffic (cosmetic, from agents.js) ---------- */
+
+  const GHOST_FILL = 'rgba(198,224,255,0.95)';
+  const GHOST_EDGE = 'rgba(104,158,232,1)';
+  /* domes and other structures are opaque and now the tallest thing on the
+     map — a figure walking behind one has to read as a ghost silhouette
+     instead of just vanishing, same trick Lunar Farm uses for its own hab
+     modules. Roads and the spaceport pad are open ground, so they don't
+     hide anyone; a zoned dome (stage >= 1) does, a grow hall's glass walls
+     don't. */
+  const AGENT_SEE_THROUGH = { track: 1, rail: 1, spaceport: 1 };
+  function agentOccluded(s, ax, ay) {
+    const cx = Math.floor(ax), cy = Math.floor(ay);
+    for (const [dx, dy] of [[1, 0], [0, 1], [1, 1], [2, 0], [0, 2]]) {
+      const t = S.tileAt(s, cx + dx, cy + dy);
+      if (!t) continue;
+      if (t.b && !AGENT_SEE_THROUGH[t.b.type]) return true;
+      if (t.zone && t.zone.stage >= 1) return true;
+    }
+    return false;
+  }
+
+  function drawAgent(ctx, a, l, ghost) {
+    const p = iso(a.x + 0.5, a.y + 0.5);
+
+    if (ghost) {
+      ctx.fillStyle = GHOST_FILL; ctx.strokeStyle = GHOST_EDGE; ctx.lineWidth = 1.3;
+      if (a.kind === 'rover') {
+        ctx.beginPath(); ctx.ellipse(p.x, p.y - 7, 9, 6, 0, 0, 7); ctx.fill(); ctx.stroke();
+      } else {
+        ctx.beginPath(); ctx.ellipse(p.x, p.y - 6, 3, 6, 0, 0, 7); ctx.fill(); ctx.stroke();
+        ctx.beginPath(); ctx.arc(p.x, p.y - 12, 2.5, 0, 7); ctx.fill(); ctx.stroke();
+      }
+      return;
+    }
+
+    ctx.fillStyle = 'rgba(0,0,0,0.34)';
+    ctx.beginPath(); ctx.ellipse(p.x, p.y + 1, a.kind === 'rover' ? 8 : 4, 3, 0, 0, 7); ctx.fill();
+
+    if (a.kind === 'rover') {
+      ctx.fillStyle = grey(120, Math.max(l, 0.5));
+      ctx.fillRect(p.x - 8, p.y - 4, 16, 4);
+      ctx.fillStyle = grey(178, Math.max(l, 0.5));
+      ctx.fillRect(p.x - 6, p.y - 10, 12, 6);
+      if (a.cargo) { ctx.fillStyle = '#6ee7a0'; ctx.fillRect(p.x - 4, p.y - 13, 8, 3); }
+      ctx.fillStyle = '#ffd166';
+      ctx.beginPath(); ctx.arc(p.x + 7, p.y - 7, 1.5, 0, 7); ctx.fill();
+      ctx.fillStyle = 'rgba(20,24,32,0.9)';
+      ctx.beginPath(); ctx.arc(p.x - 5, p.y - 1, 1.8, 0, 7); ctx.fill();
+      ctx.beginPath(); ctx.arc(p.x + 5, p.y - 1, 1.8, 0, 7); ctx.fill();
+      return;
+    }
+
+    /* a suited figure, bobbing as it walks */
+    const bob = Math.abs(Math.sin(a.bob)) * 1.5;
+    ctx.fillStyle = a.tint;
+    ctx.fillRect(p.x - 2, p.y - 8 - bob, 4, 5.5);
+    ctx.fillStyle = shade(a.tint === '#e8edf7' ? '#e8edf7' : '#d8c9a8', -40);
+    ctx.fillRect(p.x - 2, p.y - 3 - bob, 1.6, 3);
+    ctx.fillRect(p.x + 0.4, p.y - 3 - bob, 1.6, 3);
+    ctx.fillStyle = a.tint;
+    ctx.beginPath(); ctx.arc(p.x, p.y - 10 - bob, 2.2, 0, 7); ctx.fill();
+    ctx.fillStyle = 'rgba(90,150,220,0.85)';
+    ctx.beginPath(); ctx.arc(p.x + 0.4, p.y - 10.2 - bob, 1.3, 0, 7); ctx.fill();
+  }
+
   /* ---------- viewport culling ---------- */
 
   function visibleRange(ui, w, h) {
@@ -897,7 +1110,7 @@
 
     walkVisible(range, (tx, ty) => {
       const t = s.map[idx(tx, ty)];
-      if (t.b && (t.b.type === 'track' || t.b.type === 'rail')) drawRoad(ctx, s, t, light);
+      if (t.b && (t.b.type === 'track' || t.b.type === 'rail')) drawRoad(ctx, s, t, light, night);
     });
 
     walkVisible(range, (tx, ty) => {
@@ -918,6 +1131,13 @@
       const t = s.map[idx(tx, ty)];
       if (t.b && t.b.type !== 'track' && t.b.type !== 'rail') drawStruct(ctx, s, t, light, sv, night);
     });
+
+    if (A) {
+      for (const a of A.all()) {
+        if (a.x < range.xMin - 1 || a.x > range.xMax + 1 || a.y < range.yMin - 1 || a.y > range.yMax + 1) continue;
+        drawAgent(ctx, a, light, agentOccluded(s, a.x, a.y));
+      }
+    }
 
     if (ui.view && ui.view !== 'zones') drawOverlay(ctx, s, ui, range);
 

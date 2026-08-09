@@ -29,7 +29,8 @@
       <button data-speed="12" class="sp">12×</button>
     </div>
     <div class="modes">
-      <button id="btnAuto" class="mode" title="Let a colony director build and manage growth on its own">Automanage</button>
+      <button id="btnAutoCity" class="mode" title="Let a director handle day-to-day operations: colony alerts, farming, power, roads and zoning">Auto-Manage City</button>
+      <button id="btnAutoExpand" class="mode" title="Let a director handle survey expansion and the mining/export economy">Auto-Manage Expansion</button>
       <button id="btnReport" class="mode" title="Telemetry report">Report</button>
       <button id="btnLeague" class="mode" title="Scores from past runs">League</button>
       <button id="btnDisasters" class="mode" title="Toggle the disaster deck on or off">Disasters</button>
@@ -164,10 +165,11 @@
     <p>The Colony tab tracks a straight answer to "is this actually working": a day counts as
       self-sufficient when the grid held without browning out, the larder has more than five
       days of food ahead of it, and the zoned districts brought in more than they cost to run.
-      Hold that for ten straight days and the charter records it. <strong>Automanage</strong>
-      chases the same goal once established — a colony whose books are trending backwards gets
-      its zoning and survey expansion throttled in favour of the mining/ISRU/launch economy that
-      actually pays for itself, rather than spending the founding stash down slower.</p>
+      Hold that for ten straight days and the charter records it. <strong>Auto-Manage City</strong>
+      and <strong>Auto-Manage Expansion</strong> both chase the same goal once established — each
+      throttles its own kind of growth (zoning for City, survey charter and the export economy
+      for Expansion) once the books are trending backwards, rather than spending the founding
+      stash down slower.</p>
 
     <h3>Upgrades</h3>
     <p>Colony-wide equipment, bought once rather than placed on a tile — dust shielding for the
@@ -175,11 +177,15 @@
       against flares and moonquakes, self-tending grow halls, and harder drill bits for every
       mining rig already sunk. Free under Free Mode, same as everything else.</p>
 
-    <h3>The three switches</h3>
+    <h3>The switches</h3>
     <p><strong>Free Mode</strong> waives every cost, for experimenting with layouts.
       <strong>Disasters</strong> toggles the random-event deck — solar flares, micrometeorite
       strikes, moonquakes and the rest — off by default; flip it on for a harder run.
-      <strong>Automanage</strong> hands the colony to a director that builds and grows it for you.</p>
+      <strong>Auto-Manage City</strong> hands day-to-day operations — colony alerts, farming,
+      power, roads, zoning — to a director. <strong>Auto-Manage Expansion</strong> hands it the
+      survey charter and the mining/ISRU/launch economy instead. The two are independent: run
+      either alone, both together for a fully hands-off colony, or neither for full manual
+      control.</p>
 
     <h3>Credits</h3>
     <p>An original game, in the spirit of Maxis' <em>SimCity 2000</em> (1993) but sharing no
@@ -228,6 +234,7 @@
 <script src="js/zones.js"></script>
 <script src="js/sim.js"></script>
 <script src="js/autopilot.js"></script>
+<script src="js/agents.js"></script>
 <script src="js/render.js"></script>
 <script src="js/dashboard.js"></script>
 <script src="js/league.js"></script>

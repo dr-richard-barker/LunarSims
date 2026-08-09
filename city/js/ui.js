@@ -500,8 +500,11 @@
        an alert nobody answers freezes the colony outright — Automanage
        included, since sim ticks are what would otherwise let its own
        endOfDay-time resolution ever run. Answer it here instead of ever
-       opening the modal. */
-    if (s.auto && window.LC_AUTO) {
+       opening the modal. Bucketed under City (day-to-day operations): a
+       player running Expansion-only still sees and answers alerts
+       themselves, which is fine since they're not claiming to be fully
+       hands-off. */
+    if (s.autoCity && window.LC_AUTO) {
       const auto = [];
       window.LC_AUTO.resolveDisaster(s, auto);
       auto.forEach(m => S.pushLog(s, m));
@@ -538,11 +541,13 @@
   /* ---------- modes / modals ---------- */
 
   function markModes() {
-    document.getElementById('btnAuto').classList.toggle('on', !!s.auto);
+    document.getElementById('btnAutoCity').classList.toggle('on', !!s.autoCity);
+    document.getElementById('btnAutoExpand').classList.toggle('on', !!s.autoExpand);
     document.getElementById('btnDisasters').classList.toggle('on', !!s.disastersOn);
     document.getElementById('btnSandbox').classList.toggle('on', !!s.sandbox);
   }
-  document.getElementById('btnAuto').onclick = () => { s.auto = !s.auto; markModes(); save(); };
+  document.getElementById('btnAutoCity').onclick = () => { s.autoCity = !s.autoCity; markModes(); save(); };
+  document.getElementById('btnAutoExpand').onclick = () => { s.autoExpand = !s.autoExpand; markModes(); save(); };
   document.getElementById('btnDisasters').onclick = () => { s.disastersOn = !s.disastersOn; markModes(); save(); };
   document.getElementById('btnSandbox').onclick = () => { s.sandbox = !s.sandbox; markModes(); buildUpgradesPalette(); save(); };
   document.getElementById('btnReport').onclick = openReport;
@@ -574,10 +579,14 @@
   document.getElementById('btnSave').onclick = () => { save(); toast('Colony saved.'); };
   document.getElementById('btnReset').onclick = () => {
     if (!confirm('Start a new colony? This clears the current save.')) return;
-    s = S.newGame(); ui.selected = null; markModes(); buildUpgradesPalette(); save(); renderAll();
+    s = S.newGame(); ui.selected = null; markModes(); buildUpgradesPalette();
+    if (window.LC_AGENTS) window.LC_AGENTS.reset();
+    save(); renderAll();
   };
   document.getElementById('overRestart').onclick = () => {
-    s = S.newGame(); ui.selected = null; markModes(); buildUpgradesPalette(); save(); renderAll();
+    s = S.newGame(); ui.selected = null; markModes(); buildUpgradesPalette();
+    if (window.LC_AGENTS) window.LC_AGENTS.reset();
+    save(); renderAll();
     document.getElementById('mOver').hidden = true;
   };
   document.getElementById('overLeague').onclick = () => {
@@ -629,6 +638,7 @@
         if (s.over) break;
       }
     }
+    if (ui.speed > 0 && window.LC_AGENTS) window.LC_AGENTS.update(s, dt * ui.speed);
     R.draw(ctx, s, ui);
     renderHUD();
     if (frame.tick++ % 20 === 0) { renderColony(); renderGoals(); checkEvent(); checkOver(); }

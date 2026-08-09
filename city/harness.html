@@ -475,7 +475,7 @@ td.mark{width:34px;text-align:center}
         'the first lunar night, which is what this checks for.',
       run() {
         const s = S.newGame();
-        s.auto = true;
+        s.autoCity = true; s.autoExpand = true;
         days(s, 110, { life: true });
         return [
           ['survives the first 110 days unattended', !s.over, true],
@@ -490,7 +490,7 @@ td.mark{width:34px;text-align:center}
       why: 'the director should never spend the colony down to nothing, the way lunar-habitat\'s reserve() rule works',
       run() {
         const s = S.newGame();
-        s.auto = true; s.credits = 3000;
+        s.autoCity = true; s.autoExpand = true; s.credits = 3000;
         let sawNegative = false;
         days(s, 60, { life: true, eachHour: st => { if (st.credits < -100) sawNegative = true; } });
         return [
@@ -502,7 +502,7 @@ td.mark{width:34px;text-align:center}
       why: 'given enough runway it should mine, commission ISRU, and fly at least one rocket',
       run() {
         const s = S.newGame();
-        s.auto = true; s.credits = 20000;
+        s.autoCity = true; s.autoExpand = true; s.credits = 20000;
         days(s, 500, { life: true });
         return [
           ['still going, or failed no earlier than a real setback would', s.day, '>=100'],
@@ -532,7 +532,6 @@ td.mark{width:34px;text-align:center}
       why: 'the event modal gates the UI tick loop on being hidden — an alert nobody answers freezes the colony, Automanage included, so the director must clear one itself rather than leave it pending',
       run() {
         const s = S.newGame();
-        s.auto = true;
         s.pendingEvent = window.LC_DATA.EVENTS[0].id;
         const before = s.credits;
         const log = [];
@@ -550,7 +549,7 @@ td.mark{width:34px;text-align:center}
         let threw = null;
         for (const e of window.LC_DATA.EVENTS) {
           const s = S.newGame();
-          s.auto = true; s.pendingEvent = e.id;
+          s.pendingEvent = e.id;
           try { window.LC_AUTO.resolveDisaster(s, []); }
           catch (err) { threw = `${e.id}: ${err.message}`; break; }
           if (s.pendingEvent !== null) { threw = `${e.id} left the alert pending`; break; }
@@ -620,10 +619,10 @@ td.mark{width:34px;text-align:center}
       } },
 
     { name: 'Automanage expands the survey once it can afford to',
-      why: 'ensureExpansion should fire the same reserve-respecting way ensureMining/ensureIsru already do, once canExpand is true and the credits are there — this pins the trigger condition directly rather than waiting on however many organic days a real run would take to fill half the charter',
+      why: 'ensureExpansion should fire the same reserve-respecting way ensureMining/ensureIsru already do, once canExpand is true and the credits are there — this pins the trigger condition directly rather than waiting on however many organic days a real run would take to fill half the charter, and confirms the Expansion toggle works standalone without City also being on',
       run() {
         const s = S.newGame();
-        s.auto = true;
+        s.autoExpand = true;
         s.credits = 200000;
         paintRevealedFully(s, 'hab');
         const founding = { ...s.revealed };
@@ -727,7 +726,7 @@ td.mark{width:34px;text-align:center}
       run() {
         function setup() {
           const s = S.newGame();
-          s.auto = true; s.credits = 50000; s.day = 40; // sunlit half of the cycle, and > 20
+          s.credits = 50000; s.day = 40; // sunlit half of the cycle, and > 20
           for (let i = 0; i < 6; i++) {
             const t = revealedTile(s, x => !x.b && !x.f && !x.zone && x.t === 'flat');
             if (t) S.place(s, t, 'solar');
@@ -739,14 +738,16 @@ td.mark{width:34px;text-align:center}
         for (let i = 0; i < 7; i++) sBad.history.push({ d: i, credits: 20000 - i * 200 });
         const establishedNow = sBad.day > 20 && S.generation(sBad).total > S.gridDemand(sBad).total * 1.4;
         const zonedBefore = sBad.map.filter(t => t.zone).length;
-        window.LC_AUTO.autoManage(sBad, []);
+        window.LC_AUTO.autoManageCity(sBad, []);
+        window.LC_AUTO.autoManageExpansion(sBad, []);
         const zonedAfterBad = sBad.map.filter(t => t.zone).length;
         const minedAfterBad = S.count(sBad, 'miner');
 
         const sGood = setup();
         sGood.history = [];
         for (let i = 0; i < 7; i++) sGood.history.push({ d: i, credits: 20000 + i * 200 });
-        window.LC_AUTO.autoManage(sGood, []);
+        window.LC_AUTO.autoManageCity(sGood, []);
+        window.LC_AUTO.autoManageExpansion(sGood, []);
         const zonedAfterGood = sGood.map.filter(t => t.zone).length;
 
         return [
