@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lunar Metropolis — a sandbox city on the Moon</title>
+<meta name="description" content="A SimCity 2000-style sandbox city builder on the Moon: sculpt crater terrain, chase the peaks of eternal light for power and the permanently shadowed floors for ice, and grow a city out of the regolith.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🌗</text></svg>">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="hud">
+  <div class="brand">
+    <span class="mark">🌗</span>
+    <div>
+      <strong>LUNAR METROPOLIS</strong>
+      <small>Terrain Foundation · Phase 1</small>
+    </div>
+  </div>
+  <div class="chips" id="stats"></div>
+  <div class="clockbox">
+    <div class="modes">
+      <button id="btnCentre" class="mode" title="Recentre the camera on the middle of the map">Centre</button>
+      <button id="btnNew" class="mode" title="Generate a brand new landscape from a fresh seed">New Terrain</button>
+    </div>
+  </div>
+</header>
+
+<main>
+  <nav class="palette">
+    <div class="palgroup">
+      <h4>Terrain</h4>
+      <div class="tools" id="tools"></div>
+    </div>
+    <div class="palgroup">
+      <h4>Reading the ground</h4>
+      <p class="note" style="margin:0">Near the pole the sun barely clears the horizon, so even low
+        relief casts long shadows. High rims stay lit almost permanently — the best ground for solar.
+        Deep crater floors never see the sun at all, which is exactly where the ice survives.</p>
+    </div>
+  </nav>
+
+  <section class="stage">
+    <div class="seg" id="viewBar">
+      <button data-view="terrain" class="on">Terrain</button>
+      <button data-view="height">Elevation</button>
+      <button data-view="sun">Sunlight</button>
+      <button data-view="deposits">Deposits</button>
+    </div>
+    <canvas id="cv"></canvas>
+    <div class="statusbar"><span id="hint"></span></div>
+  </section>
+
+  <aside class="panel">
+    <div class="tabpane on" id="pane-info">
+      <div id="tileDetail" class="empty">Click a tile to read the ground.</div>
+    </div>
+  </aside>
+</main>
+
+<script src="js/data.js"></script>
+<script src="js/terrain.js"></script>
+<script src="js/render.js"></script>
+<script src="js/ui.js"></script>
+</body>
+</html>

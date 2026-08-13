@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lunar Metropolis — terrain harness</title>
+<style>
+:root{
+  --bg:#080a10; --panel:#11141c; --panel-2:#161a24; --line:#232838;
+  --ink:#e6ebf5; --ink-soft:#9aa6bd; --ink-faint:#5c6478;
+  --good:#6ee7a0; --bad:#ff7a68;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.6}
+.wrap{max-width:1000px;margin:0 auto;padding:34px 22px 70px}
+h1{font-size:26px;margin:0 0 6px}
+.lede{color:var(--ink-soft);font-size:14px;margin:0 0 8px;max-width:74ch}
+.note{color:var(--ink-faint);font-size:12.5px;margin:0 0 22px;max-width:74ch}
+#summary{font-family:var(--mono);font-size:15px;padding:12px 16px;border-radius:9px;
+  background:var(--panel);border:1px solid var(--line);margin-bottom:20px}
+.sc{background:var(--panel);border:1px solid var(--line);border-radius:10px;margin-bottom:12px;overflow:hidden}
+.sc > h2{margin:0;padding:11px 16px;font-size:14px;display:flex;gap:10px;align-items:baseline;
+  background:var(--panel-2);border-bottom:1px solid var(--line)}
+.sc h2 .why{font-weight:400;font-size:12px;color:var(--ink-soft)}
+.sc h2 .verdict{margin-left:auto;font-family:var(--mono);font-size:12px}
+table{border-collapse:collapse;width:100%;font-size:12.5px}
+td{padding:7px 16px;border-bottom:1px solid var(--line);font-family:var(--mono)}
+tr:last-child td{border-bottom:none}
+td.label{font-family:var(--sans);color:var(--ink-soft);width:46%}
+td.mark{width:34px;text-align:center}
+.pass{color:var(--good)} .fail{color:var(--bad)}
+.err{color:var(--bad);font-family:var(--mono);font-size:12px;padding:10px 16px;white-space:pre-wrap}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Lunar Metropolis — terrain harness</h1>
+  <p class="lede">Drives the elevation model headlessly: map generation, the one-level step rule
+    that every sculpting tool must preserve, the sun-exposure raycast, and the deposit seeding
+    that hangs off it. No renderer, no DOM — only <code>data.js</code> and <code>terrain.js</code>.</p>
+  <p class="note">Re-run after any change to those two files. The step rule in particular is an
+    invariant the renderer and every later system rely on.</p>
+  <div id="summary">running…</div>
+  <div id="out"></div>
+</div>
+
+<script src="js/data.js"></script>
+<script src="js/terrain.js"></script>
+<script>
+(function () {
+  const T = window.LM_TERRAIN;
+  const K = window.LM_DATA.K;
+
+  /* Generation is the expensive step (a full-map sun raycast), so scenarios
+     that only read the world share one. Anything that sculpts gets its own. */
+  let shared = null;
+  const world = () => (shared || (shared = T.makeMap(2026)));
+  const fresh = seed => T.makeMap(seed === undefined ? 4242 : seed);
+
+  const at = (s, x, y) => s.map[T.idx(x, y)];
+
+  /* An open, flat test bed carved into a real map — lets the sun tests
+     assert against known geometry instead of whatever the generator
+     happened to produce. */
+  function flatten(s, cx, cy, r, h) {
+    for (let y = cy - r; y <= cy + r; y++)
+      for (let x = cx - r; x <= cx + r; x++) {
+        const t = T.tileAt(s, x, y);
+        if (t) { t.h = h; t.t = 'flat'; }
+      }
+  }
+
+  const SCENARIOS = [
+
+    { name: 'A world generates at the declared size, with real relief',
+      why: 'the map must be fully populated and actually varied in height — a flat plain would make every later elevation system pointless',
+      run() {
+        const s = world();
+        let lo = 99, hi = -1;
+        for (const t of s.map) { if (t.h < lo) lo = t.h; if (t.h > hi) hi = t.h; }
+        const kinds = new Set(s.map.map(t => t.t));
+        return [
+          ['the map is the declared size', s.map.length, K.COLS * K.ROWS],
+          ['every tile has an integer height in range',
+            s.map.every(t => Number.isInteger(t.h) && t.h >= 0 && t.h <= K.MAX_H), true],
+          ['the terrain actually varies in height', hi - lo, '>=6'],
+          ['more than one ground type was generated', kinds.size, '>=2'],
+          ['a lava-tube skylight exists', s.map.some(t => t.t === 'skylight'), true]
+        ];
+      } },
+
+    { name: 'Generation obeys the one-level step rule',
+      why: 'every sculpting tool relaxes toward this invariant, and the cliff renderer assumes it — if generation can violate it, nothing downstream is safe',
+      run() {
+        return [['no two adjacent tiles differ by more than one level', T.stepRuleHolds(world()), true]];
+      } },
+
+    { name: 'The same seed always regenerates the same world',
+      why: 'a shared seed has to be reproducible or nobody can compare runs, and the harness itself would stop being deterministic',
+      run() {
+        const a = T.makeMap(77), b = T.makeMap(77), c = T.makeMap(78);
+        const sameH = a.map.every((t, i) => t.h === b.map[i].h);
+        const sameSun = a.map.every((t, i) => t.sun === b.map[i].sun);
+        const differs = a.map.some((t, i) => t.h !== c.map[i].h);
+        return [
+          ['identical seeds give identical heights', sameH, true],
+          ['identical seeds give identical sun exposure', sameSun, true],
+          ['a different seed gives a different world', differs, true]
+        ];
+      } },
+
+    { name: 'Raising ground lifts it and keeps the slope walkable',
+      why: 'the raise tool must cascade into its neighbours — an un-relaxed raise makes spikes, not landscape',
+      run() {
+        const s = fresh(101);
+        const t = at(s, 60, 60);
+        const before = t.h;
+        for (let i = 0; i < 5; i++) T.raise(s, 60, 60);
+        return [
+          ['the tile actually rose', t.h > before, true],
+          ['it rose by the number of applications (clamped)', t.h, Math.min(K.MAX_H, before + 5)],
+          ['the step rule still holds across the whole map', T.stepRuleHolds(s), true],
+          ['neighbours were pulled up rather than left behind',
+            [[1,0],[-1,0],[0,1],[0,-1]].every(([dx,dy]) => Math.abs(at(s,60+dx,60+dy).h - t.h) <= K.MAX_STEP), true]
+        ];
+      } },
+
+    { name: 'Lowering ground drops it and keeps the slope walkable',
+      why: 'same contract as raising, in the other direction — this is how crater pads get dug',
+      run() {
+        const s = fresh(102);
+        const t = at(s, 40, 40);
+        for (let i = 0; i < 6; i++) T.raise(s, 40, 40);   // build headroom first
+        const high = t.h;
+        for (let i = 0; i < 4; i++) T.lower(s, 40, 40);
+        return [
+          ['the tile actually dropped', t.h < high, true],
+          ['the step rule still holds across the whole map', T.stepRuleHolds(s), true]
+        ];
+      } },
+
+    { name: 'Elevation clamps at both ends instead of running away',
+      why: 'a tool held down at the ceiling or the floor must simply stop, not push heights out of range and corrupt the renderer',
+      run() {
+        const s = fresh(103);
+        for (let i = 0; i < K.MAX_H + 8; i++) T.raise(s, 20, 20);
+        const top = at(s, 20, 20).h;
+        const refusedAtTop = T.raise(s, 20, 20);
+        for (let i = 0; i < K.MAX_H + 8; i++) T.lower(s, 90, 90);
+        const bottom = at(s, 90, 90).h;
+        const refusedAtBottom = T.lower(s, 90, 90);
+        return [
+          ['raising stops at the ceiling', top, K.MAX_H],
+          ['a raise at the ceiling reports no change', refusedAtTop, false],
+          ['lowering stops at the floor', bottom, 0],
+          ['a lower at the floor reports no change', refusedAtBottom, false],
+          ['every height is still in range', s.map.every(t => t.h >= 0 && t.h <= K.MAX_H), true],
+          ['the step rule survived both extremes', T.stepRuleHolds(s), true]
+        ];
+      } },
+
+    { name: 'Levelling walks ground toward a target height',
+      why: 'this is the build-pad tool — it has to converge on the target from either side and then stop',
+      run() {
+        const s = fresh(104);
+        const t = at(s, 70, 30);
+        for (let i = 0; i < 6; i++) T.raise(s, 70, 30);
+        const target = Math.max(0, t.h - 4);
+        let guard = 0;
+        while (t.h !== target && guard++ < 40) T.levelTo(s, 70, 30, target);
+        const noOp = T.levelTo(s, 70, 30, target);
+        return [
+          ['it reached the target height', t.h, target],
+          ['levelling an already-level tile reports no change', noOp, false],
+          ['the step rule still holds', T.stepRuleHolds(s), true]
+        ];
+      } },
+
+    { name: 'Clearing boulders opens the ground',
+      why: 'boulder fields are the one terrain type that blocks building, so clearing them has to actually change the tile',
+      run() {
+        const s = fresh(105);
+        const b = s.map.find(t => t.t === 'boulder');
+        if (!b) throw new Error('generation produced no boulder fields to clear');
+        const wasBuildable = T.buildable(b);
+        const cleared = T.clearBoulders(s, b.x, b.y);
+        const plain = s.map.find(t => t.t === 'flat');
+        return [
+          ['boulder fields start unbuildable', wasBuildable, false],
+          ['clearing reports a change', cleared, true],
+          ['the tile is now buildable', T.buildable(b), true],
+          ['clearing open ground is refused', T.clearBoulders(s, plain.x, plain.y), false]
+        ];
+      } },
+
+    { name: 'Sun exposure follows the terrain that surrounds a tile',
+      why: 'the whole sun/shadow economy rests on this raycast — a pit ringed by high ground must come out dark and an open rise must come out lit, or peaks of eternal light and shadowed ice are meaningless',
+      run() {
+        const s = fresh(106);
+        /* an open plain, a pit sunk into it, and a rise standing on it */
+        flatten(s, 64, 64, 22, 6);
+        for (let i = 0; i < 5; i++) T.lower(s, 64, 64);
+        flatten(s, 24, 24, 20, 4);
+        for (let i = 0; i < 5; i++) T.raise(s, 24, 24);
+        T.computeSun(s);
+        const pit = at(s, 64, 64), rise = at(s, 24, 24), open = at(s, 24, 40);
+        return [
+          ['a pit ringed by higher ground is in shadow', pit.sun < 0.3, true],
+          ['a rise above open ground is well lit', rise.sun, '>=0.9'],
+          ['the rise is meaningfully sunnier than the pit', rise.sun - pit.sun, '>=0.5'],
+          ['every tile has an exposure between 0 and 1',
+            s.map.every(t => t.sun >= 0 && t.sun <= 1), true],
+          ['open flat ground is lit', open.sun, '>=0.5']
+        ];
+      } },
+
+    { name: 'The local sun recompute matches a full-map pass',
+      why: 'sculpting recomputes sun only near the edit for speed — if that shortcut ever disagrees with the real thing, shadows would silently drift out of date as the player works',
+      run() {
+        const s = fresh(107);
+        for (let i = 0; i < 6; i++) T.raise(s, 50, 50);
+        T.computeSunNear(s, 50, 50, 2);
+        const local = s.map.map(t => t.sun);
+        T.computeSun(s);
+        let worst = 0, checked = 0;
+        for (const t of s.map) {
+          if (Math.abs(t.x - 50) > K.RAY_LEN || Math.abs(t.y - 50) > K.RAY_LEN) continue;
+          checked++;
+          worst = Math.max(worst, Math.abs(local[T.idx(t.x, t.y)] - t.sun));
+        }
+        return [
+          ['it actually checked a meaningful neighbourhood', checked, '>=400'],
+          ['local and full-map exposure agree exactly near the edit', worst, 0]
+        ];
+      } },
+
+    { name: 'Deposits are seeded by sunlight, not scattered at random',
+      why: 'ice surviving in permanent shadow and helium-3 accumulating on permanently sunlit ground is the coupling that makes elevation worth sculpting — if deposits ignore the sun model, the terrain is just decoration',
+      run() {
+        const s = world();
+        const ice = s.map.filter(t => t.deposit && t.deposit.kind === 'ice');
+        const he3 = s.map.filter(t => t.deposit && t.deposit.kind === 'he3');
+        const reg = s.map.filter(t => t.deposit && t.deposit.kind === 'regolith');
+        return [
+          ['the map has ice to find', ice.length, '>=20'],
+          ['every ice tile is in permanent shadow',
+            ice.every(t => t.sun <= K.SUN_SHADOW), true],
+          ['every helium-3 tile is on permanently sunlit ground',
+            he3.every(t => t.sun >= K.SUN_PEAK), true],
+          ['bulk regolith is also available', reg.length, '>=50'],
+          ['no deposit sits on the skylight',
+            s.map.every(t => t.t !== 'skylight' || !t.deposit), true],
+          ['every richness is a sane fraction',
+            s.map.every(t => !t.deposit || (t.deposit.richness > 0 && t.deposit.richness <= 1)), true]
+        ];
+      } },
+
+    { name: 'The map offers both extremes to build against',
+      why: 'a generated world that had no permanently sunlit high ground, or no permanently shadowed floor, would have nothing to make the central trade-off out of',
+      run() {
+        const s = world();
+        const peaks = s.map.filter(t => t.sun >= K.SUN_PEAK).length;
+        const shadow = s.map.filter(t => t.sun <= K.SUN_SHADOW).length;
+        return [
+          ['there is sunlit high ground for solar', peaks, '>=100'],
+          ['there is permanently shadowed ground for ice', shadow, '>=40'],
+          ['neither extreme swallows the whole map',
+            peaks < s.map.length * 0.9 && shadow < s.map.length * 0.5, true]
+        ];
+      } },
+
+    { name: 'A world survives JSON, which is how it will be saved',
+      why: 'the sandbox autosaves to localStorage, so the whole world has to round-trip without losing height, sun or deposits',
+      run() {
+        const s = fresh(108);
+        let copy = null, threw = null;
+        try { copy = JSON.parse(JSON.stringify(s)); } catch (e) { threw = e.message; }
+        return [
+          ['it serialises without throwing', threw, null],
+          ['the map survives intact', copy && copy.map.length === s.map.length, true],
+          ['heights survive', copy && copy.map.every((t, i) => t.h === s.map[i].h), true],
+          ['sun exposure survives', copy && copy.map.every((t, i) => t.sun === s.map[i].sun), true]
+        ];
+      } }
+  ];
+
+  /* ---------- runner ---------- */
+
+  function judge(got, want) {
+    if (typeof want === 'string' && want.startsWith('>=')) return got >= parseFloat(want.slice(2));
+    if (typeof want === 'string' && want.startsWith('<=')) return got <= parseFloat(want.slice(2));
+    if (typeof want === 'string' && want.startsWith('>')) return got > parseFloat(want.slice(1));
+    if (typeof want === 'string' && want.startsWith('~')) {
+      const target = parseFloat(want.slice(1));
+      return got !== null && Math.abs(got - target) <= Math.max(0.04, target * 0.06);
+    }
+    return got === want;
+  }
+
+  const out = document.getElementById('out');
+  let passed = 0, failed = 0, broke = 0;
+
+  SCENARIOS.forEach(sc => {
+    const box = document.createElement('div');
+    box.className = 'sc';
+    let rows = [], crash = null;
+    try { rows = sc.run(); } catch (e) { crash = (e && e.stack) || String(e); }
+
+    let scPass = !crash;
+    const body = rows.map(([label, got, want]) => {
+      const ok = judge(got, want);
+      if (ok) passed++; else { failed++; scPass = false; }
+      const shown = got === null ? 'null' : String(got);
+      return `<tr><td class="mark ${ok ? 'pass' : 'fail'}">${ok ? '✔' : '✘'}</td>
+        <td class="label">${label}</td><td>${shown}</td>
+        <td style="color:var(--ink-faint)">want ${want === true ? 'true' : want === null ? 'null' : want}</td></tr>`;
+    }).join('');
+    if (crash) broke++;
+
+    box.innerHTML = `<h2>${sc.name}<span class="why">${sc.why}</span>
+        <span class="verdict ${scPass ? 'pass' : 'fail'}">${crash ? 'ERROR' : scPass ? 'PASS' : 'FAIL'}</span></h2>
+      ${crash ? `<div class="err">${crash}</div>` : `<table>${body}</table>`}`;
+    out.appendChild(box);
+  });
+
+  const el = document.getElementById('summary');
+  const bad = failed + broke;
+  el.innerHTML = bad
+    ? `<span class="fail">${failed} check${failed === 1 ? '' : 's'} failed`
+      + (broke ? `, ${broke} scenario${broke === 1 ? '' : 's'} threw` : '') + `</span> · ${passed} passed`
+    : `<span class="pass">all ${passed} checks passed</span> across ${SCENARIOS.length} scenarios`;
+})();
+</script>
+</body>
+</html>
