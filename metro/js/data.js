@@ -40,10 +40,22 @@ const K = {
   LUNAR_CYCLE: 29.5,       // Earth days; sunlit for the first half
 
   /* A tile this well lit is treated as a peak of eternal light; this dark,
-     as permanently shadowed. Both are used by map generation and, later,
-     by solar output and ice yield. */
+     as permanently shadowed. Both are used by map generation, by solar
+     output, and by where ice survives. */
   SUN_PEAK: 0.88,
-  SUN_SHADOW: 0.18
+  SUN_SHADOW: 0.18,
+
+  /* ---- city simulation ---- */
+  START_CREDITS: 20000,
+  DEMAND_SCALE: 60,        // divisor turning the jobs/population gap into an RCI index
+  MAX_STAGE: 4,
+  BASE_GROWTH: 0.16,       // stage progress per day under ideal conditions
+  DECAY_RATE: 0.10,        // stage progress lost per day when demand is negative
+  UNSERVED_LIMIT: 8,       // days off the networks before a developed tile loses a stage
+  AIR_PER_PLANT: 45,       // colonists one oxygen plant can pressurise
+  KW_PER_STAGE: 0.5,       // grid draw of a developed tile, per stage reached
+  MIGRATION_RATE: 0.10,    // fraction of the housing gap that moves in per day
+  MIGRATION_CAP: 8
 };
 
 /* Ground types. Height does most of the work that terrain type did in
@@ -59,10 +71,9 @@ const TERRAIN = [
     note: 'A collapsed roof opening into an intact lava tube — the most valuable real estate on the Moon, and off-limits until you can build into it.' }
 ];
 
-/* Deposits are surveyed in at map generation. Distribution follows the real
-   geology as far as a playable map allows, and — unlike Artemis City — it is
-   now driven by the elevation model rather than scattered independently of
-   it: ice concentrates where the sun genuinely never reaches. */
+/* Deposits are surveyed in at map generation, driven by the elevation model
+   rather than scattered independently of it: ice concentrates where the sun
+   genuinely never reaches. */
 const DEPOSITS = [
   { id: 'regolith', name: 'Regolith', colour: '#9a9088',
     note: 'Loose lunar soil, ubiquitous but variable in how easily it yields useful volatiles.' },
@@ -72,19 +83,102 @@ const DEPOSITS = [
     note: 'Solar-wind particles implanted in mature, sun-exposed regolith over billions of years — a speculative but often-cited fusion feedstock.' }
 ];
 
-/* Phase 1 tool roster: terrain sculpting and inspection. Zoning, networks
-   and services join this list in later phases. */
-const TOOLS = [
-  { id: 'inspect', name: 'Inspect', glyph: '🔍', key: '1',
-    hint: 'Click any tile to read its height, sunlight and deposits.' },
-  { id: 'raise', name: 'Raise Land', glyph: '▲', key: '2',
-    hint: 'Raise ground one level. Neighbours are pulled up to keep the slope walkable.' },
-  { id: 'lower', name: 'Lower Land', glyph: '▼', key: '3',
-    hint: 'Lower ground one level. Neighbours are pulled down to keep the slope walkable.' },
-  { id: 'level', name: 'Level Land', glyph: '▬', key: '4',
-    hint: 'Flatten a tile to match the first tile you click — the tool for building pads.' },
-  { id: 'clear', name: 'Clear Boulders', glyph: '✖', key: '5',
-    hint: 'Clear a boulder field back to open regolith.' }
+/* The three growth zones, each in a low and a high density. Painting a zone
+   sets ground aside; the city raises the buildings itself as demand and land
+   value allow — you are setting conditions, not placing structures.
+
+   Low density tops out early and cheaply; high density costs more, and can
+   climb to a real skyline, but is far more sensitive to land value. That
+   split is what gives a lunar city a downtown instead of a uniform sprawl. */
+const ZONES = [
+  { id: 'hab', name: 'Habitation', colour: '#5fc9ff',
+    desc: 'Pressurised living space. Grows as jobs pull colonists in.',
+    low:  { cost: 60,  maxStage: 2, stages: [
+      { pop: 0, upkeep: 0 }, { pop: 5, upkeep: 1 }, { pop: 11, upkeep: 3 }] },
+    high: { cost: 150, maxStage: 4, stages: [
+      { pop: 0, upkeep: 0 }, { pop: 9, upkeep: 3 }, { pop: 21, upkeep: 7 },
+      { pop: 38, upkeep: 13 }, { pop: 62, upkeep: 21 }] } },
+
+  { id: 'trade', name: 'Trade', colour: '#ffb84d',
+    desc: 'Depots, exchanges and mess halls. Grows with population.',
+    low:  { cost: 70,  maxStage: 2, stages: [
+      { jobs: 0, income: 0, upkeep: 0 }, { jobs: 5, income: 11, upkeep: 1 },
+      { jobs: 12, income: 28, upkeep: 4 }] },
+    high: { cost: 165, maxStage: 4, stages: [
+      { jobs: 0, income: 0, upkeep: 0 }, { jobs: 10, income: 26, upkeep: 4 },
+      { jobs: 23, income: 62, upkeep: 9 }, { jobs: 40, income: 112, upkeep: 16 },
+      { jobs: 64, income: 184, upkeep: 26 }] } },
+
+  { id: 'industry', name: 'Industry', colour: '#c98bff',
+    desc: 'Fabrication and refining. Grows with export opportunity.',
+    low:  { cost: 80,  maxStage: 2, stages: [
+      { jobs: 0, income: 0, upkeep: 0 }, { jobs: 7, income: 15, upkeep: 2 },
+      { jobs: 15, income: 36, upkeep: 5 }] },
+    high: { cost: 180, maxStage: 4, stages: [
+      { jobs: 0, income: 0, upkeep: 0 }, { jobs: 13, income: 34, upkeep: 5 },
+      { jobs: 28, income: 78, upkeep: 11 }, { jobs: 48, income: 138, upkeep: 19 },
+      { jobs: 74, income: 220, upkeep: 30 }] } }
 ];
 
-window.LM_DATA = { K, TERRAIN, DEPOSITS, TOOLS };
+/* Placed structures.
+
+   The three networks deliberately behave differently, mirroring how SimCity
+   2000 separates roads, power lines and water pipes:
+
+   - Transit tubes are surface infrastructure a zone must physically touch.
+   - Power conduits carry current from a generator, and — as in SC2K —
+     current also flows through developed buildings, so a dense block needs
+     only one connection rather than a conduit on every tile.
+   - Atmosphere mains are SUBSURFACE. They coexist with anything already on
+     the tile, which is what stops routing three parallel networks from
+     becoming tedious busywork. */
+const BUILDINGS = [
+  { id: 'tube', name: 'Transit Tube', cost: 14, line: true, group: 'network',
+    desc: 'Pressurised surface tube. Zoned ground must touch one, or nothing will develop on it.' },
+  { id: 'conduit', name: 'Power Conduit', cost: 9, line: true, group: 'network',
+    desc: 'Carries current from a generator. Power also flows through developed buildings, so you need fewer of these than you might think.' },
+  { id: 'main', name: 'Atmosphere Main', cost: 11, line: true, subsurface: true, group: 'network',
+    desc: 'Buried pressurisation line. Runs underneath anything already built, so it never competes for surface space.' },
+
+  { id: 'solar', name: 'Solar Array', cost: 380, group: 'power', kw: 7,
+    desc: 'Output scales directly with how much sun the ground it stands on actually receives. On a peak of eternal light it runs near continuously; on a shadowed floor it is nearly worthless.' },
+  { id: 'reactor', name: 'Fission Plant', cost: 5600, group: 'power', kw: 60,
+    desc: 'A Kilopower-class surface reactor. Expensive, and indifferent to sunlight — which is the entire point through the long night.' },
+  { id: 'o2', name: 'Oxygen Plant', cost: 950, group: 'life', drawKw: 5, air: K.AIR_PER_PLANT,
+    desc: 'Cracks oxygen and pressurises the mains. Draws real power, and pressurises a fixed number of colonists — build more as the city grows.' }
+];
+
+/* Tool roster. Terrain sculpting, the three networks, generation and life
+   support, and the six zoning brushes. */
+const TOOLS = [
+  { id: 'inspect', name: 'Inspect', glyph: '🔍', key: '1', group: 'terrain',
+    hint: 'Click any tile to read its height, sunlight, services and deposits.' },
+  { id: 'raise', name: 'Raise Land', glyph: '▲', key: '2', group: 'terrain',
+    hint: 'Raise ground one level. Neighbours are pulled up to keep the slope walkable.' },
+  { id: 'lower', name: 'Lower Land', glyph: '▼', key: '3', group: 'terrain',
+    hint: 'Lower ground one level. Neighbours are pulled down to keep the slope walkable.' },
+  { id: 'level', name: 'Level Land', glyph: '▬', key: '4', group: 'terrain',
+    hint: 'Flatten toward the first tile you click — the tool for cutting building pads.' },
+  { id: 'clear', name: 'Clear Boulders', glyph: '✖', key: '5', group: 'terrain',
+    hint: 'Clear a boulder field back to open regolith.' },
+
+  { id: 'tube', name: 'Transit Tube', glyph: '═', key: 'T', group: 'network', build: 'tube', drag: 'line' },
+  { id: 'conduit', name: 'Power Conduit', glyph: '⌇', key: 'C', group: 'network', build: 'conduit', drag: 'line' },
+  { id: 'main', name: 'Atmosphere Main', glyph: '┅', key: 'A', group: 'network', build: 'main', drag: 'line' },
+
+  { id: 'solar', name: 'Solar Array', glyph: '☀', key: 'S', group: 'plant', build: 'solar' },
+  { id: 'reactor', name: 'Fission Plant', glyph: '⚛', key: 'F', group: 'plant', build: 'reactor' },
+  { id: 'o2', name: 'Oxygen Plant', glyph: '◍', key: 'O', group: 'plant', build: 'o2' },
+
+  { id: 'hab_low',   name: 'Habitation · Low',  glyph: '▨', key: 'Q', group: 'zone', zone: 'hab',      density: 'low',  drag: 'rect' },
+  { id: 'hab_high',  name: 'Habitation · High', glyph: '▧', key: 'W', group: 'zone', zone: 'hab',      density: 'high', drag: 'rect' },
+  { id: 'trade_low', name: 'Trade · Low',       glyph: '▨', key: 'E', group: 'zone', zone: 'trade',    density: 'low',  drag: 'rect' },
+  { id: 'trade_high',name: 'Trade · High',      glyph: '▧', key: 'R', group: 'zone', zone: 'trade',    density: 'high', drag: 'rect' },
+  { id: 'ind_low',   name: 'Industry · Low',    glyph: '▨', key: 'D', group: 'zone', zone: 'industry', density: 'low',  drag: 'rect' },
+  { id: 'ind_high',  name: 'Industry · High',   glyph: '▧', key: 'G', group: 'zone', zone: 'industry', density: 'high', drag: 'rect' },
+
+  { id: 'bulldoze', name: 'Bulldoze', glyph: '💥', key: 'X', group: 'terrain',
+    hint: 'Remove whatever is on a tile — zoning, network or structure.' }
+];
+
+window.LM_DATA = { K, TERRAIN, DEPOSITS, ZONES, BUILDINGS, TOOLS };

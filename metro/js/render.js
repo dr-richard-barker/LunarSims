@@ -17,8 +17,8 @@
    genuinely read as bright — the elevation model showing its work. */
 
 (function () {
-  const { K, DEPOSITS } = window.LM_DATA;
-  const T = window.LM_TERRAIN;
+  const { K, DEPOSITS, ZONES } = window.LM_DATA;
+  const T = window.LM_TERRAIN, G = window.LM_GRID;
 
   const TW = 128, TH = 64;
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -179,6 +179,166 @@
     ctx.globalAlpha = 1;
   }
 
+  /* ---------- built structures ---------- */
+
+  function tone(hex, l, mul) {
+    const n = parseInt(hex.slice(1), 16);
+    const f = l * mul;
+    return `rgb(${Math.round(clamp(((n >> 16) & 255) * f, 0, 255))},${
+      Math.round(clamp(((n >> 8) & 255) * f, 0, 255))},${
+      Math.round(clamp((n & 255) * f, 0, 255))})`;
+  }
+
+  /* An extruded box standing on ground already lifted to baseZ. */
+  function box(ctx, tx, ty, w, h, hz, col, l, baseZ, opts) {
+    const o = opts || {};
+    const b = iso(tx + w, ty), c = iso(tx + w, ty + h), d = iso(tx, ty + h);
+    const z0 = baseZ, z1 = baseZ + hz;
+    ctx.fillStyle = o.right || tone(col, l, 0.62);
+    ctx.beginPath();
+    ctx.moveTo(b.x, b.y - z0); ctx.lineTo(c.x, c.y - z0);
+    ctx.lineTo(c.x, c.y - z1); ctx.lineTo(b.x, b.y - z1);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = o.left || tone(col, l, 0.42);
+    ctx.beginPath();
+    ctx.moveTo(d.x, d.y - z0); ctx.lineTo(c.x, c.y - z0);
+    ctx.lineTo(c.x, c.y - z1); ctx.lineTo(d.x, d.y - z1);
+    ctx.closePath(); ctx.fill();
+    if (!o.noTop) {
+      ctx.fillStyle = o.top || tone(col, l, 1.0);
+      diamond(ctx, tx, ty, w, h, z1); ctx.fill();
+    }
+    if (o.stroke) {
+      ctx.strokeStyle = o.stroke; ctx.lineWidth = o.lw || 1;
+      diamond(ctx, tx, ty, w, h, z1); ctx.stroke();
+    }
+  }
+
+  /* A pressurised dome: regolith berm, shell layers standing in for
+     curvature, and a glazed viewport ring. */
+  function dome(ctx, tx, ty, w, h, hz, col, l, baseZ, ring) {
+    const p = iso(tx + w / 2, ty + h / 2);
+    const rx = w * (TW / 2) * 0.9, ry = h * (TH / 2) * 0.9;
+    ctx.fillStyle = regolith(140, l);
+    ctx.beginPath(); ctx.ellipse(p.x, p.y - baseZ + TH * 0.05, rx * 1.2, ry * 1.2, 0, 0, 7); ctx.fill();
+    for (const ly of [{ f: 0, rf: 1, sh: 0.55 }, { f: 0.5, rf: 0.78, sh: 0.84 }, { f: 1, rf: 0.48, sh: 1.08 }]) {
+      ctx.fillStyle = tone(col, l, ly.sh);
+      ctx.beginPath();
+      ctx.ellipse(p.x, p.y - baseZ - hz * ly.f, rx * ly.rf, ry * ly.rf, 0, 0, 7);
+      ctx.fill();
+    }
+    ctx.strokeStyle = ring || `rgba(190,225,255,${0.3 + l * 0.3})`;
+    ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.ellipse(p.x, p.y - baseZ - hz * 0.6, rx * 0.66, ry * 0.66, 0, 0, 7); ctx.stroke();
+  }
+
+  /* Transit tube: a raised, ribbed, pressurised corridor. Legs are drawn
+     only toward neighbours that actually continue the network, so junctions
+     and dead ends read correctly. */
+  function drawTube(ctx, s, t, l) {
+    const z = lift(t);
+    const c = iso(t.x + 0.5, t.y + 0.5);
+    ctx.fillStyle = regolith(120, l);
+    fillDiamond(ctx, t.x + 0.16, t.y + 0.16, 0.68, 0.68, regolith(150, l), null, z);
+    for (const [dx, dy] of G.DIRS) {
+      const n = G.tileAt(s, t.x + dx, t.y + dy);
+      if (!n || !((n.b && (n.b.type === 'tube')) || (n.zone && n.zone.stage > 0))) continue;
+      const e = iso(t.x + 0.5 + dx * 0.5, t.y + 0.5 + dy * 0.5);
+      const nz = lift(n);
+      ctx.strokeStyle = tone('#cfc6ae', l, 1); ctx.lineWidth = 5;
+      ctx.beginPath(); ctx.moveTo(c.x, c.y - z - 3); ctx.lineTo(e.x, e.y - (z + nz) / 2 - 3); ctx.stroke();
+      ctx.strokeStyle = tone('#6d6858', l, 1); ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.moveTo(c.x, c.y - z - 6); ctx.lineTo(e.x, e.y - (z + nz) / 2 - 6); ctx.stroke();
+    }
+    ctx.fillStyle = tone('#e6dcc0', l, 1);
+    ctx.beginPath(); ctx.arc(c.x, c.y - z - 4, 3.2, 0, 7); ctx.fill();
+  }
+
+  /* Power conduit: slim pylons carrying a catenary between them. */
+  function drawConduit(ctx, s, t, l) {
+    const z = lift(t);
+    const c = iso(t.x + 0.5, t.y + 0.5);
+    ctx.strokeStyle = grey(150, Math.max(l, 0.5)); ctx.lineWidth = 1.8;
+    ctx.beginPath(); ctx.moveTo(c.x, c.y - z); ctx.lineTo(c.x, c.y - z - 15); ctx.stroke();
+    ctx.strokeStyle = `rgba(120,220,255,${0.35 + l * 0.4})`; ctx.lineWidth = 1.2;
+    for (const [dx, dy] of G.DIRS) {
+      const n = G.tileAt(s, t.x + dx, t.y + dy);
+      if (!n) continue;
+      const conducts = (n.b && ['conduit', 'solar', 'reactor', 'o2'].includes(n.b.type)) || (n.zone && n.zone.stage > 0);
+      if (!conducts) continue;
+      const e = iso(t.x + 0.5 + dx * 0.5, t.y + 0.5 + dy * 0.5);
+      ctx.beginPath(); ctx.moveTo(c.x, c.y - z - 14); ctx.lineTo(e.x, e.y - (z + lift(n)) / 2 - 12); ctx.stroke();
+    }
+  }
+
+  function drawPlant(ctx, s, t, l) {
+    const z = lift(t), type = t.b.type;
+    if (type === 'solar') {
+      /* the panel is tilted and its brightness tracks the tile's own sun
+         exposure, so an array on a shadowed floor visibly reads as dead */
+      box(ctx, t.x + 0.42, t.y + 0.42, 0.16, 0.16, 9, '#8a8f9c', l, z, { noTop: true });
+      const a = iso(t.x + 0.06, t.y + 0.06), b = iso(t.x + 0.94, t.y + 0.06);
+      const c2 = iso(t.x + 0.94, t.y + 0.94), d = iso(t.x + 0.06, t.y + 0.94);
+      const tilt = 8, Z = z + 20;
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y - Z - tilt); ctx.lineTo(b.x, b.y - Z);
+      ctx.lineTo(c2.x, c2.y - Z + tilt); ctx.lineTo(d.x, d.y - Z);
+      ctx.closePath();
+      const g = 0.25 + t.sun * 0.75;
+      ctx.fillStyle = `rgb(${Math.round(22 + 30 * g)},${Math.round(40 + 62 * g)},${Math.round(86 + 96 * g)})`;
+      ctx.fill();
+      ctx.strokeStyle = `rgba(155,200,250,${0.2 + t.sun * 0.5})`; ctx.lineWidth = 1; ctx.stroke();
+      return;
+    }
+    if (type === 'reactor') {
+      box(ctx, t.x + 0.22, t.y + 0.22, 0.56, 0.56, 26, '#9aa0ad', l, z, { stroke: '#ffd166', lw: 1.4 });
+      const p = iso(t.x + 0.5, t.y + 0.5);
+      ctx.fillStyle = '#ffd166';
+      ctx.beginPath(); ctx.arc(p.x, p.y - z - 26, 3.4, 0, 7); ctx.fill();
+      ctx.fillStyle = 'rgba(255,209,102,0.16)';
+      ctx.beginPath(); ctx.arc(p.x, p.y - z - 26, 11, 0, 7); ctx.fill();
+      return;
+    }
+    if (type === 'o2') {
+      dome(ctx, t.x + 0.14, t.y + 0.14, 0.72, 0.72, 22, '#9fd8c4', l, z, 'rgba(190,255,235,0.6)');
+      const p = iso(t.x + 0.5, t.y + 0.5);
+      ctx.fillStyle = 'rgba(200,255,235,0.55)';
+      ctx.beginPath(); ctx.arc(p.x, p.y - z - 24, 3.2, 0, 7); ctx.fill();
+    }
+  }
+
+  /* Zone buildings. Low density stays domed and low; high density becomes a
+     genuine tower with a dome cap — which is what gives a lunar city a
+     downtown silhouette instead of uniform sprawl. */
+  function drawZoneBuilding(ctx, s, t, l) {
+    const z0 = lift(t), zn = t.zone;
+    const spec = ZONES.find(x => x.id === zn.kind);
+    const col = spec.colour;
+    const stage = zn.stage;
+    if (stage === 0) {
+      ctx.globalAlpha = 0.5;
+      fillDiamond(ctx, t.x + 0.08, t.y + 0.08, 0.84, 0.84, tone(col, l, 0.42), tone(col, l, 0.9), z0);
+      ctx.globalAlpha = 1;
+      return;
+    }
+    if (zn.density === 'low') {
+      dome(ctx, t.x + 0.14, t.y + 0.14, 0.72, 0.72, 12 + stage * 8, '#c7cdd9', l, z0,
+        `rgba(${col === '#5fc9ff' ? '190,225,255' : col === '#ffb84d' ? '255,214,150' : '210,200,255'},0.5)`);
+    } else {
+      const hz = 16 + stage * 15;
+      box(ctx, t.x + 0.2, t.y + 0.2, 0.6, 0.6, hz, '#b9c0cc', l, z0,
+        { stroke: grey(140, l), lw: 1, top: tone(col, l, 0.5) });
+      /* window bands up the shaft */
+      ctx.strokeStyle = `rgba(255,209,120,${0.30 + l * 0.35})`; ctx.lineWidth = 1.1;
+      for (let i = 1; i <= stage; i++) {
+        const wy = z0 + hz * (i / (stage + 1));
+        const a = iso(t.x + 0.2, t.y + 0.8), b = iso(t.x + 0.8, t.y + 0.8);
+        ctx.beginPath(); ctx.moveTo(a.x, a.y - wy); ctx.lineTo(b.x, b.y - wy); ctx.stroke();
+      }
+      if (stage >= 3) dome(ctx, t.x + 0.3, t.y + 0.3, 0.4, 0.4, 8, '#d5dbe6', l, z0 + hz, null);
+    }
+  }
+
   /* ---------- viewport culling ---------- */
 
   /* Padded generously on the far side: a tall tile is drawn well above its
@@ -230,6 +390,7 @@
      terraces and cliff geometry still show through underneath, which is what
      keeps the map legible as terrain. */
   function drawOverlay(ctx, s, ui, range) {
+    const nets = ui.nets;
     walkVisible(range, (tx, ty) => {
       const t = s.map[T.idx(tx, ty)];
       let colour = null, alpha = 0.8;
@@ -241,12 +402,34 @@
         if (!t.deposit) return;
         colour = DEPOSITS.find(d => d.id === t.deposit.kind).colour;
         alpha = 0.25 + t.deposit.richness * 0.5;
+      } else if (ui.view === 'power') {
+        if (!nets) return;
+        colour = G.served(s, nets.power, tx, ty) ? '#6ee7a0' : '#3b2230';
+      } else if (ui.view === 'air') {
+        if (!nets) return;
+        colour = G.served(s, nets.air, tx, ty) ? '#7fd8ff' : '#2a2438';
+      } else if (ui.view === 'transit') {
+        colour = G.hasTransit(s, tx, ty) ? '#ffd166' : '#2e2a26';
+      } else if (ui.view === 'value') {
+        if (!t.zone) return;
+        colour = lerpColour('#3a6ea8', '#ffd166', t.zone.value || 0);
       }
       if (!colour) return;
       ctx.globalAlpha = alpha;
       fillDiamond(ctx, tx, ty, 1, 1, colour, null, lift(t));
       ctx.globalAlpha = 1;
     });
+  }
+
+  /* Ghost of whatever the current drag would build. */
+  function drawPreview(ctx, s, prev) {
+    for (const c of prev.cells) {
+      const t = T.tileAt(s, c.x, c.y);
+      if (!t) continue;
+      fillDiamond(ctx, c.x + 0.04, c.y + 0.04, 0.92, 0.92,
+        c.ok ? 'rgba(95,201,255,0.32)' : 'rgba(255,122,104,0.38)',
+        c.ok ? '#5fc9ff' : '#ff7a68', lift(t));
+    }
   }
 
   /* ---------- frame ---------- */
@@ -272,13 +455,33 @@
 
     const range = visibleRange(ui, w, h);
 
+    /* One back-to-front pass covering ground AND everything standing on it.
+       Splitting structures into a later pass would let a tall tower behind a
+       ridge paint over the ridge in front of it; doing both per tile in
+       diagonal order keeps the occlusion honest. */
     walkVisible(range, (tx, ty) => {
       const t = s.map[T.idx(tx, ty)];
       drawTile(ctx, s, t);
-      if (ui.showDeposits !== false && t.deposit) depositMarker(ctx, t);
+
+      if (t.pipe) {                                  // buried main, faintly showing
+        ctx.strokeStyle = 'rgba(120,200,230,0.30)';
+        ctx.lineWidth = 1.4; ctx.setLineDash([4, 4]);
+        fillDiamond(ctx, tx + 0.3, ty + 0.3, 0.4, 0.4, null, ctx.strokeStyle, lift(t));
+        ctx.setLineDash([]);
+      }
+      if (ui.showDeposits !== false && t.deposit && !t.b && !t.zone) depositMarker(ctx, t);
+
+      if (t.b) {
+        if (t.b.type === 'tube') drawTube(ctx, s, t, litness(t));
+        else if (t.b.type === 'conduit') drawConduit(ctx, s, t, litness(t));
+        else drawPlant(ctx, s, t, litness(t));
+      } else if (t.zone) {
+        drawZoneBuilding(ctx, s, t, litness(t));
+      }
     });
 
     if (ui.view && ui.view !== 'terrain') drawOverlay(ctx, s, ui, range);
+    if (ui.preview) drawPreview(ctx, s, ui.preview);
 
     if (ui.hover) {
       const t = T.tileAt(s, ui.hover.x, ui.hover.y);

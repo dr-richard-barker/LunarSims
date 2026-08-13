@@ -48,9 +48,12 @@ td.mark{width:34px;text-align:center}
 
 <script src="js/data.js"></script>
 <script src="js/terrain.js"></script>
+<script src="js/grid.js"></script>
+<script src="js/zones.js"></script>
+<script src="js/sim.js"></script>
 <script>
 (function () {
-  const T = window.LM_TERRAIN;
+  const T = window.LM_TERRAIN, G = window.LM_GRID, Z = window.LM_ZONES, S = window.LM_SIM;
   const K = window.LM_DATA.K;
 
   /* Generation is the expensive step (a full-map sun raycast), so scenarios
@@ -60,6 +63,47 @@ td.mark{width:34px;text-align:center}
   const fresh = seed => T.makeMap(seed === undefined ? 4242 : seed);
 
   const at = (s, x, y) => s.map[T.idx(x, y)];
+
+  /* A city on a cleared working area. Boulders and the skylight are removed
+     only inside 45..80 so the placement tests can still find real ones
+     elsewhere on the map. */
+  function city(seed) {
+    const s = S.newGame(seed === undefined ? 555 : seed);
+    s.credits = 1e7;
+    for (let y = 45; y <= 80; y++) {
+      for (let x = 45; x <= 80; x++) {
+        const t = T.tileAt(s, x, y);
+        if (!t) continue;
+        if (t.t !== 'flat') t.t = 'flat';
+        t.b = null; t.zone = null; t.pipe = false;
+        if (t.sun < 0.5) t.sun = 0.6;
+      }
+    }
+    return s;
+  }
+
+  /* Force a tile to an already-developed stage, for tests about what
+     developed buildings do rather than how they get there. */
+  function develop(s, x, y, kind, density, stage) {
+    const t = T.tileAt(s, x, y);
+    t.zone = { kind, density, stage, growth: 0, unserved: 0, decay: 0, served: true, value: 0.5 };
+    return t;
+  }
+
+  /* One zoned tile at (62,62) with a selectable subset of the three
+     services. A generator always sits far away at (50,50) so that switching
+     `power` off means "the network does not reach this tile" rather than
+     "the colony has no generation at all" — otherwise the no-power case
+     would pass for the wrong reason, via the brownout gate. */
+  function servicedZone(o) {
+    const s = city();
+    const far = T.tileAt(s, 50, 50); far.sun = 1; S.place(s, far, 'solar');
+    if (o.tube) S.place(s, T.tileAt(s, 62, 61), 'tube');
+    if (o.power) { const g = T.tileAt(s, 61, 62); g.sun = 1; S.place(s, g, 'solar'); }
+    if (o.air) S.place(s, T.tileAt(s, 63, 62), 'o2');
+    S.paintZone(s, 62, 62, 1, 1, 'hab', o.density || 'low');
+    return s;
+  }
 
   /* An open, flat test bed carved into a real map — lets the sun tests
      assert against known geometry instead of whatever the generator
@@ -282,6 +326,206 @@ td.mark{width:34px;text-align:center}
           ['the map survives intact', copy && copy.map.length === s.map.length, true],
           ['heights survive', copy && copy.map.every((t, i) => t.h === s.map[i].h), true],
           ['sun exposure survives', copy && copy.map.every((t, i) => t.sun === s.map[i].sun), true]
+        ];
+      } },
+
+    /* ---------- phase 2: the city loop ---------- */
+
+    { name: 'Power flows from a generator along conduits and through buildings',
+      why: 'this is SimCity 2000\'s power-line rule and the reason a dense block needs only one connection — if current did not cross developed buildings, every tile would need its own conduit',
+      run() {
+        const s = city();
+        S.place(s, T.tileAt(s, 60, 60), 'solar');
+        for (let x = 61; x <= 64; x++) S.place(s, T.tileAt(s, x, 60), 'conduit');
+        const net = G.powerNet(s);
+        const farEnd = G.served(s, net, 65, 60);      // just past the last conduit
+        const unwired = G.served(s, net, 60, 70);     // nowhere near it
+        /* now bridge a gap using a developed building rather than a conduit */
+        const s2 = city();
+        S.place(s2, T.tileAt(s2, 60, 60), 'solar');
+        develop(s2, 61, 60, 'trade', 'low', 1);
+        const net2 = G.powerNet(s2);
+        return [
+          ['the generator powers its own tile', G.served(s, net, 60, 60), true],
+          ['current runs to the end of the conduit', farEnd, true],
+          ['unconnected ground is unpowered', unwired, false],
+          ['current crosses a developed building', G.served(s2, net2, 62, 60), true]
+        ];
+      } },
+
+    { name: 'Atmosphere runs through buried mains, which coexist with the surface',
+      why: 'mains are subsurface precisely so routing three networks does not become busywork — they must be placeable under existing structures and still carry pressurisation',
+      run() {
+        const s = city();
+        S.place(s, T.tileAt(s, 60, 60), 'o2');
+        for (let x = 61; x <= 64; x++) S.place(s, T.tileAt(s, x, 60), 'main');
+        const net = G.airNet(s);
+        /* a main under a tile that already has a tube on it */
+        S.place(s, T.tileAt(s, 65, 60), 'tube');
+        const underTube = S.place(s, T.tileAt(s, 65, 60), 'main');
+        const blockedSurface = S.canPlace(s, T.tileAt(s, 65, 60), 'conduit');
+        return [
+          ['the plant pressurises its own tile', G.served(s, net, 60, 60), true],
+          ['atmosphere reaches the end of the main', G.served(s, net, 65, 60), true],
+          ['unconnected ground has no atmosphere', G.served(s, net, 60, 70), false],
+          ['a main can be buried under an existing tube', underTube, null],
+          ['but the surface itself stays occupied', blockedSurface !== null, true]
+        ];
+      } },
+
+    { name: 'Transit serves the ground it touches',
+      why: 'zoned ground has to physically touch a tube, the way SimCity zones must touch a road — adjacency, not mere existence somewhere on the map',
+      run() {
+        const s = city();
+        S.place(s, T.tileAt(s, 60, 60), 'tube');
+        return [
+          ['the tube tile itself is served', G.hasTransit(s, 60, 60), true],
+          ['ground beside it is served', G.hasTransit(s, 61, 60), true],
+          ['ground two tiles away is not', G.hasTransit(s, 62, 60), false],
+          ['diagonals do not count', G.hasTransit(s, 61, 61), false]
+        ];
+      } },
+
+    { name: 'A zone develops only when all three networks reach it',
+      why: 'the central rule of the whole game — transit, power and atmosphere each individually gate growth, so removing any one has to stop development on its own',
+      run() {
+        const full = servicedZone({ tube: true, power: true, air: true });
+        const noTube = servicedZone({ tube: false, power: true, air: true });
+        const noPower = servicedZone({ tube: true, power: false, air: true });
+        const noAir = servicedZone({ tube: true, power: true, air: false });
+        const run = s => { for (let i = 0; i < 30; i++) S.tick(s); return T.tileAt(s, 62, 62).zone.stage; };
+        return [
+          ['fully serviced ground develops', run(full), '>=1'],
+          ['without transit it stays bare', run(noTube), 0],
+          ['without power it stays bare', run(noPower), 0],
+          ['without atmosphere it stays bare', run(noAir), 0]
+        ];
+      } },
+
+    { name: 'An over-committed grid or oxygen supply stalls the whole city',
+      why: 'these are the two "build another plant" pressures. They must halt growth city-wide rather than only on the tiles that happen to be far from a plant',
+      run() {
+        const s = servicedZone({ tube: true, power: true, air: true });
+        for (let i = 0; i < 30; i++) S.tick(s);
+        const grew = T.tileAt(s, 62, 62).zone.stage;
+
+        /* strip every generator out from under a working city — servicedZone
+           deliberately builds two, so removing only the first would leave the
+           grid healthy and prove nothing */
+        for (const t of s.map) if (t.b && t.b.type === 'solar') t.b = null;
+        const before = T.tileAt(s, 62, 62).zone.stage;
+        for (let i = 0; i < 4; i++) S.tick(s);
+        return [
+          ['a serviced city grows in the first place', grew, '>=1'],
+          ['losing generation reports a brownout', s.brownout, true],
+          ['and growth stops rather than continuing', T.tileAt(s, 62, 62).zone.stage <= before, true]
+        ];
+      } },
+
+    { name: 'Solar output is decided by the ground it stands on',
+      why: 'this is the payoff for the whole elevation and shadow model — an array on a peak of eternal light must be worth many times one on a permanently shadowed floor, or sculpting terrain earns nothing',
+      run() {
+        const bright = city(), dark = city();
+        const bt = T.tileAt(bright, 60, 60), dt = T.tileAt(dark, 60, 60);
+        bt.sun = 1.0; dt.sun = 0.05;
+        S.place(bright, bt, 'solar');
+        S.place(dark, dt, 'solar');
+        const gb = Z.power(bright).gen, gd = Z.power(dark).gen;
+        return [
+          ['an array in full sun generates its rated output', Math.round(gb * 10) / 10, 7],
+          ['an array in permanent shadow is nearly useless', gd < 0.5, true],
+          ['the sunlit site is worth many times the shadowed one', gb / Math.max(gd, 0.01), '>=10']
+        ];
+      } },
+
+    { name: 'Land value responds to transit, sunlight and industry',
+      why: 'land value is what makes high density selective rather than uniform — it has to actually move with the things the player controls',
+      run() {
+        const s = city();
+        S.place(s, T.tileAt(s, 60, 60), 'tube');
+        const ctx = { transit: (x, y) => G.hasTransit(s, x, y),
+                      indDist: Z.distanceField(s, () => false, 5) };
+        const served = T.tileAt(s, 61, 60), unserved = T.tileAt(s, 70, 70);
+        served.sun = 0.5; unserved.sun = 0.5; served.h = unserved.h;
+        const vServed = Z.landValue(s, ctx, served);
+        const vUnserved = Z.landValue(s, ctx, unserved);
+        const sunny = T.tileAt(s, 61, 60);
+        sunny.sun = 1.0;
+        const vSunny = Z.landValue(s, ctx, sunny);
+        return [
+          ['transit access raises land value', vServed > vUnserved, true],
+          ['sunlight raises it further', vSunny > vServed, true],
+          ['it always stays a 0..1 fraction',
+            [vServed, vUnserved, vSunny].every(v => v >= 0 && v <= 1), true]
+        ];
+      } },
+
+    { name: 'Density bands cap how far ground can develop',
+      why: 'low density has to top out early and high density has to be able to climb, or there is no reason to ever pay for the expensive brush and no downtown ever forms',
+      run() {
+        const lo = Z.bandOf({ kind: 'hab', density: 'low' });
+        const hi = Z.bandOf({ kind: 'hab', density: 'high' });
+        return [
+          ['low density caps early', lo.maxStage, 2],
+          ['high density can reach a real skyline', hi.maxStage, 4],
+          ['high density costs more to zone', hi.cost > lo.cost, true],
+          ['a stage table exists for every stage up to the cap',
+            lo.stages.length === lo.maxStage + 1 && hi.stages.length === hi.maxStage + 1, true]
+        ];
+      } },
+
+    { name: 'Placement rules hold',
+      why: 'a build tool that quietly succeeds on impossible ground would let the player construct a city on boulder fields and lava-tube skylights',
+      run() {
+        const s = city();
+        const boulder = s.map.find(t => t.t === 'boulder');
+        const sky = s.map.find(t => t.t === 'skylight');
+        const open = T.tileAt(s, 60, 60);
+        const first = S.place(s, open, 'tube');
+        const second = S.canPlace(s, open, 'tube');
+        const poor = city(); poor.credits = 0;
+        return [
+          ['building on open ground works', first, null],
+          ['building twice on one tile is refused', second !== null, true],
+          ['boulder fields are refused', S.canPlace(s, boulder, 'tube') !== null, true],
+          ['the lava-tube skylight is refused', sky ? S.canPlace(s, sky, 'tube') !== null : true, true],
+          ['building without the credits is refused',
+            S.canPlace(poor, T.tileAt(poor, 60, 60), 'reactor') !== null, true]
+        ];
+      } },
+
+    { name: 'Zoning and bulldozing move credits and clear ground',
+      why: 'the sandbox economy is only meaningful if painting zoning actually costs money and clearing actually frees the tile again',
+      run() {
+        const s = city();
+        const before = s.credits;
+        const painted = S.paintZone(s, 60, 60, 3, 3, 'hab', 'low');
+        const spent = before - s.credits;
+        const t = T.tileAt(s, 60, 60);
+        const cleared = S.bulldoze(s, t);
+        return [
+          ['a 3x3 drag zones nine tiles of open ground', painted, 9],
+          ['it charged the per-tile price for each', spent, 9 * S.zoneCost('hab', 'low')],
+          ['bulldozing reports success', cleared, null],
+          ['and the tile is genuinely free again', t.zone, null],
+          ['zoning already-zoned ground is refused',
+            S.canZone(s, T.tileAt(s, 61, 60)) !== null, true]
+        ];
+      } },
+
+    { name: 'The city has no fail state',
+      why: 'this is a sandbox, not the survival simulator it grew out of — stripping away every service must stall and depopulate the city, never end the run',
+      run() {
+        const s = servicedZone({ tube: true, power: true, air: true });
+        for (let i = 0; i < 40; i++) S.tick(s);
+        const peak = s.pop;
+        for (const t of s.map) if (t.b) t.b = null;      // tear out every plant
+        for (let i = 0; i < 120; i++) S.tick(s);
+        return [
+          ['the city had grown a population', peak, '>=1'],
+          ['stripping every service depopulates it', s.pop < peak, true],
+          ['but nothing ever declares the run over', s.over === undefined, true],
+          ['and the simulation keeps ticking cleanly', s.day, '>=150']
         ];
       } }
   ];
