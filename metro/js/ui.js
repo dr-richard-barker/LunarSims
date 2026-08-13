@@ -8,7 +8,7 @@
 
 (function () {
   const D = window.LM_DATA, T = window.LM_TERRAIN, G = window.LM_GRID;
-  const Z = window.LM_ZONES, S = window.LM_SIM, R = window.LM_RENDER;
+  const Z = window.LM_ZONES, S = window.LM_SIM, R = window.LM_RENDER, B = window.LM_BUDGET;
   const K = D.K;
   const SAVE_KEY = 'lunar-metropolis.save.v2';
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -292,19 +292,31 @@
   }
 
   function renderHUD() {
+    /* Read the budget-adjusted figures, not the raw hardware ratings —
+       a grid whose maintenance has been cut really does deliver less, and
+       the readout should say so rather than flattering the player. */
+    const eff = B.effects(s);
     const pw = Z.power(s);
-    const load = Z.tally(s).draw + pw.o2Draw;
+    const tal = Z.tally(s);
+    const gen = pw.gen * eff.genMul;
+    const load = tal.draw + pw.o2Draw;
+    const airCap = Math.floor(pw.o2Plants * K.AIR_PER_PLANT * eff.airMul);
+    const net = s.revenue - s.expenses;
+
     document.getElementById('stats').innerHTML =
-      `<div class="chip"><b>${Math.round(s.credits).toLocaleString()}</b><span>Credits</span></div>` +
+      `<div class="chip${s.credits < 0 ? ' bad' : ''}"><b>${Math.round(s.credits).toLocaleString()}</b><span>Credits</span></div>` +
+      `<div class="chip${net < 0 ? ' warn' : ''}"><b>${net >= 0 ? '+' : '−'}${Math.abs(Math.round(net))}</b><span>Net / day</span></div>` +
       `<div class="chip"><b>${s.pop.toLocaleString()}/${s.housingCap.toLocaleString()}</b><span>Population</span></div>` +
       `<div class="chip"><b>${s.jobs.toLocaleString()}</b><span>Jobs</span></div>` +
-      `<div class="chip${load > pw.gen ? ' bad' : ''}"><b>${load.toFixed(1)}/${pw.gen.toFixed(1)}</b><span>kW load/gen</span></div>` +
-      `<div class="chip${s.pop > pw.o2Plants * K.AIR_PER_PLANT ? ' bad' : ''}"><b>${(pw.o2Plants * K.AIR_PER_PLANT).toLocaleString()}</b><span>Air capacity</span></div>` +
+      `<div class="chip${load > gen ? ' bad' : ''}"><b>${load.toFixed(1)}/${gen.toFixed(1)}</b><span>kW load/gen</span></div>` +
+      `<div class="chip${s.pop > airCap ? ' bad' : ''}"><b>${airCap.toLocaleString()}</b><span>Air capacity</span></div>` +
       `<div class="chip"><b>${s.day.toLocaleString()}</b><span>Day</span></div>`;
 
     const warn = [];
-    if (load > pw.gen) warn.push('Grid is over capacity — growth has stopped. Build more generation.');
-    if (s.pop > pw.o2Plants * K.AIR_PER_PLANT) warn.push('Not enough pressurisation — build another oxygen plant.');
+    if (s.credits < 0) warn.push('The treasury is in deficit. Every department is running at half effect until it recovers — raise tax, or cut spending.');
+    if (load > gen) warn.push('The grid is over capacity and growth has stopped. Build more generation, or restore the Power Grid budget.');
+    if (s.pop > airCap) warn.push('Not enough pressurisation for this population. Build another oxygen plant, or restore the Atmosphere budget.');
+    if (eff.safety < 0.65) warn.push('Repair funding is short. A maintenance backlog is building and developed districts will start losing density.');
     document.getElementById('advisor').innerHTML = warn.length
       ? warn.map(w => `<p class="note" style="border-left-color:var(--bad)">${w}</p>`).join('')
       : '';
@@ -312,6 +324,79 @@
     document.getElementById('demand').innerHTML =
       bar('Habitation', s.demand.hab) + bar('Trade', s.demand.trade) + bar('Industry', s.demand.industry);
   }
+
+  /* ---------- budget panel ---------- */
+
+  /* Rebuilt wholesale only when the tab is opened or a dial moves; the live
+     numbers inside it are refreshed separately every tick so dragging a
+     slider does not fight with the simulation rewriting the DOM underneath
+     the input the player is holding. */
+  function buildBudget() {
+    const el = document.getElementById('pane-budget');
+    const m = B.monthly(s, Z.tally(s));
+    el.innerHTML = `
+      <h3 class="sec">Taxation</h3>
+      <div class="ctrl">
+        <label>Tax rate</label>
+        <input type="range" id="taxRate" min="0" max="${K.MAX_TAX}" step="1" value="${s.taxRate}">
+        <span class="v" id="taxRateVal" style="font-family:var(--mono);min-width:34px;text-align:right">${s.taxRate}%</span>
+      </div>
+      <p class="note">Above ${K.BASE_TAX}% the treasury takes more but every demand index is dragged
+        down — a heavily taxed city is rich, well maintained and stops growing.</p>
+
+      <h3 class="sec">Departments</h3>
+      ${D.DEPARTMENTS.map(d => `
+        <div class="ctrl">
+          <label title="${d.effect}">${d.name}</label>
+          <input type="range" class="fund" data-dept="${d.id}" min="0" max="100" step="5" value="${Math.round((s.funding[d.id] ?? 1) * 100)}">
+          <span class="v" id="fund-${d.id}" style="font-family:var(--mono);min-width:34px;text-align:right">${Math.round((s.funding[d.id] ?? 1) * 100)}%</span>
+        </div>`).join('')}
+
+      <h3 class="sec">Monthly projection</h3>
+      <div class="rows" id="budgetRows"></div>
+      <p class="note" id="budgetNote"></p>`;
+
+    el.querySelector('#taxRate').oninput = e => {
+      s.taxRate = +e.target.value;
+      el.querySelector('#taxRateVal').textContent = s.taxRate + '%';
+      renderBudgetNumbers(); save();
+    };
+    el.querySelectorAll('.fund').forEach(inp => inp.oninput = e => {
+      const id = e.target.dataset.dept;
+      s.funding[id] = +e.target.value / 100;
+      el.querySelector('#fund-' + id).textContent = e.target.value + '%';
+      renderBudgetNumbers(); save();
+    });
+    renderBudgetNumbers();
+  }
+
+  function renderBudgetNumbers() {
+    const rows = document.getElementById('budgetRows');
+    if (!rows) return;
+    const m = B.monthly(s, Z.tally(s));
+    const money = v => (v < 0 ? '−' : '') + Math.abs(Math.round(v)).toLocaleString();
+    rows.innerHTML =
+      `<div class="row"><span class="k">Taxable activity</span><span class="v">${Math.round(m.taxBase).toLocaleString()}</span></div>
+       <div class="row"><span class="k">Revenue</span><span class="v good">+${money(m.revenue)}</span></div>` +
+      D.DEPARTMENTS.map(d => `<div class="row"><span class="k">${d.name}</span><span class="v bad">−${money(m.byDept[d.id])}</span></div>`).join('') +
+      `<div class="row"><span class="k">District upkeep</span><span class="v bad">−${money(s.zoneUpkeep * 30)}</span></div>
+       <div class="row"><span class="k">Net per 30 days</span><span class="v ${m.net - s.zoneUpkeep * 30 >= 0 ? 'good' : 'bad'}">${m.net - s.zoneUpkeep * 30 >= 0 ? '+' : ''}${money(m.net - s.zoneUpkeep * 30)}</span></div>
+       <div class="row"><span class="k">Research banked</span><span class="v">${Math.round(s.research).toLocaleString()}</span></div>`;
+
+    const note = document.getElementById('budgetNote');
+    if (note) {
+      note.textContent = s.credits < 0
+        ? 'The treasury is in deficit — every department is running at half effect until it recovers. Raise tax or cut spending.'
+        : 'Departments are charged daily, in proportion to the infrastructure each one maintains.';
+      note.style.borderLeftColor = s.credits < 0 ? 'var(--bad)' : '';
+    }
+  }
+
+  document.querySelectorAll('.tab').forEach(t => t.onclick = () => {
+    document.querySelectorAll('.tab').forEach(x => x.classList.toggle('on', x === t));
+    document.querySelectorAll('.tabpane').forEach(p => p.classList.toggle('on', p.id === 'pane-' + t.dataset.tab));
+    if (t.dataset.tab === 'budget') buildBudget();
+  });
 
   document.querySelectorAll('#viewBar button').forEach(b => b.onclick = () => {
     ui.view = b.dataset.view;
@@ -372,7 +457,7 @@
         acc -= DAY_MS / 1000;
         ticked++;
       }
-      if (ticked) { refreshNets(); renderHUD(); renderTile(); }
+      if (ticked) { refreshNets(); renderHUD(); renderTile(); renderBudgetNumbers(); }
     }
     R.draw(ctx, s, ui);
     if (frames++ % 30 === 0) save();

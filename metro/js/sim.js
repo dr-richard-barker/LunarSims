@@ -13,22 +13,27 @@
   const T = window.LM_TERRAIN, G = window.LM_GRID, Z = window.LM_ZONES;
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
-  const STATE_VERSION = 1;
+  /* bump whenever the saved shape changes in a way older saves lack — the
+     budget added taxRate, funding and research, none of which a Phase 2
+     save carries */
+  const STATE_VERSION = 2;
   const buildById = id => BUILDINGS.find(b => b.id === id);
 
   function newGame(seed) {
     const w = T.makeMap(seed === undefined ? Math.floor(Math.random() * 9999) : seed);
-    return {
+    const s = {
       version: STATE_VERSION, seed: w.seed,
       map: w.map,
       day: 1,
       credits: K.START_CREDITS,
       pop: 0, housingCap: 0, jobs: 0,
       demand: { hab: 0, trade: 0, industry: 0 },
-      gen: 0, load: 0, airCap: 0,
+      gen: 0, ratedGen: 0, load: 0, airCap: 0,
+      revenue: 0, expenses: 0, deptExpenses: 0, zoneUpkeep: 0,
       brownout: false, airShort: false,
       log: [], history: []
     };
+    return Object.assign(s, window.LM_BUDGET.initial());
   }
 
   /* ---------- placement ---------- */
@@ -111,15 +116,29 @@
     const nets = G.services(s);
     const r = Z.growthTick(s, nets);
 
+    const B = window.LM_BUDGET;
     s.housingCap = r.tally.housingCap;
     s.jobs = r.tally.jobs;
     s.demand = r.demand;
-    s.gen = r.power.gen;
+    s.gen = r.gen;                 // after the power department's funding
+    s.ratedGen = r.ratedGen;       // what the hardware could do if maintained
     s.load = r.load;
     s.airCap = r.airCap;
     s.brownout = r.brownout;
     s.airShort = r.airShort;
-    s.credits += r.tally.income - r.tally.upkeep;
+
+    /* Settled daily rather than in an annual lump, so the treasury is never
+       ambushed by a bill it cannot pay and the player can watch a slider
+       move the balance immediately. */
+    const rev = B.revenue(s, r.tally);
+    const exp = B.expenses(s);
+    s.revenue = rev.taken;
+    s.deptExpenses = exp.total;
+    s.zoneUpkeep = r.tally.upkeep;
+    s.expenses = exp.total + r.tally.upkeep;
+    s.credits += s.revenue - s.expenses;
+
+    s.research += r.eff.sciencePerDay * developedCount(s);
 
     /* Migration tracks the gap between people and pressurised housing.
        A colony that has over-extended its grid or its oxygen supply stops
@@ -136,8 +155,9 @@
     s.day++;
     s.history.push({
       d: s.day, pop: s.pop, jobs: s.jobs, housingCap: s.housingCap,
-      credits: Math.round(s.credits), gen: Math.round(r.power.gen * 10) / 10,
-      load: Math.round(r.load * 10) / 10
+      credits: Math.round(s.credits), gen: Math.round(r.gen * 10) / 10,
+      load: Math.round(r.load * 10) / 10,
+      revenue: Math.round(s.revenue), expenses: Math.round(s.expenses)
     });
     if (s.history.length > 400) s.history.shift();
     return r;

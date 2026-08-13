@@ -55,7 +55,18 @@ const K = {
   AIR_PER_PLANT: 45,       // colonists one oxygen plant can pressurise
   KW_PER_STAGE: 0.5,       // grid draw of a developed tile, per stage reached
   MIGRATION_RATE: 0.10,    // fraction of the housing gap that moves in per day
-  MIGRATION_CAP: 8
+  MIGRATION_CAP: 8,
+
+  /* ---- budget ----
+     BASE_TAX is the rate at which zone income arrives exactly as its stage
+     table states, so the default game plays at the balance the zone tables
+     were written for and the slider reads as a deviation from normal rather
+     than an arbitrary multiplier. */
+  BASE_TAX: 9,
+  MAX_TAX: 20,
+  HAB_TAX_PER_HEAD: 1.15,  // residents are taxable activity too, not just trade
+  TAX_DEMAND_BITE: 0.02,   // demand lost per point of tax above the base rate
+  BROKE_FUNDING: 0.5       // services run at half effect while the treasury is negative
 };
 
 /* Ground types. Height does most of the work that terrain type did in
@@ -148,6 +159,31 @@ const BUILDINGS = [
     desc: 'Cracks oxygen and pressurises the mains. Draws real power, and pressurises a fixed number of colonists — build more as the city grows.' }
 ];
 
+/* City departments. Each dial runs 0..100% and every one of them has a real,
+   present-tense effect — there are no placeholder sliders here. Funding a
+   department costs credits every day in proportion to how much of that
+   department's infrastructure exists, so a bigger city genuinely costs more
+   to run, which is the pressure the tax rate exists to answer.
+
+   `rate` is credits per day, per unit of upkeep, at full funding. */
+const DEPARTMENTS = [
+  { id: 'power', name: 'Power Grid', rate: 0.85,
+    effect: 'Underfunded, the grid delivers less than its rated output — the same arrays produce less usable power.',
+    unit: 'generators and conduits' },
+  { id: 'air', name: 'Atmosphere', rate: 1.05,
+    effect: 'Underfunded, plants pressurise fewer colonists than their rating, tightening the population ceiling.',
+    unit: 'oxygen plants and mains' },
+  { id: 'transit', name: 'Transit', rate: 0.30,
+    effect: 'Underfunded, tube access is worth less to the ground it serves, dragging land value down.',
+    unit: 'transit tubes' },
+  { id: 'safety', name: 'Safety & Repair', rate: 0.55,
+    effect: 'Underfunded, a maintenance backlog builds and developed ground slowly loses the density it gained.',
+    unit: 'developed tiles' },
+  { id: 'science', name: 'Science', rate: 0.70,
+    effect: 'Funds research. Accumulated findings are what later unlock the next era of construction.',
+    unit: 'developed tiles' }
+];
+
 /* Tool roster. Terrain sculpting, the three networks, generation and life
    support, and the six zoning brushes. */
 const TOOLS = [
@@ -181,4 +217,4 @@ const TOOLS = [
     hint: 'Remove whatever is on a tile — zoning, network or structure.' }
 ];
 
-window.LM_DATA = { K, TERRAIN, DEPOSITS, ZONES, BUILDINGS, TOOLS };
+window.LM_DATA = { K, TERRAIN, DEPOSITS, ZONES, BUILDINGS, DEPARTMENTS, TOOLS };

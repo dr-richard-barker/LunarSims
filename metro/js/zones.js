@@ -75,11 +75,14 @@
     return { gen, o2Plants: plants, o2Draw: plants * 5 };
   }
 
-  /* RCI, each index running -1..+1. */
-  function demand(s, t) {
-    const hab = clamp((t.jobs - s.pop) / K.DEMAND_SCALE, -1, 1);
-    const trade = clamp((s.pop * 0.38 - t.tradeJobs) / K.DEMAND_SCALE, -1, 1);
-    const industry = clamp((s.pop * 0.28 - t.industryJobs) / K.DEMAND_SCALE, -1, 1);
+  /* RCI, each index running -1..+1. `bite` is the drag a tax rate above the
+     base puts on every index — the other half of the budget trade-off, and
+     the reason a maximally-taxed city is rich and stagnant. */
+  function demand(s, t, bite) {
+    const b = bite || 0;
+    const hab = clamp((t.jobs - s.pop) / K.DEMAND_SCALE - b, -1, 1);
+    const trade = clamp((s.pop * 0.38 - t.tradeJobs) / K.DEMAND_SCALE - b, -1, 1);
+    const industry = clamp((s.pop * 0.28 - t.industryJobs) / K.DEMAND_SCALE - b, -1, 1);
     return { hab, trade, industry };
   }
 
@@ -89,7 +92,9 @@
      drags down whatever sits close to it, so hab wants to be somewhere else. */
   function landValue(s, ctx, tile) {
     let v = tile.t === 'flat' ? 0.52 : 0.38;
-    v += ctx.transit(tile.x, tile.y) ? 0.22 : -0.40;
+    /* a barely-maintained tube network is worth less to the ground it
+       serves — the transit dial showing up in the economy */
+    v += ctx.transit(tile.x, tile.y) ? 0.22 * (ctx.transitMul === undefined ? 1 : ctx.transitMul) : -0.40;
     v += (tile.sun - 0.4) * 0.30;                       // outlook and daylight
     v += (tile.h / K.MAX_H - 0.35) * 0.14;              // above the dust
     const dInd = ctx.indDist[idx(tile.x, tile.y)];
@@ -100,22 +105,30 @@
   /* Advance or retreat every zoned tile by one day. `nets` is the result of
      LM_GRID.services(s), computed once for the whole map. */
   function growthTick(s, nets) {
+    const B = window.LM_BUDGET;
+    const eff = B ? B.effects(s)
+      : { genMul: 1, airMul: 1, transitMul: 1, safety: 1, taxBite: 0 };
+
     const t = tally(s);
-    const d = demand(s, t);
+    const d = demand(s, t, eff.taxBite);
     const pw = power(s);
     const indDist = distanceField(s, x => x.zone && x.zone.kind === 'industry' && x.zone.stage > 0, 5);
 
     const ctx = {
       transit: (x, y) => G.hasTransit(s, x, y),
-      indDist
+      indDist,
+      transitMul: eff.transitMul
     };
 
     /* Colony-wide gates. Growth stops everywhere if the grid cannot carry
        the load or there is not enough pressurisation to go round — the two
-       classic "build another plant" pressures. */
+       classic "build another plant" pressures. Both ratings are scaled by
+       their department's funding, so letting maintenance slide has exactly
+       the same effect as never having built the capacity. */
+    const gen = pw.gen * eff.genMul;
     const load = t.draw + pw.o2Draw;
-    const brownout = load > pw.gen;
-    const airCap = pw.o2Plants * K.AIR_PER_PLANT;
+    const brownout = load > gen;
+    const airCap = Math.floor(pw.o2Plants * K.AIR_PER_PLANT * eff.airMul);
     const airShort = s.pop > airCap;
 
     for (const tile of s.map) {
@@ -157,9 +170,21 @@
           if (z.decay >= 1) { z.stage--; z.decay = 0; z.growth = 0.5; }
         } else z.decay = 0;
       }
+
+      /* Deferred maintenance. Below roughly two-thirds funding a backlog
+         accrues on developed ground and eventually costs it a stage — the
+         slow, unglamorous way a city decays when the repair budget is the
+         easy thing to cut. Well-funded, any accrued backlog works off. */
+      if (z.stage > 0 && eff.safety < 0.65) {
+        z.backlog = (z.backlog || 0) + (0.65 - eff.safety) * 0.06;
+        if (z.backlog >= 1) { z.stage--; z.backlog = 0; z.growth = 0.5; }
+      } else if (z.backlog) {
+        z.backlog = Math.max(0, z.backlog - 0.03);
+      }
     }
 
-    return { tally: t, demand: d, power: pw, brownout, airShort, airCap, load };
+    return { tally: t, demand: d, power: pw, gen, ratedGen: pw.gen,
+             brownout, airShort, airCap, load, eff };
   }
 
   window.LM_ZONES = {

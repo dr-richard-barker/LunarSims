@@ -52,6 +52,10 @@
   </section>
 
   <aside class="panel">
+    <nav class="tabs">
+      <button class="tab on" data-tab="info">City</button>
+      <button class="tab" data-tab="budget">Budget</button>
+    </nav>
     <div class="tabpane on" id="pane-info">
       <h3 class="sec">Demand</h3>
       <div id="demand"></div>
@@ -59,6 +63,7 @@
       <h3 class="sec">Selected ground</h3>
       <div id="tileDetail" class="empty">Click a tile to read the ground.</div>
     </div>
+    <div class="tabpane" id="pane-budget"></div>
   </aside>
 </main>
 
@@ -67,6 +72,7 @@
 <script src="js/data.js"></script>
 <script src="js/terrain.js"></script>
 <script src="js/grid.js"></script>
+<script src="js/budget.js"></script>
 <script src="js/zones.js"></script>
 <script src="js/sim.js"></script>
 <script src="js/render.js"></script>

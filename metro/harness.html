@@ -49,11 +49,13 @@ td.mark{width:34px;text-align:center}
 <script src="js/data.js"></script>
 <script src="js/terrain.js"></script>
 <script src="js/grid.js"></script>
+<script src="js/budget.js"></script>
 <script src="js/zones.js"></script>
 <script src="js/sim.js"></script>
 <script>
 (function () {
   const T = window.LM_TERRAIN, G = window.LM_GRID, Z = window.LM_ZONES, S = window.LM_SIM;
+  const B = window.LM_BUDGET;
   const K = window.LM_DATA.K;
 
   /* Generation is the expensive step (a full-map sun raycast), so scenarios
@@ -526,6 +528,158 @@ td.mark{width:34px;text-align:center}
           ['stripping every service depopulates it', s.pop < peak, true],
           ['but nothing ever declares the run over', s.over === undefined, true],
           ['and the simulation keeps ticking cleanly', s.day, '>=150']
+        ];
+      } },
+
+    /* ---------- phase 3: taxation and departmental funding ---------- */
+
+    { name: 'A new city starts fully funded at the base tax rate',
+      why: 'the defaults have to reproduce exactly the balance the zone tables were written for, so the slider reads as a deviation from normal rather than an arbitrary multiplier',
+      run() {
+        const s = S.newGame(900);
+        const allFull = window.LM_DATA.DEPARTMENTS.every(d => s.funding[d.id] === 1);
+        return [
+          ['tax starts at the base rate', s.taxRate, K.BASE_TAX],
+          ['every department starts fully funded', allFull, true],
+          ['research starts empty', s.research, 0],
+          ['at the base rate revenue equals the raw taxable activity',
+            Math.round(B.revenue(s, { income: 100, housingCap: 0 }).taken), 100]
+        ];
+      } },
+
+    { name: 'The tax rate moves revenue and bites demand in opposite directions',
+      why: 'this is the whole management trade-off — if raising tax were free money there would be no decision to make',
+      run() {
+        const s = city();
+        const tal = { income: 200, housingCap: 100 };
+        s.taxRate = K.BASE_TAX;
+        const mid = B.revenue(s, tal).taken;
+        s.taxRate = K.MAX_TAX;
+        const high = B.revenue(s, tal).taken, highBite = B.effects(s).taxBite;
+        s.taxRate = 0;
+        const none = B.revenue(s, tal).taken, noneBite = B.effects(s).taxBite;
+
+        /* and the bite has to actually reach the demand indices */
+        const t = { jobs: 100, tradeJobs: 0, industryJobs: 0 };
+        const dMid = Z.demand({ pop: 50 }, t, 0);
+        const dHigh = Z.demand({ pop: 50 }, t, highBite);
+        return [
+          ['a higher rate takes more', high > mid, true],
+          ['a zero rate takes nothing', none, 0],
+          ['a high rate suppresses demand', highBite > 0, true],
+          ['a low rate stimulates it', noneBite < 0, true],
+          ['the bite genuinely reaches the demand index', dHigh.hab < dMid.hab, true]
+        ];
+      } },
+
+    { name: 'Department funding scales both the daily bill and the effect',
+      why: 'a dial that changed cost without changing outcome, or outcome without changing cost, would be a fake choice',
+      run() {
+        const s = city();
+        S.place(s, T.tileAt(s, 60, 60), 'solar');
+        S.place(s, T.tileAt(s, 61, 60), 'o2');
+        for (let x = 62; x <= 68; x++) S.place(s, T.tileAt(s, x, 60), 'conduit');
+
+        s.funding.power = 1;
+        const fullCost = B.expenses(s).byDept.power, fullMul = B.effects(s).genMul;
+        s.funding.power = 0;
+        const zeroCost = B.expenses(s).byDept.power, zeroMul = B.effects(s).genMul;
+        return [
+          ['full funding costs something', fullCost, '>0'],
+          ['zero funding costs nothing', zeroCost, 0],
+          ['full funding delivers the full rating', Math.round(fullMul * 100) / 100, 1],
+          ['zero funding delivers noticeably less', zeroMul < 0.6, true],
+          ['the bill scales with the infrastructure maintained',
+            B.counts(s).power, 4 + 7]
+        ];
+      } },
+
+    { name: 'Starving the grid or the atmosphere budget shrinks real capacity',
+      why: 'the funding multipliers must reach the actual growth gates, not just a readout — letting maintenance slide has to bite exactly like never having built the capacity',
+      run() {
+        const s = servicedZone({ tube: true, power: true, air: true });
+        for (let i = 0; i < 40; i++) S.tick(s);
+        const fedGen = s.gen, fedAir = s.airCap;
+        s.funding.power = 0; s.funding.air = 0;
+        S.tick(s);
+        return [
+          ['a funded grid reports its full rating', fedGen > 0, true],
+          ['starving power cuts delivered generation', s.gen < fedGen, true],
+          ['starving atmosphere cuts pressurisation capacity', s.airCap < fedAir, true],
+          ['the rated hardware figure is still reported separately', s.ratedGen > s.gen, true]
+        ];
+      } },
+
+    { name: 'A deficit degrades every service without ending the run',
+      why: 'the no-fail rule has to survive bankruptcy specifically — the city should stall and shrink, and still be recoverable, rather than declaring a loss',
+      run() {
+        const s = servicedZone({ tube: true, power: true, air: true });
+        for (let i = 0; i < 40; i++) S.tick(s);
+        const solventMul = B.effects(s).genMul;
+        s.credits = -5000;
+        const brokeMul = B.effects(s).genMul;
+        for (let i = 0; i < 30; i++) S.tick(s);
+        /* and it can climb back out */
+        s.credits = 50000;
+        const recoveredMul = B.effects(s).genMul;
+        return [
+          ['a solvent city runs its services at full effect', Math.round(solventMul * 100) / 100, 1],
+          ['a deficit halves the effect of funding', brokeMul < solventMul, true],
+          ['the run is never declared over', s.over === undefined, true],
+          ['and services recover once the treasury does', Math.round(recoveredMul * 100) / 100, 1]
+        ];
+      } },
+
+    { name: 'Deferred repair budgets eat developed density',
+      why: 'the safety dial has to have a real, visible consequence rather than being a number that only costs money',
+      run() {
+        const s = servicedZone({ tube: true, power: true, air: true });
+        for (let i = 0; i < 60; i++) S.tick(s);
+        const grown = T.tileAt(s, 62, 62).zone.stage;
+        s.funding.safety = 0;
+        for (let i = 0; i < 120; i++) S.tick(s);
+        const after = T.tileAt(s, 62, 62).zone.stage;
+        return [
+          ['the district developed while maintained', grown, '>=1'],
+          ['cutting repair funding costs it density', after < grown, true],
+          ['a backlog is what actually did it',
+            B.effects({ credits: 1, funding: { safety: 0 } }).safety, 0]
+        ];
+      } },
+
+    { name: 'Science funding banks research for later eras',
+      why: 'the science dial pays for something the player cannot spend yet, so it has to at least visibly accumulate — otherwise it is a decorative slider',
+      run() {
+        const s = servicedZone({ tube: true, power: true, air: true });
+        for (let i = 0; i < 60; i++) S.tick(s);
+        const funded = s.research;
+        const s2 = servicedZone({ tube: true, power: true, air: true });
+        s2.funding.science = 0;
+        for (let i = 0; i < 60; i++) S.tick(s2);
+        return [
+          ['a funded science budget banks research', funded, '>0'],
+          ['an unfunded one banks none', s2.research, 0],
+          ['research only accrues against developed ground',
+            B.effects({ credits: 1, funding: { science: 1 } }).sciencePerDay, '>0']
+        ];
+      } },
+
+    { name: 'The treasury settles daily and the books add up',
+      why: 'a budget the player cannot reconcile against their own balance is worse than none — revenue minus expenses must be exactly the change in credits',
+      run() {
+        const s = servicedZone({ tube: true, power: true, air: true });
+        for (let i = 0; i < 30; i++) S.tick(s);
+        const before = s.credits;
+        S.tick(s);
+        const delta = s.credits - before;
+        const expected = s.revenue - s.expenses;
+        return [
+          ['the daily change equals revenue minus expenses',
+            Math.abs(delta - expected) < 1e-6, true],
+          ['expenses are departments plus district upkeep',
+            Math.abs(s.expenses - (s.deptExpenses + s.zoneUpkeep)) < 1e-6, true],
+          ['a 30-day projection is thirty times the daily rate',
+            Math.abs(B.monthly(s, Z.tally(s)).revenue - s.revenue * 30) < 1e-6, true]
         ];
       } }
   ];
