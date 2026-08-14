@@ -240,6 +240,106 @@ city/
   js/ui.js                    tools, camera, panels, main loop, saving
 ```
 
+## Lunar Metropolis
+
+`metro/` — a sandbox city builder, and the largest of the three. Where Artemis
+City is a colony simulation with zoning in it, Lunar Metropolis is a city
+builder first: there is no survival clock, no starvation, and no fail state of
+any kind. The worst thing that can happen to you is ground you have to rebuild.
+
+The defining difference from `city/` is **elevation**. Every tile carries an
+integer height, and a tile's sunlight is derived once from that height by
+raycasting against its neighbours at a low polar sun angle. That single derived
+field is what makes the terrain tools strategic rather than cosmetic:
+
+- crater rims approach the **peaks of eternal light** that make polar landing
+  sites worth having, and are where a solar array earns its keep;
+- deep floors are **permanently shadowed**, and are exactly where the ice is.
+
+So every site decision is a trade between power and water, and sculpting the
+ground changes the economics of it.
+
+### What the Moon does to the SimCity systems
+
+The setting is not a skin over the usual subsystems — it motivates them.
+
+| SimCity 2000 | Lunar Metropolis |
+|---|---|
+| Water pipes | **Atmosphere mains** — buried, so they coexist with anything on the tile |
+| Power lines | **Power conduits** — current also flows through developed buildings |
+| Roads | **Transit tubes** — pure adjacency, no network solve |
+| Hills and waterfront | **Crater rims and shadowed floors** |
+| Pollution | **Regolith dust** — a diffusing field that fouls the arrays and land value |
+| Crime | **Maintenance backlog** — underfunded repair costs you density |
+| Police and fire | **Repair depots and medbays**, with coverage radii |
+| Arcologies | **Lava-tube megadome**, which must abut a real skylight |
+| Neighbour connections | **Mass driver**, which needs a long level ridge to run along |
+
+### Eras
+
+Four of them — Outpost, Settlement, Colony, Metropolis — each unlocked by
+reaching **both** a population high-water mark and a research total. Pairing the
+two is what stops the science budget being safe to zero out forever, and stops a
+small well-funded outpost building a skyline. Each era raises the density
+ceiling, unlocks buildings, and changes what the city looks like: bermed
+regolith cans, then domes and mid-rise, then radiator fins and lit viewports,
+then towers with window grids and skyways between the dense blocks.
+
+### The three modes
+
+All three are off by default and all three persist with the save.
+
+- **🤖 Auto-play** — an AI director builds and manages the city on a priority
+  ladder: budget, ground clearance, power, air, networks, zoning, civic
+  services, wonders, expansion. Utilities before ground and ground before
+  buildings, so it never widens the city while the part it has is browning out.
+  Your own tools keep working alongside it.
+- **∞ Sandbox** — everything free, nothing era-locked, for you and the director
+  alike. It deliberately does not touch the era itself: the city still advances
+  as it grows, so the architecture is still earned. Sandbox removes the price
+  tag, not the progression.
+- **☄ Disasters** — off by default, because this is a builder and having a city
+  wrecked should be opted into. Four events that each cost you something
+  different: a seal blowout takes networks, a dust surge takes economy, a solar
+  flare takes power city-wide for a few days, and a meteor is the only one that
+  rewrites terrain. Repair coverage mitigates all four. None can end a run.
+
+The dust event is electrostatic transport rather than a storm — the Moon has no
+wind. Charging by UV and the solar wind lofts fine grains off the surface, which
+is the phenomenon behind Surveyor's "horizon glow" and the reports from Apollo
+crews near the terminator.
+
+### Testing
+
+`metro/js/{data,terrain,grid,budget,services,eras,zones,disasters,sim,autopilot}.js`
+have no DOM references, so `metro/harness.html` drives the whole simulation
+headlessly: terrain cascade invariants, sun derivation, three-network
+reachability, RCI growth and decay, the budget, coverage radii, the dust field,
+era gating, every disaster, and complete AI-director runs of several hundred
+simulated days. Open it in a browser and re-run it after any change to those
+files.
+
+### Layout
+
+```
+metro/
+  index.html        game shell
+  harness.html       headless simulation tests — open it in a browser
+  style.css
+  js/data.js         constants, terrain, zones, buildings, eras, departments, disasters
+  js/terrain.js       map generation, height editing, the sun raycast
+  js/grid.js           one flood fill serving all three networks
+  js/budget.js          tax rate, departmental funding, and what each dial does
+  js/services.js         civic coverage fields and the diffusing dust field
+  js/eras.js              era thresholds and what each one unlocks
+  js/zones.js              RCI demand, land value, per-tile growth and decay
+  js/disasters.js           the four-event deck
+  js/sim.js                  the simulation — one tick is one day
+  js/autopilot.js             the AI auto-play director
+  js/render.js                 isometric canvas renderer, procedural throughout
+  js/ui.js                      tools, camera, panels, trends, main loop, saving
+```
+
 ## On the crop list
 
 The crops are real ones: `'Outredgeous'` red romaine, mizuna and Tokyo Bekana from
@@ -255,7 +355,7 @@ relationships behave qualitatively as they should, but nothing here should be ci
 
 ## The rest of the arcade
 
-Lunar Farm and Artemis City are two games in a set. The
+Lunar Farm, Artemis City and Lunar Metropolis are three games in a set. The
 **[CoSE Arcade](https://dr-richard-barker.github.io/cose-arcade/)** is the front door;
 the **[Lunar Arcade](https://dr-richard-barker.github.io/lunar-arcade/)** holds the
 other lunar titles, including
@@ -271,8 +371,10 @@ separately — its regolith-into-soil premise is the bed-conditioning mechanic a
 
 ## Provenance
 
-Written from scratch. Lunar Farm takes its shape from *SimFarm* (Maxis, 1993) and Artemis City
-from *SimCity 2000* (Maxis, 1993) — an open-source SimCity2000 clone, [OpenSC2K](https://github.com/nicholas-ochoa/OpenSC2K),
+Written from scratch. Lunar Farm takes its shape from *SimFarm* (Maxis, 1993), and Artemis City
+and Lunar Metropolis both from *SimCity 2000* (Maxis, 1993) — Artemis City as a colony simulation
+with zoning in it, Lunar Metropolis as a sandbox builder with elevation, a budget window and an era
+arc. An open-source SimCity2000 clone, [OpenSC2K](https://github.com/nicholas-ochoa/OpenSC2K),
 was surveyed early on as a possible base and rejected: it is GPL-3.0, its own simulation was never
 finished, and its art pipeline requires proprietary game files that cannot be redistributed. Nothing
 here shares code, art or data with any Maxis game, and none of those games is distributed in this
