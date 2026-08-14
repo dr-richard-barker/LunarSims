@@ -48,6 +48,24 @@ const K = {
   /* ---- city simulation ---- */
   START_CREDITS: 20000,
   DEMAND_SCALE: 60,        // divisor turning the jobs/population gap into an RCI index
+
+  /* RCI ratios. These three have to be consistent with each other or the
+     city hits a ceiling it can never grow through: habitation only develops
+     while jobs outrun population, while trade and industry only develop
+     while population outruns their own headcount. If the two job ratios sum
+     to less than one, the equilibrium the city settles at has fewer jobs
+     than residents — which leaves habitation demand permanently negative,
+     stalls population for good, and puts the later eras out of reach of any
+     player, however well they build.
+
+     So the two job ratios sum to exactly 1: at equilibrium there is one job
+     per resident. RESIDENTS_PER_JOB is then what makes a city grow at all —
+     each job supports slightly more than one resident, because not everyone
+     in a household works. That margin is the engine, and it stays bounded by
+     land, power, pressurisation, land value and the era ceiling. */
+  RESIDENTS_PER_JOB: 1.15,
+  TRADE_JOBS_PER_HEAD: 0.55,
+  IND_JOBS_PER_HEAD: 0.45,
   MAX_STAGE: 4,
   BASE_GROWTH: 0.16,       // stage progress per day under ideal conditions
   DECAY_RATE: 0.10,        // stage progress lost per day when demand is negative
@@ -78,7 +96,33 @@ const K = {
   DUST_DECAY: 0.982,       // settles out slowly
   DUST_SPREAD: 0.085,      // fraction bleeding to each orthogonal neighbour
   DUST_SOLAR_BITE: 0.55,   // most of an array's output a full dust load costs
-  DUST_VALUE_BITE: 0.40    // land value lost under a full dust load
+  DUST_VALUE_BITE: 0.40,   // land value lost under a full dust load
+
+  /* ---- disasters ----
+     OFF by default. This is a sandbox city builder first: a player who wants
+     to design a city should not have one deleted by a dice roll they never
+     opted into. Nothing here can end a run either — the worst case is ground
+     you have to rebuild.
+
+     The rate is per day and deliberately low. It scales with how much there
+     is to hit, so an empty map is quiet and a real city is not, and a
+     cooldown stops two events landing on top of each other before the first
+     has been repaired. */
+  DISASTER_BASE_CHANCE: 0.0045,
+  DISASTER_SCALE_TILES: 400,   // developed tiles at which the rate has doubled
+  DISASTER_MAX_CHANCE: 0.02,
+  DISASTER_COOLDOWN: 45,       // days of quiet after one fires
+  DISASTER_GRACE: 20,          // no events at all before this day
+
+  /* ---- AI auto-play ----
+     Block spacing for the director's lattice. Tube streets every third row
+     put every tile within one of a tube, which is the adjacency the growth
+     model needs. */
+  AI_BLOCK: 3,
+  AI_CONDUIT_EVERY: 6,     // conduit columns are sparser; developed ground carries the rest
+  AI_RESERVE_FLOOR: 2500,  // never spend the treasury below this
+  AI_POWER_MARGIN: 1.3,    // build generation until it clears load by this factor
+  AI_AIR_MARGIN: 1.25      // and pressurisation until it clears population by this
 };
 
 /* Ground types. Height does most of the work that terrain type did in
@@ -232,6 +276,39 @@ const ERAS = [
     blurb: 'Towers, skyways between the dense blocks, and a skyline worth the name.' }
 ];
 
+/* The disaster deck, rethemed for a city rather than a survival base.
+
+   Each one damages the city in a different currency, so no single defence
+   answers all four: the meteor takes ground, the blowout takes networks, the
+   dust surge takes economy, and the flare takes power. All four are survivable
+   and repairable — none can end a run.
+
+   `mitigatedBy` names the coverage field that reduces the damage, which is
+   what gives the Safety & Repair budget a second job besides holding density.
+
+   A note on the dust event: the Moon has no wind, so there are no dust storms
+   in the terrestrial sense. What it does have is electrostatic dust transport
+   — UV and solar-wind charging lofts fine grains above the surface, seen as
+   Surveyor's "horizon glow" and reported by Apollo crews near the terminator.
+   That is the real phenomenon this event models, hence the name. */
+const DISASTERS = [
+  { id: 'blowout', name: 'Seal Blowout', glyph: '💨', weight: 1.6, minDay: 25,
+    mitigatedBy: 'safety',
+    desc: 'A pressure seal lets go. The atmosphere mains around it vent to vacuum and the district above them loses density until the run is relaid.' },
+
+  { id: 'dustsurge', name: 'Electrostatic Dust Surge', glyph: '🌫', weight: 1.4, minDay: 20,
+    mitigatedBy: 'safety',
+    desc: 'Charged regolith lofts off the surface and settles over everything downrange, fouling solar arrays and dragging land value down until it clears.' },
+
+  { id: 'flare', name: 'Solar Flare', glyph: '⚡', weight: 1.2, minDay: 30,
+    mitigatedBy: 'safety',
+    desc: 'A particle event forces the grid into protective shutdown. Generation is cut city-wide for several days, but nothing is destroyed.' },
+
+  { id: 'meteor', name: 'Meteor Strike', glyph: '☄', weight: 0.8, minDay: 40,
+    mitigatedBy: 'safety',
+    desc: 'A meteoroid gets through. Everything inside the crater is gone and the ground itself is rewritten — the only event that changes the terrain.' }
+];
+
 /* City departments. Each dial runs 0..100% and every one of them has a real,
    present-tense effect — there are no placeholder sliders here. Funding a
    department costs credits every day in proportion to how much of that
@@ -299,4 +376,4 @@ const TOOLS = [
     hint: 'Remove whatever is on a tile — zoning, network or structure.' }
 ];
 
-window.LM_DATA = { K, TERRAIN, DEPOSITS, ZONES, ERAS, BUILDINGS, DEPARTMENTS, SERVICES, TOOLS };
+window.LM_DATA = { K, TERRAIN, DEPOSITS, ZONES, ERAS, BUILDINGS, DEPARTMENTS, SERVICES, TOOLS, DISASTERS };

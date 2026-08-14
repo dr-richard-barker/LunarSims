@@ -95,9 +95,9 @@
      the reason a maximally-taxed city is rich and stagnant. */
   function demand(s, t, bite) {
     const b = bite || 0;
-    const hab = clamp((t.jobs - s.pop) / K.DEMAND_SCALE - b, -1, 1);
-    const trade = clamp((s.pop * 0.38 - t.tradeJobs) / K.DEMAND_SCALE - b, -1, 1);
-    const industry = clamp((s.pop * 0.28 - t.industryJobs) / K.DEMAND_SCALE - b, -1, 1);
+    const hab = clamp((t.jobs * K.RESIDENTS_PER_JOB - s.pop) / K.DEMAND_SCALE - b, -1, 1);
+    const trade = clamp((s.pop * K.TRADE_JOBS_PER_HEAD - t.tradeJobs) / K.DEMAND_SCALE - b, -1, 1);
+    const industry = clamp((s.pop * K.IND_JOBS_PER_HEAD - t.industryJobs) / K.DEMAND_SCALE - b, -1, 1);
     return { hab, trade, industry };
   }
 

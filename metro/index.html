@@ -27,6 +27,11 @@
       <button data-speed="12" class="sp">12×</button>
     </div>
     <div class="modes">
+      <button id="btnAuto" class="mode" title="Hand the city to the AI director. It lays the networks, zones to demand, keeps the grid and the air ahead of the city, and manages the budget — all with a bias toward growth.">🤖 Auto-play</button>
+      <button id="btnSandbox" class="mode" title="Everything free, nothing locked. The city still advances through its eras as it grows — sandbox removes the price tag, not the progression.">∞ Sandbox</button>
+      <button id="btnDisasters" class="mode" title="Meteor strikes, seal blowouts, dust surges and solar flares. Off by default. Nothing here can end a run.">☄ Disasters</button>
+    </div>
+    <div class="modes">
       <button id="btnCentre" class="mode" title="Recentre the camera on the middle of the map">Centre</button>
       <button id="btnNew" class="mode" title="Abandon this city and generate fresh terrain">New Colony</button>
     </div>
@@ -69,6 +74,8 @@
       <div id="advisor"></div>
       <h3 class="sec">Selected ground</h3>
       <div id="tileDetail" class="empty">Click a tile to read the ground.</div>
+      <h3 class="sec">City log</h3>
+      <div id="log" class="empty">Nothing has happened yet.</div>
     </div>
     <div class="tabpane" id="pane-budget"></div>
   </aside>
@@ -83,7 +90,9 @@
 <script src="js/services.js"></script>
 <script src="js/eras.js"></script>
 <script src="js/zones.js"></script>
+<script src="js/disasters.js"></script>
 <script src="js/sim.js"></script>
+<script src="js/autopilot.js"></script>
 <script src="js/render.js"></script>
 <script src="js/ui.js"></script>
 </body>

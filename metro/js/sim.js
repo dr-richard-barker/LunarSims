@@ -13,10 +13,12 @@
   const T = window.LM_TERRAIN, G = window.LM_GRID, Z = window.LM_ZONES;
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
-  /* bump whenever the saved shape changes in a way older saves lack — the
-     budget added taxRate, funding and research, none of which a Phase 2
-     save carries */
-  const STATE_VERSION = 3;
+  /* Bump whenever the saved shape changes in a way older saves lack. v4 adds
+     the three mode switches and the disaster state, and — more importantly —
+     corrects the RCI ratios, which changes how an existing city behaves
+     rather than just what it stores. Carrying a v3 city forward would leave
+     it balanced against rules that no longer exist. */
+  const STATE_VERSION = 4;
   const buildById = id => BUILDINGS.find(b => b.id === id);
 
   function newGame(seed) {
@@ -31,6 +33,13 @@
       gen: 0, ratedGen: 0, load: 0, airCap: 0,
       revenue: 0, expenses: 0, deptExpenses: 0, zoneUpkeep: 0,
       brownout: false, airShort: false,
+
+      /* Modes. Disasters start OFF: this is a sandbox city builder, and a
+         player who came to design a city should opt in to having one wrecked
+         rather than opt out. */
+      sandbox: false, disastersOn: false, autoPlay: false,
+      flareDays: 0, lastDisaster: -999,
+
       log: [], history: []
     };
     return Object.assign(s, window.LM_BUDGET.initial());
@@ -66,11 +75,20 @@
     return false;
   }
 
+  /* Sandbox mode. Everything is free and every era-gated structure is
+     available immediately — the player (or the director) is designing a city
+     rather than earning one. It deliberately does NOT touch the era itself:
+     the city still advances through Outpost to Metropolis as it grows, so the
+     architecture still changes as it earns it. What sandbox removes is the
+     permission system, not the progression. */
+  const free = s => !!s.sandbox;
+  const cost = (s, n) => free(s) ? 0 : n;
+
   function canPlace(s, t, type) {
     const B = buildById(type);
     if (!B) return 'Unknown structure.';
     if (!t) return 'That is off the map.';
-    if (window.LM_ERAS && !window.LM_ERAS.unlocked(s, type)) {
+    if (!free(s) && window.LM_ERAS && !window.LM_ERAS.unlocked(s, type)) {
       return window.LM_ERAS.lockReason(s, type);
     }
     if (B.once && count(s, type) >= 1) return `The colony only builds one ${B.name}.`;
@@ -90,7 +108,7 @@
       if (t.b) return t.b.type === type ? 'Already built here.' : 'Something is already built here.';
       if (t.zone) return 'That ground is zoned — clear the zoning first.';
     }
-    if (s.credits < B.cost) return `That costs ${B.cost.toLocaleString()} credits.`;
+    if (s.credits < cost(s, B.cost)) return `That costs ${B.cost.toLocaleString()} credits.`;
     return null;
   }
 
@@ -98,7 +116,7 @@
     const err = canPlace(s, t, type);
     if (err) return err;
     const B = buildById(type);
-    s.credits -= B.cost;
+    s.credits -= cost(s, B.cost);
     if (B.subsurface) t.pipe = true;
     else t.b = { type };
     return null;
@@ -124,14 +142,14 @@
      refusing the whole drag — dragging across a boulder field should still
      zone everything either side of it. Returns how many tiles were set. */
   function paintZone(s, x, y, w, h, kind, density) {
-    const cost = zoneCost(kind, density);
+    const each = cost(s, zoneCost(kind, density));
     let painted = 0;
     for (let yy = y; yy < y + h; yy++) {
       for (let xx = x; xx < x + w; xx++) {
         const t = T.tileAt(s, xx, yy);
         if (canZone(s, t)) continue;
-        if (s.credits < cost) return painted;
-        s.credits -= cost;
+        if (s.credits < each) return painted;
+        s.credits -= each;
         t.zone = { kind, density, stage: 0, growth: 0, unserved: 0, decay: 0, served: false, value: 0 };
         painted++;
       }
@@ -151,6 +169,17 @@
   /* ---------- the daily tick ---------- */
 
   function tick(s) {
+    /* The director acts at the top of the day, before anything is evaluated,
+       so what it builds is reflected in the same day's growth rather than
+       lagging it by one. Loaded optionally — sim.js has no hard dependency on
+       autopilot.js, the same discipline the renderer follows. */
+    if (s.autoPlay && window.LM_AUTO) {
+      try { window.LM_AUTO.step(s); } catch (e) { console.error('autoplay', e); }
+    }
+    /* Then the dice, if the player opted in. */
+    if (s.disastersOn && window.LM_DISASTERS) window.LM_DISASTERS.maybeFire(s);
+    if (s.flareDays > 0) s.flareDays--;
+
     /* Dust settles before growth is evaluated, so a district reacts to the
        air it is actually breathing today rather than yesterday's. */
     if (window.LM_SERVICES) window.LM_SERVICES.diffuseDust(s);

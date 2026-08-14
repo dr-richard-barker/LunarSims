@@ -90,10 +90,17 @@
     const deptFunding = {};
     for (const d of DEPARTMENTS) deptFunding[d.id] = effFunding(s, d.id);
 
+    /* A solar flare puts the grid into protective shutdown for a few days.
+       It multiplies the same generation figure the power dial does, so a
+       well-funded grid rides one out with more headroom than a starved one —
+       the flare is a shock to capacity, not a separate rule. */
+    const flare = s.flareDays > 0 ? 0.35 : 1;
+
     return {
       deptFunding,
+      flare: s.flareDays > 0,
       /* a starved grid delivers less than its rated output */
-      genMul: 0.55 + 0.45 * effFunding(s, 'power'),
+      genMul: (0.55 + 0.45 * effFunding(s, 'power')) * flare,
       /* and starved plants pressurise fewer people than their rating */
       airMul: 0.55 + 0.45 * effFunding(s, 'air'),
       /* tube access is worth less when the tubes are barely maintained */

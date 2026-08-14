@@ -82,11 +82,14 @@
       box.className = 'tools';
       D.TOOLS.filter(t => t.group === g.id).forEach(t => {
         const b = document.createElement('button');
-        const locked = t.build && E && !E.unlocked(s, t.build);
+        /* Sandbox lifts the era locks as well as the prices, so the palette
+           has to agree with what canPlace will actually allow. */
+        const locked = !s.sandbox && t.build && E && !E.unlocked(s, t.build);
         b.className = 'tool' + (ui.tool === t.id ? ' on' : '');
         if (locked) { b.disabled = true; b.style.opacity = 0.42; }
-        const cost = t.build ? S.buildById(t.build).cost
+        const listed = t.build ? S.buildById(t.build).cost
           : t.zone ? S.zoneCost(t.zone, t.density) : null;
+        const cost = listed === null ? null : (s.sandbox ? 0 : listed);
         b.innerHTML = `<span class="g">${locked ? '🔒' : t.glyph}</span><span class="n">${t.name}</span>` +
           (cost !== null ? `<span class="c">${cost.toLocaleString()}</span>` : `<span class="k">${t.key}</span>`);
         b.title = locked ? E.lockReason(s, t.build)
@@ -345,6 +348,7 @@
       `<div class="chip"><b>${s.day.toLocaleString()}</b><span>Day</span></div>`;
 
     const warn = [];
+    if (s.flareDays > 0) warn.push(`A solar flare has the grid in protective shutdown for another ${s.flareDays} day${s.flareDays === 1 ? '' : 's'}. Generation is cut until it passes — nothing has been damaged.`);
     if (s.credits < 0) warn.push('The treasury is in deficit. Every department is running at half effect until it recovers — raise tax, or cut spending.');
     if (load > gen) warn.push('The grid is over capacity and growth has stopped. Build more generation, or restore the Power Grid budget.');
     if (s.pop > airCap) warn.push('Not enough pressurisation for this population. Build another oxygen plant, or restore the Atmosphere budget.');
@@ -459,14 +463,89 @@
     document.querySelectorAll('.sp').forEach(x => x.classList.toggle('on', x === b));
   });
 
+  /* ---------- modes ---------- */
+
+  /* Three independent switches, all persisted with the save. Auto-play and
+     Sandbox compose deliberately: the director building a free city is a
+     legitimate way to watch the whole era arc play out quickly. */
+  function markModes() {
+    document.getElementById('btnAuto').classList.toggle('on', !!s.autoPlay);
+    document.getElementById('btnSandbox').classList.toggle('on', !!s.sandbox);
+    document.getElementById('btnDisasters').classList.toggle('on', !!s.disastersOn);
+  }
+
+  document.getElementById('btnAuto').onclick = () => {
+    s.autoPlay = !s.autoPlay;
+    markModes();
+    toast(s.autoPlay
+      ? 'Auto-play on. The director will build and manage the city — your tools still work alongside it.'
+      : 'Auto-play off. The city is yours again.');
+    save();
+  };
+  document.getElementById('btnSandbox').onclick = () => {
+    s.sandbox = !s.sandbox;
+    markModes();
+    /* Costs are shown on every palette button, so the palette has to be
+       rebuilt for the prices — and the locks — to reflect the new mode. */
+    buildPalette(); renderHUD();
+    toast(s.sandbox
+      ? 'Sandbox on. Everything is free and nothing is locked.'
+      : 'Sandbox off. Costs and era locks are back.');
+    save();
+  };
+  document.getElementById('btnDisasters').onclick = () => {
+    s.disastersOn = !s.disastersOn;
+    markModes();
+    toast(s.disastersOn
+      ? 'Disasters armed. Nothing here can end the run — the worst case is ground to rebuild.'
+      : 'Disasters off.');
+    save();
+  };
+
+  /* ---------- log ---------- */
+
+  function renderLog() {
+    const box = document.getElementById('log');
+    if (!box) return;
+    if (!s.log || !s.log.length) {
+      box.className = 'empty';
+      box.textContent = 'Nothing has happened yet.';
+      return;
+    }
+    box.className = '';
+    box.innerHTML = s.log.slice(0, 8).map(e =>
+      `<p class="note"><b style="font-family:var(--mono)">Day ${e.day}</b> — ${e.msg}</p>`).join('');
+  }
+
   document.getElementById('btnNew').onclick = () => {
     if (!confirm('Start a new colony on fresh terrain? This clears the current city.')) return;
-    s = S.newGame();
+    /* The three mode switches are a statement about how the player wants to
+       play, not part of the city — carry them across a new map rather than
+       making them set them again. */
+    const modes = { sandbox: s.sandbox, disastersOn: s.disastersOn, autoPlay: s.autoPlay };
+    s = Object.assign(S.newGame(), modes);
     ui.selected = null; ui.levelTarget = null;
     centreOn(K.COLS / 2, K.ROWS / 2);
-    refreshNets(); renderTile(); renderHUD(); setHint(); save();
+    refreshNets(); buildPalette(); renderTile(); renderHUD(); renderLog(); markModes();
+    setHint(); save();
   };
-  document.getElementById('btnCentre').onclick = () => centreOn(K.COLS / 2, K.ROWS / 2);
+  /* Centres on the city rather than on the map. The two are only the same
+     thing on day one — a player settles wherever the terrain suited them, and
+     the AI director picks its own site, which on a 128-tile map can be a long
+     way from the middle. Centring on empty regolith and calling it "Centre"
+     is how you lose a city you just built. */
+  function cityCentre() {
+    let sx = 0, sy = 0, n = 0;
+    for (const t of s.map) {
+      if (!t.b && !t.zone) continue;
+      sx += t.x; sy += t.y; n++;
+    }
+    return n ? { x: sx / n, y: sy / n } : { x: K.COLS / 2, y: K.ROWS / 2 };
+  }
+  document.getElementById('btnCentre').onclick = () => {
+    const c = cityCentre();
+    centreOn(c.x, c.y);
+  };
 
   /* ---------- toast ---------- */
 
@@ -496,6 +575,7 @@
   const DAY_MS = 1100;
   const SAVE_EVERY_MS = 4000;
   let last = performance.now(), acc = 0, lastSave = 0, drawFailed = false;
+  let lastLogLen = -1, lastEra = -1;
 
   function frame(now) {
     const dt = Math.min(0.25, (now - last) / 1000); last = now;
@@ -510,7 +590,16 @@
         acc -= DAY_MS / 1000;
         ticked++;
       }
-      if (ticked) { refreshNets(); renderHUD(); renderTile(); renderBudgetNumbers(); ui.dirty = true; }
+      if (ticked) {
+        refreshNets(); renderHUD(); renderTile(); renderBudgetNumbers(); ui.dirty = true;
+        /* The log only redraws when something was actually written to it, and
+           the palette only rebuilds when the era moved — both are full DOM
+           rewrites and neither belongs on every tick. */
+        const n = s.log ? s.log.length : 0;
+        if (n !== lastLogLen) { lastLogLen = n; renderLog(); }
+        const era = E ? E.index(s) : 0;
+        if (era !== lastEra) { lastEra = era; buildPalette(); }
+      }
     }
     /* Guarded for the same reason the tick is: an exception thrown out of a
        single frame would otherwise stop requestAnimationFrame for good and
@@ -528,6 +617,6 @@
   }
 
   refreshNets();
-  buildPalette(); setHint(); renderTile(); renderHUD();
+  buildPalette(); setHint(); renderTile(); renderHUD(); renderLog(); markModes();
   requestAnimationFrame(t => { last = t; requestAnimationFrame(frame); });
 })();
