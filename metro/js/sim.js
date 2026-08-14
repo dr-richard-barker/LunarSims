@@ -225,7 +225,12 @@
        player can build their way out of, never a game over. */
     if (!r.brownout && !r.airShort) {
       const gap = Math.max(0, s.housingCap - s.pop);
-      s.pop += clamp(Math.round(gap * K.MIGRATION_RATE), 0, K.MIGRATION_CAP);
+      /* The ceiling on daily arrivals scales with the city. A flat cap is
+         right for an outpost with one landing pad and absurd for a
+         metropolis — held flat, a city with thousands of empty berths fills
+         them at eight people a day and never catches up to its own housing. */
+      const cap = Math.max(K.MIGRATION_CAP, Math.round(s.pop * K.MIGRATION_CAP_FRAC));
+      s.pop += clamp(Math.round(gap * K.MIGRATION_RATE), 0, cap);
     } else if (s.pop > 0) {
       s.pop = Math.max(0, s.pop - Math.max(1, Math.round(s.pop * 0.02)));
     }

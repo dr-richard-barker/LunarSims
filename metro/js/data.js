@@ -73,7 +73,8 @@ const K = {
   AIR_PER_PLANT: 45,       // colonists one oxygen plant can pressurise
   KW_PER_STAGE: 0.5,       // grid draw of a developed tile, per stage reached
   MIGRATION_RATE: 0.10,    // fraction of the housing gap that moves in per day
-  MIGRATION_CAP: 8,
+  MIGRATION_CAP: 8,       // floor on daily arrivals, for a city too small to scale
+  MIGRATION_CAP_FRAC: 0.02, // and above that, arrivals scale with the city itself
 
   /* ---- budget ----
      BASE_TAX is the rate at which zone income arrives exactly as its stage
@@ -119,7 +120,12 @@ const K = {
      put every tile within one of a tube, which is the adjacency the growth
      model needs. */
   AI_BLOCK: 3,
-  AI_CONDUIT_EVERY: 6,     // conduit columns are sparser; developed ground carries the rest
+  /* Conduit columns are sparser than the streets, because current also flows
+     through developed buildings and does not need its own tile everywhere.
+     Every fourth column leaves exactly one mid-block column relying on that
+     propagation; every sixth left three, which took visibly longer to light
+     up and held back the ground in between. */
+  AI_CONDUIT_EVERY: 4,
   AI_RESERVE_FLOOR: 2500,  // never spend the treasury below this
   AI_POWER_MARGIN: 1.3,    // build generation until it clears load by this factor
   AI_AIR_MARGIN: 1.25      // and pressurisation until it clears population by this

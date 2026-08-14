@@ -1321,12 +1321,21 @@ td.mark{width:34px;text-align:center}
         const target = s.map.find(t => t.zone && t.zone.stage > 0);
         DIS.fire(s, 'meteor', target);
         const devAfter = S.developedCount(s);
-        for (let i = 0; i < 200; i++) S.tick(s);
+        /* Tracked as a peak over the recovery rather than read once at the
+           end. Developed count naturally swings by a hundred tiles or more as
+           districts cycle with the RCI indices, so a single sample two
+           hundred days later is measuring that swing, not the recovery. */
+        let peak = devAfter;
+        for (let i = 0; i < 200; i++) {
+          S.tick(s);
+          const n = S.developedCount(s);
+          if (n > peak) peak = n;
+        }
         return [
           ['the strike destroys developed ground', devAfter < devBefore, true],
           ['the city does not end', s.pop, '>0'],
-          ['and the director rebuilds past where it was',
-            S.developedCount(s) >= devBefore, true],
+          ['and it keeps growing through it', s.pop > popBefore, true],
+          ['the director rebuilds past where it was', peak >= devBefore, true],
           ['while staying solvent', s.credits, '>=0']
         ];
       } }

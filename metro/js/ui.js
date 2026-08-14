@@ -448,10 +448,73 @@
     }
   }
 
+  /* ---------- trends ---------- */
+
+  /* Inline SVG sparklines over s.history, which the simulation already keeps
+     (the last 400 days). No library, no canvas, and no data that is not
+     genuinely recorded — every series here is a field the tick actually
+     writes. */
+  function spark(series, colours, label, fmt) {
+    const n = series[0].length;
+    if (n < 2) return `<div class="meter"><div class="lab"><span>${label}</span><span>—</span></div>
+      <p class="note">Not enough history yet.</p></div>`;
+    let lo = Infinity, hi = -Infinity;
+    for (const s2 of series) for (const v of s2) { if (v < lo) lo = v; if (v > hi) hi = v; }
+    if (hi === lo) { hi = lo + 1; }
+    const W = 260, H = 46;
+    const path = arr => arr.map((v, i) =>
+      `${i ? 'L' : 'M'}${(i / (n - 1) * W).toFixed(1)},${(H - (v - lo) / (hi - lo) * H).toFixed(1)}`).join('');
+    const lines = series.map((s2, i) =>
+      `<path d="${path(s2)}" fill="none" stroke="${colours[i]}" stroke-width="1.6"/>`).join('');
+    const last = series.map(s2 => fmt(s2[n - 1])).join(' / ');
+    return `<div class="meter">
+      <div class="lab"><span>${label}</span><span style="font-family:var(--mono)">${last}</span></div>
+      <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"
+           style="width:100%;height:46px;display:block;background:rgba(255,255,255,.03);border-radius:4px">
+        ${lines}
+      </svg>
+      <div class="lab" style="opacity:.6"><span>${fmt(lo)}</span><span>${fmt(hi)}</span></div>
+    </div>`;
+  }
+
+  function buildTrends() {
+    const el = document.getElementById('pane-trends');
+    const h = s.history || [];
+    const num = v => Math.round(v).toLocaleString();
+    const pick = k => h.map(r => r[k] || 0);
+
+    el.innerHTML = `
+      <h3 class="sec">The city so far</h3>
+      <div class="rows">
+        <div class="row"><span class="k">Day</span><span class="v">${s.day.toLocaleString()}</span></div>
+        <div class="row"><span class="k">Population</span><span class="v">${s.pop.toLocaleString()}</span></div>
+        <div class="row"><span class="k">Peak population</span><span class="v">${(s.peakPop || 0).toLocaleString()}</span></div>
+        <div class="row"><span class="k">Jobs</span><span class="v">${s.jobs.toLocaleString()}</span></div>
+        <div class="row"><span class="k">Developed tiles</span><span class="v">${S.developedCount(s).toLocaleString()} of ${S.zonedCount(s).toLocaleString()} zoned</span></div>
+        <div class="row"><span class="k">Era</span><span class="v good">${E ? E.current(s).name : '—'}</span></div>
+        <div class="row"><span class="k">Research banked</span><span class="v">${num(s.research)}</span></div>
+      </div>
+
+      <h3 class="sec">Trends</h3>
+      <p class="note">The last ${h.length} recorded days.</p>
+      ${spark([pick('pop'), pick('housingCap')], ['#6ee7a0', '#5fc9ff'], 'Population / housing capacity', num)}
+      ${spark([pick('gen'), pick('load')], ['#ffd479', '#ff9f6e'], 'Generation / load (kW)', v => v.toFixed(0))}
+      ${spark([pick('revenue'), pick('expenses')], ['#6ee7a0', '#ff7a9c'], 'Revenue / expenses per day', num)}
+      ${spark([pick('credits')], ['#c98bff'], 'Treasury', num)}
+
+      <h3 class="sec">Modes</h3>
+      <div class="rows">
+        <div class="row"><span class="k">Auto-play</span><span class="v${s.autoPlay ? ' good' : ''}">${s.autoPlay ? 'on' : 'off'}</span></div>
+        <div class="row"><span class="k">Sandbox</span><span class="v${s.sandbox ? ' good' : ''}">${s.sandbox ? 'on' : 'off'}</span></div>
+        <div class="row"><span class="k">Disasters</span><span class="v${s.disastersOn ? ' warn' : ''}">${s.disastersOn ? 'armed' : 'off'}</span></div>
+      </div>`;
+  }
+
   document.querySelectorAll('.tab').forEach(t => t.onclick = () => {
     document.querySelectorAll('.tab').forEach(x => x.classList.toggle('on', x === t));
     document.querySelectorAll('.tabpane').forEach(p => p.classList.toggle('on', p.id === 'pane-' + t.dataset.tab));
     if (t.dataset.tab === 'budget') buildBudget();
+    if (t.dataset.tab === 'trends') buildTrends();
   });
 
   document.querySelectorAll('#viewBar button').forEach(b => b.onclick = () => {
@@ -599,6 +662,10 @@
         if (n !== lastLogLen) { lastLogLen = n; renderLog(); }
         const era = E ? E.index(s) : 0;
         if (era !== lastEra) { lastEra = era; buildPalette(); }
+        /* Trends is a full rebuild, so it only redraws while it is the pane
+           actually on screen. */
+        const trends = document.getElementById('pane-trends');
+        if (trends && trends.classList.contains('on')) buildTrends();
       }
     }
     /* Guarded for the same reason the tick is: an exception thrown out of a
