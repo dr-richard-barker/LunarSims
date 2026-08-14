@@ -349,35 +349,177 @@
   /* wall-clock pulse, so beacons stay alive even while the sim is paused */
   const beatPulse = () => (Math.sin(Date.now() / 520) + 1) / 2;
 
-  /* Zone buildings. Low density stays domed and low; high density becomes a
-     genuine tower with a dome cap — which is what gives a lunar city a
-     downtown silhouette instead of uniform sprawl. */
-  function drawZoneBuilding(ctx, s, t, l) {
+  /* Zone buildings.
+
+     Four architectural languages, one per era, because a city that looks
+     identical from its first shelter to its last tower has no visible arc.
+     An Outpost is bermed cans; a Settlement is proper viewported domes; a
+     Colony is dome clusters and mid-rise; a Metropolis is towers with
+     window grids, spires and skyways. Low density stays low throughout —
+     the contrast between the two is what gives a lunar city a downtown
+     rather than uniform sprawl. */
+
+  const ZONE_RING = {
+    hab: '190,225,255', trade: '255,214,150', industry: '210,200,255'
+  };
+
+  /* stable per-tile variant so a block of identical stage/era tiles does not
+     render as one building repeated */
+  const variant = t => Math.floor(((t.v * 977) % 1) * 3);
+
+  function drawZoneBuilding(ctx, s, t, l, era) {
     const z0 = lift(t), zn = t.zone;
     const spec = ZONES.find(x => x.id === zn.kind);
     const col = spec.colour;
     const stage = zn.stage;
-    if (stage === 0) {
+    const v = variant(t);
+    const ring = `rgba(${ZONE_RING[zn.kind]},0.55)`;
+
+    if (stage === 0) {                       // zoned, nothing built yet
       ctx.globalAlpha = 0.5;
       fillDiamond(ctx, t.x + 0.08, t.y + 0.08, 0.84, 0.84, tone(col, l, 0.42), tone(col, l, 0.9), z0);
       ctx.globalAlpha = 1;
       return;
     }
-    if (zn.density === 'low') {
-      dome(ctx, t.x + 0.14, t.y + 0.14, 0.72, 0.72, 12 + stage * 8, '#c7cdd9', l, z0,
-        `rgba(${col === '#5fc9ff' ? '190,225,255' : col === '#ffb84d' ? '255,214,150' : '210,200,255'},0.5)`);
-    } else {
-      const hz = 16 + stage * 15;
-      box(ctx, t.x + 0.2, t.y + 0.2, 0.6, 0.6, hz, '#b9c0cc', l, z0,
-        { stroke: grey(140, l), lw: 1, top: tone(col, l, 0.5) });
-      /* window bands up the shaft */
-      ctx.strokeStyle = `rgba(255,209,120,${0.30 + l * 0.35})`; ctx.lineWidth = 1.1;
-      for (let i = 1; i <= stage; i++) {
-        const wy = z0 + hz * (i / (stage + 1));
-        const a = iso(t.x + 0.2, t.y + 0.8), b = iso(t.x + 0.8, t.y + 0.8);
-        ctx.beginPath(); ctx.moveTo(a.x, a.y - wy); ctx.lineTo(b.x, b.y - wy); ctx.stroke();
+
+    if (zn.density === 'low' || era === 0) {
+      /* Outpost cans and low-density domes. At the earliest era even a
+         high-density plot is only a hut — the city has not learned to
+         build upward yet. */
+      if (era === 0) {
+        box(ctx, t.x + 0.26, t.y + 0.26, 0.48, 0.48, 10 + stage * 4, '#b3aa98', l, z0,
+          { stroke: grey(130, l), lw: 1 });
+        const bp = iso(t.x + 0.5, t.y + 0.5);
+        ctx.fillStyle = regolith(140, l);     // regolith berm heaped against it
+        ctx.beginPath(); ctx.ellipse(bp.x, bp.y - z0 + 3, TW * 0.34, TH * 0.34, 0, 0, 7); ctx.fill();
+        ctx.fillStyle = tone(col, l, 0.8);
+        ctx.beginPath(); ctx.arc(bp.x, bp.y - z0 - 10 - stage * 4, 2.2, 0, 7); ctx.fill();
+        return;
       }
-      if (stage >= 3) dome(ctx, t.x + 0.3, t.y + 0.3, 0.4, 0.4, 8, '#d5dbe6', l, z0 + hz, null);
+      dome(ctx, t.x + 0.14, t.y + 0.14, 0.72, 0.72, 12 + stage * 8, '#c7cdd9', l, z0, ring);
+      if (era >= 2) {                         // lit viewports once the colony matures
+        const p = iso(t.x + 0.5, t.y + 0.5);
+        for (let i = 0; i < 3; i++) {
+          const a = (i / 3) * Math.PI * 2 + v;
+          ctx.fillStyle = `rgba(255,209,120,${0.5 + l * 0.35})`;
+          ctx.beginPath();
+          ctx.arc(p.x + Math.cos(a) * 12, p.y - z0 - 12 + Math.sin(a) * 6, 1.8, 0, 7);
+          ctx.fill();
+        }
+      }
+      return;
+    }
+
+    /* ---- high density ---- */
+    const hz = era >= 3 ? 20 + stage * 24 : 14 + stage * 13;
+    box(ctx, t.x + 0.2, t.y + 0.2, 0.6, 0.6, hz, era >= 3 ? '#c3cad8' : '#b9c0cc', l, z0,
+      { stroke: grey(140, l), lw: 1, top: tone(col, l, 0.5) });
+
+    if (era >= 3) {
+      /* Metropolis: a real window grid up the shaft rather than a few bands,
+         plus a setback crown and a beacon — this is the skyline. */
+      const rows = 2 + stage * 2;
+      for (let r = 1; r <= rows; r++) {
+        const wy = z0 + hz * (r / (rows + 1));
+        for (let c = 0; c < 3; c++) {
+          const u = 0.28 + c * 0.22;
+          const q = iso(t.x + u, t.y + 0.8);
+          ctx.fillStyle = `rgba(255,214,140,${0.30 + l * 0.4})`;
+          ctx.fillRect(q.x - 1.6, q.y - wy - 2.4, 3.2, 3.4);
+        }
+      }
+      box(ctx, t.x + 0.3, t.y + 0.3, 0.4, 0.4, 14, '#d5dbe6', l, z0 + hz,
+        { stroke: grey(150, l), lw: 1 });
+      const cp = iso(t.x + 0.5, t.y + 0.5);
+      ctx.strokeStyle = grey(180, Math.max(l, 0.5)); ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(cp.x, cp.y - z0 - hz - 14); ctx.lineTo(cp.x, cp.y - z0 - hz - 14 - (8 + v * 4));
+      ctx.stroke();
+      ctx.fillStyle = `rgba(255,110,90,${0.4 + beatPulse() * 0.5})`;
+      ctx.beginPath(); ctx.arc(cp.x, cp.y - z0 - hz - 23 - v * 4, 2, 0, 7); ctx.fill();
+
+      /* Skyways. Only between neighbours that are also tall, and only
+         toward +x/+y so each link is drawn exactly once. */
+      ctx.strokeStyle = `rgba(210,225,245,${0.35 + l * 0.35})`; ctx.lineWidth = 3.4;
+      for (const [dx, dy] of [[1, 0], [0, 1]]) {
+        const n = s && T.tileAt(s, t.x + dx, t.y + dy);
+        if (!n || !n.zone || n.zone.density !== 'high' || n.zone.stage < 3) continue;
+        const nz = lift(n) + 20 + n.zone.stage * 24;
+        const a = iso(t.x + 0.5 + dx * 0.3, t.y + 0.5 + dy * 0.3);
+        const b = iso(t.x + 0.5 + dx * 0.7, t.y + 0.5 + dy * 0.7);
+        const yA = a.y - (z0 + hz) * 0.72, yB = b.y - nz * 0.72;
+        ctx.beginPath(); ctx.moveTo(a.x, yA); ctx.lineTo(b.x, yB); ctx.stroke();
+      }
+      return;
+    }
+
+    /* Settlement and Colony: banded windows, and a dome cap once clustered */
+    ctx.strokeStyle = `rgba(255,209,120,${0.30 + l * 0.35})`; ctx.lineWidth = 1.1;
+    for (let i = 1; i <= stage; i++) {
+      const wy = z0 + hz * (i / (stage + 1));
+      const a = iso(t.x + 0.2, t.y + 0.8), b = iso(t.x + 0.8, t.y + 0.8);
+      ctx.beginPath(); ctx.moveTo(a.x, a.y - wy); ctx.lineTo(b.x, b.y - wy); ctx.stroke();
+    }
+    if (era >= 2 && stage >= 2) {
+      dome(ctx, t.x + 0.28, t.y + 0.28, 0.44, 0.44, 9, '#d5dbe6', l, z0 + hz, ring);
+      /* radiator fins along the flank — the Colony-era tell */
+      ctx.strokeStyle = tone('#aeb6c4', l, 0.9); ctx.lineWidth = 2;
+      const f1 = iso(t.x + 0.22, t.y + 0.5), f2 = iso(t.x + 0.78, t.y + 0.5);
+      ctx.beginPath();
+      ctx.moveTo(f1.x, f1.y - z0 - hz * 0.6); ctx.lineTo(f2.x, f2.y - z0 - hz * 0.6);
+      ctx.stroke();
+    }
+  }
+
+  /* ---- wonders ---- */
+
+  function drawWonder(ctx, s, t, l) {
+    const z = lift(t), type = t.b.type;
+    if (type === 'megadome') {
+      /* a vast glazed shell over the tube mouth, ringed by a service collar */
+      const p = iso(t.x + 0.5, t.y + 0.5);
+      ctx.fillStyle = regolith(150, l);
+      ctx.beginPath(); ctx.ellipse(p.x, p.y - z + 4, TW * 0.62, TH * 0.62, 0, 0, 7); ctx.fill();
+      for (const ly of [{ f: 0, rf: 1, sh: 0.5 }, { f: 0.45, rf: 0.8, sh: 0.78 },
+                        { f: 0.8, rf: 0.55, sh: 1.02 }, { f: 1, rf: 0.28, sh: 1.15 }]) {
+        ctx.fillStyle = tone('#8fd8c8', l, ly.sh);
+        ctx.beginPath();
+        ctx.ellipse(p.x, p.y - z - 46 * ly.f, TW * 0.55 * ly.rf, TH * 0.55 * ly.rf, 0, 0, 7);
+        ctx.fill();
+      }
+      ctx.strokeStyle = `rgba(200,255,240,${0.4 + l * 0.4})`; ctx.lineWidth = 1.4;
+      /* Meridian ribs: each is the same arc seen at a different angle, so the
+         x-radius is a cosine. It must be an absolute value — past a quarter
+         turn the cosine goes negative, and canvas throws on a negative radius
+         rather than ignoring it, which takes the whole draw loop down. */
+      for (let i = 0; i < 4; i++) {
+        const rx = Math.abs(Math.cos((i / 4) * Math.PI)) * TW * 0.5;
+        if (rx < 0.5) continue;
+        ctx.beginPath();
+        ctx.ellipse(p.x, p.y - z - 20, rx, TH * 0.5, 0, Math.PI, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.fillStyle = `rgba(255,240,190,${0.5 + beatPulse() * 0.4})`;
+      ctx.beginPath(); ctx.arc(p.x, p.y - z - 50, 3.4, 0, 7); ctx.fill();
+      return;
+    }
+    if (type === 'massdriver') {
+      /* a launch rail running away along the ridge, on trestles */
+      const p = iso(t.x + 0.5, t.y + 0.5);
+      box(ctx, t.x + 0.1, t.y + 0.3, 0.8, 0.4, 16, '#9aa1b0', l, z, { stroke: grey(150, l), lw: 1.2 });
+      ctx.strokeStyle = grey(200, Math.max(l, 0.5)); ctx.lineWidth = 3;
+      const a = iso(t.x - 2.6, t.y + 0.5), b = iso(t.x + 3.6, t.y + 0.5);
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y - z - 14); ctx.lineTo(b.x, b.y - z - 30);
+      ctx.stroke();
+      ctx.strokeStyle = grey(140, l); ctx.lineWidth = 1.4;
+      for (let i = -2; i <= 3; i++) {
+        const q = iso(t.x + i, t.y + 0.5);
+        const yTop = q.y - z - 14 - ((i + 2.6) / 6.2) * 16;
+        ctx.beginPath(); ctx.moveTo(q.x, q.y - z); ctx.lineTo(q.x, yTop); ctx.stroke();
+      }
+      ctx.fillStyle = `rgba(120,220,255,${0.5 + beatPulse() * 0.45})`;
+      ctx.beginPath(); ctx.arc(b.x, b.y - z - 30, 3.2, 0, 7); ctx.fill();
     }
   }
 
@@ -510,6 +652,9 @@
     ctx.scale(ui.cam.z, ui.cam.z);
 
     const range = visibleRange(ui, w, h);
+    /* the architectural language for this frame — every zone building reads
+       it, so the whole city changes character together as the era turns */
+    const era = window.LM_ERAS ? window.LM_ERAS.index(s) : 3;
 
     /* One back-to-front pass covering ground AND everything standing on it.
        Splitting structures into a later pass would let a tall tower behind a
@@ -530,9 +675,10 @@
       if (t.b) {
         if (t.b.type === 'tube') drawTube(ctx, s, t, litness(t));
         else if (t.b.type === 'conduit') drawConduit(ctx, s, t, litness(t));
+        else if (t.b.type === 'megadome' || t.b.type === 'massdriver') drawWonder(ctx, s, t, litness(t));
         else drawPlant(ctx, s, t, litness(t));
       } else if (t.zone) {
-        drawZoneBuilding(ctx, s, t, litness(t));
+        drawZoneBuilding(ctx, s, t, litness(t), era);
       }
     });
 

@@ -51,12 +51,13 @@ td.mark{width:34px;text-align:center}
 <script src="js/grid.js"></script>
 <script src="js/budget.js"></script>
 <script src="js/services.js"></script>
+<script src="js/eras.js"></script>
 <script src="js/zones.js"></script>
 <script src="js/sim.js"></script>
 <script>
 (function () {
   const T = window.LM_TERRAIN, G = window.LM_GRID, Z = window.LM_ZONES, S = window.LM_SIM;
-  const B = window.LM_BUDGET, SV = window.LM_SERVICES;
+  const B = window.LM_BUDGET, SV = window.LM_SERVICES, E = window.LM_ERAS;
   const K = window.LM_DATA.K;
 
   /* Generation is the expensive step (a full-map sun raycast), so scenarios
@@ -85,6 +86,11 @@ td.mark{width:34px;text-align:center}
     return s;
   }
 
+  /* Hand a test city the final era outright. Several tests are about what a
+     building does once built, not about earning the right to build it, and
+     era-gated structures (labs, reactors, wonders) are refused at Outpost. */
+  function grantEra(s) { s.peakPop = 1e6; s.research = 1e6; return s; }
+
   /* Force a tile to an already-developed stage, for tests about what
      developed buildings do rather than how they get there. */
   function develop(s, x, y, kind, density, stage) {
@@ -106,6 +112,39 @@ td.mark{width:34px;text-align:center}
     if (o.air) S.place(s, T.tileAt(s, 63, 62), 'o2');
     S.paintZone(s, 62, 62, 1, 1, 'hab', o.density || 'low');
     return s;
+  }
+
+  /* A fully serviced mixed district: habitation and trade on one row, with a
+     transit spine above it, a power spine below it and atmosphere mains
+     running underneath the zoning itself.
+
+     `servicedZone` deliberately zones habitation alone, which is fine for
+     "does this tile develop at all" but useless for anything about sustained
+     growth: with no jobs anywhere, habitation demand goes negative the moment
+     anyone moves in and the district stalls for reasons that have nothing to
+     do with what is being tested. Zoning trade alongside it lets the two
+     chase each other the way the demand model intends. */
+  function mixedDistrict() {
+    const s = city();
+    for (let x = 62; x <= 67; x++) {
+      S.place(s, T.tileAt(s, x, 61), 'tube');
+      S.place(s, T.tileAt(s, x, 63), 'conduit');
+      S.place(s, T.tileAt(s, x, 62), 'main');
+      const g = T.tileAt(s, x, 64); g.sun = 1; S.place(s, g, 'solar');
+    }
+    S.place(s, T.tileAt(s, 61, 62), 'o2');
+    S.place(s, T.tileAt(s, 68, 62), 'o2');
+    S.paintZone(s, 62, 62, 3, 1, 'hab', 'high');
+    S.paintZone(s, 65, 62, 3, 1, 'trade', 'high');
+    return s;
+  }
+
+  /* The tallest stage anywhere in a district — the era ceiling is a cap on
+     the whole city, so read the city's best rather than one arbitrary tile. */
+  function peakStage(s) {
+    let m = 0;
+    for (const t of s.map) if (t.zone && t.zone.stage > m) m = t.zone.stage;
+    return m;
   }
 
   /* An open, flat test bed carved into a real map — lets the sun tests
@@ -731,7 +770,7 @@ td.mark{width:34px;text-align:center}
       } },
 
     { name: 'A repair depot buys back ground the central budget cannot hold',
-      why: 'the depot has to do something the safety slider alone cannot, or it is just a more expensive way to spend the same money',
+      why: 'the depot has to do something the safety slider alone cannot, or it is just a more expensive way to spend the same money. Counted as stage losses over the run rather than read off the final stage number, because a tile that loses a stage immediately starts regrowing it — the stage oscillates, and the backlog resets to zero every time it fires, so neither is meaningful at one arbitrary tick',
       run() {
         const withDepot = servicedZone({ tube: true, power: true, air: true });
         const without = servicedZone({ tube: true, power: true, air: true });
@@ -741,13 +780,26 @@ td.mark{width:34px;text-align:center}
         S.place(withDepot, T.tileAt(withDepot, 63, 63), 'depot');
         withDepot.funding.safety = 0;
         without.funding.safety = 0;
-        for (const s of [withDepot, without]) { for (let i = 0; i < 140; i++) S.tick(s); }
+
+        /* count how often each district falls back a stage */
+        const losses = s => {
+          const z = T.tileAt(s, 62, 62).zone;
+          let n = 0, prev = z.stage;
+          for (let i = 0; i < 200; i++) {
+            S.tick(s);
+            if (z.stage < prev) n++;
+            prev = z.stage;
+          }
+          return n;
+        };
+        const lostAlone = losses(without), lostCovered = losses(withDepot);
+        const zD = T.tileAt(withDepot, 62, 62).zone, zN = T.tileAt(without, 62, 62).zone;
         return [
           ['both districts developed while funded', grown, '>=1'],
-          ['an unprotected district loses density once repair is cut',
-            T.tileAt(without, 62, 62).zone.stage < grown, true],
-          ['a district inside a depot holds more of it',
-            T.tileAt(withDepot, 62, 62).zone.stage > T.tileAt(without, 62, 62).zone.stage, true]
+          ['with the budget cut, unprotected ground has almost no repair', zN.repair < 0.1, true],
+          ['a depot restores real repair cover locally', zD.repair > zN.repair, true],
+          ['so an unprotected district keeps falling back a stage', lostAlone, '>0'],
+          ['a district inside a depot loses ground less often', lostCovered < lostAlone, true]
         ];
       } },
 
@@ -815,14 +867,14 @@ td.mark{width:34px;text-align:center}
     { name: 'Civic buildings draw power and labs multiply research',
       why: 'services must cost the grid something, and a lab that did not beat funding science alone would be a worse building than no building',
       run() {
-        const s = city();
+        const s = grantEra(city());
         const before = Z.power(s).o2Draw;
         S.place(s, T.tileAt(s, 60, 60), 'medbay');
         S.place(s, T.tileAt(s, 62, 60), 'lab');
         const after = Z.power(s).o2Draw;
 
-        const withLab = servicedZone({ tube: true, power: true, air: true });
-        const without = servicedZone({ tube: true, power: true, air: true });
+        const withLab = grantEra(servicedZone({ tube: true, power: true, air: true }));
+        const without = grantEra(servicedZone({ tube: true, power: true, air: true }));
         for (const w of [withLab, without]) for (let i = 0; i < 40; i++) S.tick(w);
         S.place(withLab, T.tileAt(withLab, 63, 63), 'lab');
         const a0 = withLab.research, b0 = without.research;
@@ -833,6 +885,134 @@ td.mark{width:34px;text-align:center}
             S.buildById('medbay').drawKw + S.buildById('lab').drawKw],
           ['a lab beats funding science alone',
             (withLab.research - a0) > (without.research - b0), true]
+        ];
+      } },
+
+    /* ---------- phase 5: eras, progression and wonders ---------- */
+
+    { name: 'An era needs population AND research, not either alone',
+      why: 'pairing the two is what stops the science dial being safe to zero out forever, and stops a tiny well-funded outpost building towers',
+      run() {
+        const base = () => ({ peakPop: 0, research: 0 });
+        const popOnly = { peakPop: 5000, research: 0 };
+        const sciOnly = { peakPop: 0, research: 99999 };
+        const both = { peakPop: 5000, research: 99999 };
+        return [
+          ['a new colony starts at the first era', E.index(base()), 0],
+          ['population alone does not advance it', E.index(popOnly), 0],
+          ['research alone does not advance it', E.index(sciOnly), 0],
+          ['meeting both reaches the final era', E.index(both), E.ERAS.length - 1],
+          ['every era raises the density ceiling',
+            E.ERAS.every((e, i) => i === 0 || e.stageCap > E.ERAS[i - 1].stageCap), true]
+        ];
+      } },
+
+    { name: 'The era ceiling caps development regardless of the brush painted',
+      why: 'this is the whole progression arc — high-density zoning bought on day one must still wait for the city to earn its skyline',
+      run() {
+        const s = mixedDistrict();
+        s.funding.science = 0;                    // never advance past Outpost
+        for (let i = 0; i < 300; i++) S.tick(s);
+        const cappedStage = peakStage(s);
+        const eraNow = E.index(s);
+
+        /* now hand the same city the final era and let it build */
+        grantEra(s);
+        for (let i = 0; i < 300; i++) S.tick(s);
+        return [
+          ['it is still the first era', eraNow, 0],
+          ['development stopped at the era ceiling', cappedStage, E.ERAS[0].stageCap],
+          ['reaching the final era lifts the ceiling', E.index(s), E.ERAS.length - 1],
+          ['and the same ground then builds higher', peakStage(s) > cappedStage, true]
+        ];
+      } },
+
+    { name: 'Era progression survives a population slump',
+      why: 'reading the high-water mark rather than today\'s count means a temporary crash never retroactively demolishes a skyline the city genuinely earned',
+      run() {
+        const s = servicedZone({ tube: true, power: true, air: true });
+        s.peakPop = 5000; s.research = 99999;
+        const before = E.index(s);
+        s.pop = 0;                                 // the city empties out
+        return [
+          ['the colony had reached the final era', before, E.ERAS.length - 1],
+          ['emptying the city does not roll the era back', E.index(s), before],
+          ['because progression reads the peak, not the present', s.peakPop, 5000]
+        ];
+      } },
+
+    { name: 'Era-gated buildings are refused until unlocked',
+      why: 'a lock that only greys out a button but still lets the build through would be no lock at all',
+      run() {
+        const s = city();
+        const early = S.canPlace(s, T.tileAt(s, 60, 60), 'reactor');
+        s.peakPop = 99999; s.research = 99999;
+        const late = S.canPlace(s, T.tileAt(s, 60, 60), 'reactor');
+        return [
+          ['a reactor is refused at the first era', early !== null, true],
+          ['the refusal explains why', /era/i.test(early || ''), true],
+          ['it is allowed once the era is reached', late, null],
+          ['unlocked() agrees with canPlace', E.unlocked(s, 'reactor'), true]
+        ];
+      } },
+
+    { name: 'The megadome must be built beside a lava-tube skylight',
+      why: 'tying a wonder to terrain is what makes the map the player explored or sculpted matter at the top of the game, rather than it being droppable anywhere',
+      run() {
+        const s = city();
+        s.peakPop = 99999; s.research = 99999; s.credits = 1e7;
+        const sky = s.map.find(t => t.t === 'skylight');
+        if (!sky) throw new Error('generation produced no skylight to build against');
+        const beside = T.tileAt(s, sky.x + 1, sky.y);
+        if (beside.t !== 'flat') beside.t = 'flat';
+        const farAway = T.tileAt(s, 60, 60);
+
+        const refusedFar = S.canPlace(s, farAway, 'megadome');
+        const okBeside = S.place(s, beside, 'megadome');
+        const second = S.canPlace(s, T.tileAt(s, sky.x, sky.y + 1), 'megadome');
+        const housed = Z.tally(s).housingCap;
+        return [
+          ['it is refused away from any skylight', refusedFar !== null, true],
+          ['the refusal names the requirement', /skylight/i.test(refusedFar || ''), true],
+          ['it is allowed beside one', okBeside, null],
+          ['a colony only ever builds one', second !== null, true],
+          ['and it houses far more than surface zoning', housed, '>=900']
+        ];
+      } },
+
+    { name: 'The mass driver needs a long, high, level run',
+      why: 'the second wonder has to test a different property of the terrain than the first, or the two are the same puzzle twice',
+      run() {
+        const s = city();
+        s.peakPop = 99999; s.research = 99999; s.credits = 1e7;
+        /* carve a genuine ridge: seven level tiles at height 9 */
+        for (let x = 55; x <= 65; x++) { const t = T.tileAt(s, x, 50); t.h = 9; t.t = 'flat'; }
+        const low = T.tileAt(s, 60, 60); low.h = 2;
+        const refusedLow = S.canPlace(s, low, 'massdriver');
+        const okRidge = S.place(s, T.tileAt(s, 60, 50), 'massdriver');
+        const income = Z.tally(s).income;
+        return [
+          ['it is refused on low or uneven ground', refusedLow !== null, true],
+          ['the refusal names the requirement', /level|ridge|height/i.test(refusedLow || ''), true],
+          ['it is allowed along a level ridge', okRidge, null],
+          ['and it pays a standing export income', income, '>=640']
+        ];
+      } },
+
+    { name: 'Wonders draw real power',
+      why: 'a wonder that cost nothing to run would be strictly free once bought, and the grid is the one pressure that should still apply at the top of the game',
+      run() {
+        const s = city();
+        s.peakPop = 99999; s.research = 99999; s.credits = 1e7;
+        const before = Z.power(s).o2Draw;
+        const sky = s.map.find(t => t.t === 'skylight');
+        const beside = T.tileAt(s, sky.x + 1, sky.y);
+        if (beside.t !== 'flat') beside.t = 'flat';
+        S.place(s, beside, 'megadome');
+        const after = Z.power(s).o2Draw;
+        return [
+          ['a megadome adds to the grid load', after > before, true],
+          ['by exactly its rated draw', after - before, S.buildById('megadome').drawKw]
         ];
       } }
   ];

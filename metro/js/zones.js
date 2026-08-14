@@ -57,6 +57,16 @@
       upkeep += st.upkeep || 0;
       draw += K.KW_PER_STAGE * z.stage;
     }
+
+    /* Wonders contribute directly rather than through the zone tables — a
+       megadome houses more people than any amount of surface zoning, and a
+       mass driver pays a standing export income. */
+    for (const t of s.map) {
+      if (!t.b) continue;
+      if (t.b.type === 'megadome') pop += 900;
+      else if (t.b.type === 'massdriver') income += 640;
+    }
+
     return { housingCap: pop, tradeJobs, industryJobs, jobs: tradeJobs + industryJobs,
              income, upkeep, draw };
   }
@@ -131,6 +141,7 @@
 
     const SV = window.LM_SERVICES;
     const cov = SV ? SV.coverage(s, eff) : null;
+    const eraCap = window.LM_ERAS ? window.LM_ERAS.stageCap(s) : K.MAX_STAGE;
 
     const ctx = {
       transit: (x, y) => G.hasTransit(s, x, y),
@@ -169,12 +180,16 @@
       z.unserved = 0;
       if (brownout || airShort) continue;      // serviced, but the colony is over-extended
 
+      /* Density is capped by BOTH the brush the player painted and the era
+         the colony has reached, so a high-density block zoned early still
+         waits for the city to earn its skyline. */
       const band = bandOf(z);
+      const cap = Math.min(band.maxStage, eraCap);
       const dk = d[z.kind];
       const lv = landValue(s, ctx, tile);
       z.value = lv;
 
-      if (z.stage < band.maxStage && dk > -0.08) {
+      if (z.stage < cap && dk > -0.08) {
         /* High density is far more sensitive to land value than low — a
            tower will not go up on ground nobody wants, which is what stops
            the whole map growing into uniform skyline. */

@@ -16,7 +16,7 @@
   /* bump whenever the saved shape changes in a way older saves lack — the
      budget added taxRate, funding and research, none of which a Phase 2
      save carries */
-  const STATE_VERSION = 2;
+  const STATE_VERSION = 3;
   const buildById = id => BUILDINGS.find(b => b.id === id);
 
   function newGame(seed) {
@@ -26,7 +26,7 @@
       map: w.map,
       day: 1,
       credits: K.START_CREDITS,
-      pop: 0, housingCap: 0, jobs: 0,
+      pop: 0, peakPop: 0, housingCap: 0, jobs: 0,
       demand: { hab: 0, trade: 0, industry: 0 },
       gen: 0, ratedGen: 0, load: 0, airCap: 0,
       revenue: 0, expenses: 0, deptExpenses: 0, zoneUpkeep: 0,
@@ -38,10 +38,48 @@
 
   /* ---------- placement ---------- */
 
+  /* A megadome has to sit beside an intact lava-tube skylight, and a mass
+     driver needs a long, high, level run. Both tie a wonder to terrain the
+     player either found or sculpted, rather than letting it drop anywhere. */
+  function nearSkylight(s, t) {
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const n = T.tileAt(s, t.x + dx, t.y + dy);
+        if (n && n.t === 'skylight') return true;
+      }
+    }
+    return false;
+  }
+
+  /* Seven tiles of level ground in a straight line, high enough to throw
+     from — checked along both axes. */
+  function onRidge(s, t) {
+    if (t.h < 7) return false;
+    for (const [dx, dy] of [[1, 0], [0, 1]]) {
+      let ok = true;
+      for (let i = -3; i <= 3; i++) {
+        const n = T.tileAt(s, t.x + dx * i, t.y + dy * i);
+        if (!n || n.h !== t.h || !T.buildable(n)) { ok = false; break; }
+      }
+      if (ok) return true;
+    }
+    return false;
+  }
+
   function canPlace(s, t, type) {
     const B = buildById(type);
     if (!B) return 'Unknown structure.';
     if (!t) return 'That is off the map.';
+    if (window.LM_ERAS && !window.LM_ERAS.unlocked(s, type)) {
+      return window.LM_ERAS.lockReason(s, type);
+    }
+    if (B.once && count(s, type) >= 1) return `The colony only builds one ${B.name}.`;
+    if (B.needsSkylight && !nearSkylight(s, t)) {
+      return 'A megadome must be built beside a lava-tube skylight.';
+    }
+    if (B.needsRidge && !onRidge(s, t)) {
+      return 'A mass driver needs seven tiles of level ground at height 7 or above to run along.';
+    }
     if (!T.buildable(t)) return t.t === 'boulder'
       ? 'Clear the boulders first.'
       : 'Nothing can be built on that ground.';
@@ -163,6 +201,10 @@
       s.pop = Math.max(0, s.pop - Math.max(1, Math.round(s.pop * 0.02)));
     }
     if (s.pop > s.housingCap) s.pop = s.housingCap;
+    /* Era progression reads the high-water mark rather than today's count,
+       so a temporary slump never retroactively demolishes a skyline the
+       city genuinely earned. */
+    if (s.pop > s.peakPop) s.peakPop = s.pop;
 
     s.day++;
     s.history.push({

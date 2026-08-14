@@ -112,14 +112,16 @@
     for (const t of s.map) t.dust = clamp(next[idx(t.x, t.y)], 0, 3);
   }
 
-  /* Total draw of every powered civic building — folded into the grid load
-     so a service-rich city genuinely needs a bigger grid. */
+  /* Total draw of every powered building other than the oxygen plants, which
+     the power model counts separately. Civic services and wonders alike are
+     folded in here, so a service-rich city — or one that has just switched
+     on a mass driver — genuinely needs a bigger grid. */
   function serviceDraw(s) {
     let kw = 0;
     for (const t of s.map) {
-      if (!t.b) continue;
+      if (!t.b || t.b.type === 'o2') continue;
       const B = buildById(t.b.type);
-      if (B && B.drawKw && B.service) kw += B.drawKw;
+      if (B && B.drawKw) kw += B.drawKw;
     }
     return kw;
   }

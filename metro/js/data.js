@@ -165,7 +165,7 @@ const BUILDINGS = [
 
   { id: 'solar', name: 'Solar Array', cost: 380, group: 'power', kw: 7,
     desc: 'Output scales directly with how much sun the ground it stands on actually receives. On a peak of eternal light it runs near continuously; on a shadowed floor it is nearly worthless.' },
-  { id: 'reactor', name: 'Fission Plant', cost: 5600, group: 'power', kw: 60,
+  { id: 'reactor', name: 'Fission Plant', cost: 5600, group: 'power', kw: 60, era: 1,
     desc: 'A Kilopower-class surface reactor. Expensive, and indifferent to sunlight — which is the entire point through the long night.' },
   { id: 'o2', name: 'Oxygen Plant', cost: 950, group: 'life', drawKw: 5, air: K.AIR_PER_PLANT,
     desc: 'Cracks oxygen and pressurises the mains. Draws real power, and pressurises a fixed number of colonists — build more as the city grows.' },
@@ -184,11 +184,21 @@ const BUILDINGS = [
     radius: 11, drawKw: 3,
     desc: 'Schooling and certification. Raises land value, and skilled ground is what lets trade and industry densify.' },
   { id: 'lab', name: 'Research Lab', cost: 2600, group: 'service', service: 'research',
-    radius: 9, drawKw: 4,
+    radius: 9, drawKw: 4, era: 1,
     desc: 'Multiplies research banked by developed ground inside its reach — the fastest way to buy your way into the next era.' },
   { id: 'biodome', name: 'Biodome', cost: 1400, group: 'service', service: 'amenity',
     radius: 7, drawKw: 3,
-    desc: 'Green space under glass, descended directly from Lunar Farm. Nothing lifts land value faster, and it scrubs dust out of the air around it.' }
+    desc: 'Green space under glass, descended directly from Lunar Farm. Nothing lifts land value faster, and it scrubs dust out of the air around it.' },
+
+  /* Wonders — one to a colony, ruinously expensive, and each tied to a piece
+     of the terrain rather than droppable anywhere. They are the payoff for
+     an era, and the reason to have sculpted the map you did. */
+  { id: 'megadome', name: 'Lava-Tube Megadome', cost: 42000, group: 'wonder', era: 2,
+    once: true, needsSkylight: true, drawKw: 18, housing: 900,
+    desc: 'A sealed city built down into an intact lava tube — the most valuable real estate on the Moon, and the only structure that can use a skylight. Must be built beside one. Houses more people than any amount of surface zoning.' },
+  { id: 'massdriver', name: 'Mass Driver', cost: 68000, group: 'wonder', era: 3,
+    once: true, needsRidge: true, drawKw: 30, exportIncome: 640,
+    desc: 'An electromagnetic launch track flinging refined cargo to Earth orbit without rockets. Needs a long, high, level run to sit on, and pays a standing export income once it does.' }
 ];
 
 /* The five coverage services a civic building can project. Each names the
@@ -200,6 +210,26 @@ const SERVICES = [
   { id: 'education', name: 'Training Cover', dept: 'science', colour: '#8fd0ff' },
   { id: 'research', name: 'Research Cover', dept: 'science', colour: '#c98bff' },
   { id: 'amenity', name: 'Amenity', dept: 'transit', colour: '#6ee7a0' }
+];
+
+/* Eras. A colony earns its way forward by growing AND by funding research —
+   both thresholds must be met, which is what stops the science dial being
+   something a player can safely zero out forever.
+
+   An era does three things: it raises the ceiling on how far any ground can
+   develop, it unlocks buildings, and it changes what the city looks like.
+   That last one is the point. Capping density by era is what gives the game
+   an arc — you cannot build a skyline on day one, you have to become the
+   kind of city that has one. */
+const ERAS = [
+  { id: 'outpost', name: 'Outpost', pop: 0, research: 0, stageCap: 1,
+    blurb: 'Bermed cans and pressurised shelters. Everything is temporary, and looks it.' },
+  { id: 'settlement', name: 'Settlement', pop: 60, research: 120, stageCap: 2,
+    blurb: 'Proper domes with viewports, joined by surface walkways. The colony starts to look permanent.' },
+  { id: 'colony', name: 'Colony', pop: 180, research: 500, stageCap: 3,
+    blurb: 'Multi-dome clusters and mid-rise blocks with lit windows and radiator fins.' },
+  { id: 'metropolis', name: 'Metropolis', pop: 450, research: 1400, stageCap: 4,
+    blurb: 'Towers, skyways between the dense blocks, and a skyline worth the name.' }
 ];
 
 /* City departments. Each dial runs 0..100% and every one of them has a real,
@@ -255,6 +285,9 @@ const TOOLS = [
   { id: 'lab', name: 'Research Lab', glyph: '🔬', key: 'B', group: 'service', build: 'lab' },
   { id: 'biodome', name: 'Biodome', glyph: '🌿', key: 'V', group: 'service', build: 'biodome' },
 
+  { id: 'megadome', name: 'Lava-Tube Megadome', glyph: '◈', key: 'J', group: 'wonder', build: 'megadome' },
+  { id: 'massdriver', name: 'Mass Driver', glyph: '⇗', key: 'K', group: 'wonder', build: 'massdriver' },
+
   { id: 'hab_low',   name: 'Habitation · Low',  glyph: '▨', key: 'Q', group: 'zone', zone: 'hab',      density: 'low',  drag: 'rect' },
   { id: 'hab_high',  name: 'Habitation · High', glyph: '▧', key: 'W', group: 'zone', zone: 'hab',      density: 'high', drag: 'rect' },
   { id: 'trade_low', name: 'Trade · Low',       glyph: '▨', key: 'E', group: 'zone', zone: 'trade',    density: 'low',  drag: 'rect' },
@@ -266,4 +299,4 @@ const TOOLS = [
     hint: 'Remove whatever is on a tile — zoning, network or structure.' }
 ];
 
-window.LM_DATA = { K, TERRAIN, DEPOSITS, ZONES, BUILDINGS, DEPARTMENTS, SERVICES, TOOLS };
+window.LM_DATA = { K, TERRAIN, DEPOSITS, ZONES, ERAS, BUILDINGS, DEPARTMENTS, SERVICES, TOOLS };

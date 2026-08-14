@@ -9,6 +9,7 @@
 (function () {
   const D = window.LM_DATA, T = window.LM_TERRAIN, G = window.LM_GRID;
   const Z = window.LM_ZONES, S = window.LM_SIM, R = window.LM_RENDER, B = window.LM_BUDGET;
+  const E = window.LM_ERAS;
   const K = D.K;
   const SAVE_KEY = 'lunar-metropolis.save.v2';
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -66,6 +67,7 @@
     { id: 'network', label: 'Networks' },
     { id: 'plant', label: 'Power & Life Support' },
     { id: 'service', label: 'Civic Services' },
+    { id: 'wonder', label: 'Wonders' },
     { id: 'zone', label: 'Zoning' }
   ];
 
@@ -80,13 +82,16 @@
       box.className = 'tools';
       D.TOOLS.filter(t => t.group === g.id).forEach(t => {
         const b = document.createElement('button');
+        const locked = t.build && E && !E.unlocked(s, t.build);
         b.className = 'tool' + (ui.tool === t.id ? ' on' : '');
+        if (locked) { b.disabled = true; b.style.opacity = 0.42; }
         const cost = t.build ? S.buildById(t.build).cost
           : t.zone ? S.zoneCost(t.zone, t.density) : null;
-        b.innerHTML = `<span class="g">${t.glyph}</span><span class="n">${t.name}</span>` +
-          (cost !== null ? `<span class="c">${cost}</span>` : `<span class="k">${t.key}</span>`);
-        b.title = t.hint || (t.build ? S.buildById(t.build).desc : '') ||
-          (t.zone ? Z.zoneById(t.zone).desc : '');
+        b.innerHTML = `<span class="g">${locked ? '🔒' : t.glyph}</span><span class="n">${t.name}</span>` +
+          (cost !== null ? `<span class="c">${cost.toLocaleString()}</span>` : `<span class="k">${t.key}</span>`);
+        b.title = locked ? E.lockReason(s, t.build)
+          : (t.hint || (t.build ? S.buildById(t.build).desc : '') ||
+             (t.zone ? Z.zoneById(t.zone).desc : ''));
         b.onclick = () => { ui.tool = t.id; ui.levelTarget = null; buildPalette(); setHint(); };
         box.appendChild(b);
       });
@@ -350,6 +355,26 @@
 
     document.getElementById('demand').innerHTML =
       bar('Habitation', s.demand.hab) + bar('Trade', s.demand.trade) + bar('Industry', s.demand.industry);
+
+    /* Era readout. Shows both thresholds separately, because a city that has
+       the population but not the research needs to be told to fund science
+       rather than to keep building. */
+    const eraBox = document.getElementById('era');
+    if (eraBox && E) {
+      const cur = E.current(s), nx = E.next(s);
+      const pct = (v, label, need) =>
+        `<div class="meter"><div class="lab"><span>${label}</span><span>${need}</span></div>
+         <div class="track"><div class="fill" style="width:${Math.round(v * 100)}%;background:var(--accent)"></div></div></div>`;
+      eraBox.innerHTML =
+        `<div class="rows"><div class="row"><span class="k">Era</span><span class="v good">${cur.name}</span></div>
+         <div class="row"><span class="k">Density ceiling</span><span class="v">stage ${cur.stageCap}</span></div>
+         <div class="row"><span class="k">Research banked</span><span class="v">${Math.round(s.research).toLocaleString()}</span></div></div>
+         <p class="note">${cur.blurb}</p>` +
+        (nx ? `<p class="note" style="border-left-color:var(--accent-2)">Next: <b>${nx.era.name}</b></p>` +
+              pct(nx.popPct, 'Population', `${(s.peakPop || 0).toLocaleString()} / ${nx.era.pop.toLocaleString()}`) +
+              pct(nx.researchPct, 'Research', `${Math.round(s.research).toLocaleString()} / ${nx.era.research.toLocaleString()}`)
+            : `<p class="note">This colony has reached its final era.</p>`);
+    }
   }
 
   /* ---------- budget panel ---------- */
@@ -470,7 +495,7 @@
 
   const DAY_MS = 1100;
   const SAVE_EVERY_MS = 4000;
-  let last = performance.now(), acc = 0, lastSave = 0;
+  let last = performance.now(), acc = 0, lastSave = 0, drawFailed = false;
 
   function frame(now) {
     const dt = Math.min(0.25, (now - last) / 1000); last = now;
@@ -487,7 +512,11 @@
       }
       if (ticked) { refreshNets(); renderHUD(); renderTile(); renderBudgetNumbers(); ui.dirty = true; }
     }
-    R.draw(ctx, s, ui);
+    /* Guarded for the same reason the tick is: an exception thrown out of a
+       single frame would otherwise stop requestAnimationFrame for good and
+       leave a black canvas with no way back short of a reload. */
+    try { R.draw(ctx, s, ui); }
+    catch (e) { if (!drawFailed) { drawFailed = true; console.error('draw failed', e); } }
     /* A full save is well over a megabyte of JSON on a 128x128 map, so it is
        throttled and only written when something actually changed. Saving on
        a frame counter meant rewriting the whole world roughly twice a second
