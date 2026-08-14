@@ -62,17 +62,22 @@
   }
 
   /* Generating capacity. Solar output is multiplied by the tile's own sun
-     exposure, which is the whole reason to fight for a peak of eternal
-     light — an array on a shadowed floor is very nearly ornamental. */
+     exposure — the whole reason to fight for a peak of eternal light — and
+     then again by how much regolith dust has settled on it. An array
+     downwind of a refinery genuinely stops earning its keep, which is the
+     cleanest expression of why industry placement matters. */
   function power(s) {
     let gen = 0, plants = 0;
     for (const t of s.map) {
       if (!t.b) continue;
-      if (t.b.type === 'solar') gen += 7 * t.sun;
-      else if (t.b.type === 'reactor') gen += 60;
-      else if (t.b.type === 'o2') { plants++; }
+      if (t.b.type === 'solar') {
+        const fouling = 1 - clamp(t.dust || 0, 0, 1) * K.DUST_SOLAR_BITE;
+        gen += 7 * t.sun * fouling;
+      } else if (t.b.type === 'reactor') gen += 60;
+      else if (t.b.type === 'o2') plants++;
     }
-    return { gen, o2Plants: plants, o2Draw: plants * 5 };
+    const svcDraw = window.LM_SERVICES ? window.LM_SERVICES.serviceDraw(s) : 0;
+    return { gen, o2Plants: plants, o2Draw: plants * 5 + svcDraw };
   }
 
   /* RCI, each index running -1..+1. `bite` is the drag a tax rate above the
@@ -91,13 +96,23 @@
      makes the terrain the player sculpted matter to the economy. Industry
      drags down whatever sits close to it, so hab wants to be somewhere else. */
   function landValue(s, ctx, tile) {
+    const k = idx(tile.x, tile.y);
     let v = tile.t === 'flat' ? 0.52 : 0.38;
     /* a barely-maintained tube network is worth less to the ground it
        serves — the transit dial showing up in the economy */
     v += ctx.transit(tile.x, tile.y) ? 0.22 * (ctx.transitMul === undefined ? 1 : ctx.transitMul) : -0.40;
     v += (tile.sun - 0.4) * 0.30;                       // outlook and daylight
     v += (tile.h / K.MAX_H - 0.35) * 0.14;              // above the dust
-    const dInd = ctx.indDist[idx(tile.x, tile.y)];
+
+    /* civic coverage — the reason to build any of it */
+    if (ctx.cov) {
+      v += ctx.cov.health[k] * 0.16;
+      v += ctx.cov.education[k] * 0.14;
+      v += ctx.cov.amenity[k] * 0.22;                   // nothing lifts value like green space
+    }
+    /* and the things that drag it back down */
+    v -= clamp(tile.dust || 0, 0, 1) * K.DUST_VALUE_BITE;
+    const dInd = ctx.indDist[k];
     if (dInd <= 4) v -= (5 - dInd) * 0.045;             // nobody wants to live by the refinery
     return clamp(v, 0, 1);
   }
@@ -114,10 +129,14 @@
     const pw = power(s);
     const indDist = distanceField(s, x => x.zone && x.zone.kind === 'industry' && x.zone.stage > 0, 5);
 
+    const SV = window.LM_SERVICES;
+    const cov = SV ? SV.coverage(s, eff) : null;
+
     const ctx = {
       transit: (x, y) => G.hasTransit(s, x, y),
       indDist,
-      transitMul: eff.transitMul
+      transitMul: eff.transitMul,
+      cov
     };
 
     /* Colony-wide gates. Growth stops everywhere if the grid cannot carry
@@ -171,12 +190,16 @@
         } else z.decay = 0;
       }
 
-      /* Deferred maintenance. Below roughly two-thirds funding a backlog
-         accrues on developed ground and eventually costs it a stage — the
-         slow, unglamorous way a city decays when the repair budget is the
-         easy thing to cut. Well-funded, any accrued backlog works off. */
-      if (z.stage > 0 && eff.safety < 0.65) {
-        z.backlog = (z.backlog || 0) + (0.65 - eff.safety) * 0.06;
+      /* Deferred maintenance. Below roughly two-thirds effective repair a
+         backlog accrues on developed ground and eventually costs it a stage
+         — the slow, unglamorous way a city decays when the repair budget is
+         the easy thing to cut. A depot within reach makes up much of the
+         shortfall locally, which is the whole reason to build one: it buys
+         back ground the city-wide budget alone cannot afford to hold. */
+      const repair = clamp(eff.safety + (cov ? cov.safety[idx(tile.x, tile.y)] * 0.5 : 0), 0, 1);
+      z.repair = repair;
+      if (z.stage > 0 && repair < 0.65) {
+        z.backlog = (z.backlog || 0) + (0.65 - repair) * 0.06;
         if (z.backlog >= 1) { z.stage--; z.backlog = 0; z.growth = 0.5; }
       } else if (z.backlog) {
         z.backlog = Math.max(0, z.backlog - 0.03);
@@ -184,7 +207,7 @@
     }
 
     return { tally: t, demand: d, power: pw, gen, ratedGen: pw.gen,
-             brownout, airShort, airCap, load, eff };
+             brownout, airShort, airCap, load, eff, cov };
   }
 
   window.LM_ZONES = {

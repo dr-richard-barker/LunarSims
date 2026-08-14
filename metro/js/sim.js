@@ -113,6 +113,9 @@
   /* ---------- the daily tick ---------- */
 
   function tick(s) {
+    /* Dust settles before growth is evaluated, so a district reacts to the
+       air it is actually breathing today rather than yesterday's. */
+    if (window.LM_SERVICES) window.LM_SERVICES.diffuseDust(s);
     const nets = G.services(s);
     const r = Z.growthTick(s, nets);
 
@@ -138,7 +141,16 @@
     s.expenses = exp.total + r.tally.upkeep;
     s.credits += s.revenue - s.expenses;
 
-    s.research += r.eff.sciencePerDay * developedCount(s);
+    /* Research accrues per developed tile, multiplied by any lab coverage
+       over it — so siting labs across the dense districts is worth far more
+       than parking them on the edge of the map. */
+    let sci = 0;
+    for (const t of s.map) {
+      if (!t.zone || t.zone.stage === 0) continue;
+      const boost = r.cov ? 1 + r.cov.research[G.idx(t.x, t.y)] : 1;
+      sci += r.eff.sciencePerDay * boost;
+    }
+    s.research += sci;
 
     /* Migration tracks the gap between people and pressurised housing.
        A colony that has over-extended its grid or its oxygen supply stops

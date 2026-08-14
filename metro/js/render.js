@@ -304,8 +304,50 @@
       const p = iso(t.x + 0.5, t.y + 0.5);
       ctx.fillStyle = 'rgba(200,255,235,0.55)';
       ctx.beginPath(); ctx.arc(p.x, p.y - z - 24, 3.2, 0, 7); ctx.fill();
+      return;
+    }
+
+    /* Civic buildings. Each keeps its service's colour so a district can be
+       read at a glance, with a small rooftop mark for what it does. */
+    const SVC = { depot: '#ff9f6e', medbay: '#ff7a9c', training: '#8fd0ff',
+                  lab: '#c98bff', biodome: '#6ee7a0' };
+    if (SVC[type]) {
+      const col = SVC[type];
+      if (type === 'biodome') {
+        /* glazed, and planted — the one civic building you can see into */
+        dome(ctx, t.x + 0.12, t.y + 0.12, 0.76, 0.76, 20, '#7fcf9a', l, z, 'rgba(190,255,210,0.7)');
+        const p = iso(t.x + 0.5, t.y + 0.5);
+        for (let i = 0; i < 4; i++) {
+          const a = (i / 4) * Math.PI * 2 + 0.6;
+          ctx.fillStyle = 'rgba(70,180,110,0.85)';
+          ctx.beginPath();
+          ctx.ellipse(p.x + Math.cos(a) * 11, p.y - z - 9 + Math.sin(a) * 5, 3.4, 2.4, 0, 0, 7);
+          ctx.fill();
+        }
+        return;
+      }
+      box(ctx, t.x + 0.18, t.y + 0.18, 0.64, 0.64, 20, '#b6bdc9', l, z,
+        { stroke: grey(140, l), lw: 1, top: tone(col, l, 0.62) });
+      const p = iso(t.x + 0.5, t.y + 0.5);
+      ctx.fillStyle = col;
+      if (type === 'medbay') {                       // a cross
+        ctx.fillRect(p.x - 6, p.y - z - 22, 12, 3.4);
+        ctx.fillRect(p.x - 1.7, p.y - z - 26, 3.4, 11);
+      } else if (type === 'training') {              // a stack of decks
+        for (let i = 0; i < 3; i++) ctx.fillRect(p.x - 7 + i, p.y - z - 20 - i * 3.4, 14 - i * 2, 2.2);
+      } else if (type === 'lab') {                   // a dish
+        ctx.strokeStyle = col; ctx.lineWidth = 1.6;
+        ctx.beginPath(); ctx.ellipse(p.x, p.y - z - 23, 8, 4, 0, Math.PI, Math.PI * 2.25); ctx.stroke();
+      } else {                                       // depot: a beacon
+        ctx.beginPath(); ctx.arc(p.x, p.y - z - 23, 3, 0, 7); ctx.fill();
+        ctx.fillStyle = `rgba(255,159,110,${0.25 + beatPulse() * 0.35})`;
+        ctx.beginPath(); ctx.arc(p.x, p.y - z - 23, 9, 0, 7); ctx.fill();
+      }
     }
   }
+
+  /* wall-clock pulse, so beacons stay alive even while the sim is paused */
+  const beatPulse = () => (Math.sin(Date.now() / 520) + 1) / 2;
 
   /* Zone buildings. Low density stays domed and low; high density becomes a
      genuine tower with a dome cap — which is what gives a lunar city a
@@ -413,6 +455,20 @@
       } else if (ui.view === 'value') {
         if (!t.zone) return;
         colour = lerpColour('#3a6ea8', '#ffd166', t.zone.value || 0);
+      } else if (ui.view === 'dust') {
+        const d = clamp(t.dust || 0, 0, 1);
+        if (d < 0.02) return;
+        colour = lerpColour('#4a3a24', '#e8b070', d);
+        alpha = 0.25 + d * 0.6;
+      } else if (ui.view.startsWith('cov:')) {
+        const svc = ui.view.slice(4);
+        const field = ui.cov && ui.cov[svc];
+        if (!field) return;
+        const c = field[T.idx(tx, ty)];
+        if (c < 0.02) return;
+        const spec = (window.LM_DATA.SERVICES || []).find(x => x.id === svc);
+        colour = lerpColour('#1b2030', spec ? spec.colour : '#6ee7a0', c);
+        alpha = 0.25 + c * 0.6;
       }
       if (!colour) return;
       ctx.globalAlpha = alpha;

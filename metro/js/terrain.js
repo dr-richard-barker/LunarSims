@@ -207,6 +207,7 @@
           h: clamp(Math.round(3 + n * 5), 0, K.MAX_H),
           t: 'flat',
           sun: 1,
+          dust: 0,
           deposit: null,
           v: rnd(seed + x * 7.1 + y * 13.7)   // stable per-tile seed for texture
         });

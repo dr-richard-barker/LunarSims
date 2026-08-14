@@ -26,7 +26,13 @@
 
   const toolById = id => D.TOOLS.find(t => t.id === id);
   const current = () => toolById(ui.tool);
-  function refreshNets() { ui.nets = G.services(s); }
+  /* Networks and civic coverage are both map-wide derived data. Recompute
+     them together whenever the map actually changes, and cache — the
+     renderer reads the cache rather than recomputing per frame. */
+  function refreshNets() {
+    ui.nets = G.services(s);
+    ui.cov = window.LM_SERVICES ? window.LM_SERVICES.coverage(s, B.effects(s)) : null;
+  }
 
   /* ---------- canvas ---------- */
 
@@ -59,6 +65,7 @@
     { id: 'terrain', label: 'Terrain' },
     { id: 'network', label: 'Networks' },
     { id: 'plant', label: 'Power & Life Support' },
+    { id: 'service', label: 'Civic Services' },
     { id: 'zone', label: 'Zoning' }
   ];
 
@@ -236,9 +243,23 @@
   });
 
   cv.addEventListener('pointerleave', () => { ui.hover = null; });
+  /* Zoom pinned to the cursor. Scaling without compensating the pan makes
+     the world slide out from under the pointer — zoom in on a district and
+     it drifts off screen, which is exactly the wrong behaviour when the map
+     is 128 tiles across. Solving for the world point beneath the cursor and
+     holding it fixed keeps whatever you are looking at under the mouse. */
   cv.addEventListener('wheel', e => {
     e.preventDefault();
-    ui.cam.z = clamp(ui.cam.z * (e.deltaY < 0 ? 1.1 : 0.9), 0.22, 2.6);
+    const rect = cv.getBoundingClientRect();
+    const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
+    const z0 = ui.cam.z;
+    const z1 = clamp(z0 * (e.deltaY < 0 ? 1.1 : 0.9), 0.22, 2.6);
+    if (z1 === z0) return;
+    const wx = (sx - rect.width / 2 - ui.cam.x) / z0;
+    const wy = (sy - 92 - ui.cam.y) / z0;
+    ui.cam.z = z1;
+    ui.cam.x = sx - rect.width / 2 - wx * z1;
+    ui.cam.y = sy - 92 - wy * z1;
   }, { passive: false });
 
   window.addEventListener('keydown', e => {
@@ -280,7 +301,13 @@
         <div class="row"><span class="k">Power</span>${yn(hasP)}</div>
         <div class="row"><span class="k">Atmosphere</span>${yn(hasA)}</div>
         ${t.pipe ? `<div class="row"><span class="k">Buried main</span><span class="v good">yes</span></div>` : ''}
+        <div class="row"><span class="k">Dust</span><span class="v${(t.dust || 0) > 0.35 ? ' bad' : (t.dust || 0) > 0.12 ? ' warn' : ''}">${Math.round((t.dust || 0) * 100)}%</span></div>
       </div>
+      ${ui.cov ? `<h3 class="sec">Civic coverage</h3><div class="rows">${
+        D.SERVICES.map(sv => {
+          const c = Math.round(ui.cov[sv.id][T.idx(t.x, t.y)] * 100);
+          return `<div class="row"><span class="k">${sv.name}</span><span class="v${c >= 50 ? ' good' : c === 0 ? ' bad' : ''}">${c}%</span></div>`;
+        }).join('')}</div>` : ''}
       <p class="note">${t.b ? S.buildById(t.b.type).desc : t.zone ? Z.zoneById(t.zone.kind).desc : kind.note}</p>
       ${dep ? `<p class="note"><b>${dep.name}</b> — richness ${Math.round(t.deposit.richness * 100)}%. ${dep.note}</p>` : ''}`;
   }
@@ -442,7 +469,8 @@
   /* ---------- loop ---------- */
 
   const DAY_MS = 1100;
-  let last = performance.now(), acc = 0, frames = 0;
+  const SAVE_EVERY_MS = 4000;
+  let last = performance.now(), acc = 0, lastSave = 0;
 
   function frame(now) {
     const dt = Math.min(0.25, (now - last) / 1000); last = now;
@@ -457,10 +485,16 @@
         acc -= DAY_MS / 1000;
         ticked++;
       }
-      if (ticked) { refreshNets(); renderHUD(); renderTile(); renderBudgetNumbers(); }
+      if (ticked) { refreshNets(); renderHUD(); renderTile(); renderBudgetNumbers(); ui.dirty = true; }
     }
     R.draw(ctx, s, ui);
-    if (frames++ % 30 === 0) save();
+    /* A full save is well over a megabyte of JSON on a 128x128 map, so it is
+       throttled and only written when something actually changed. Saving on
+       a frame counter meant rewriting the whole world roughly twice a second
+       — including while paused, with nothing to save. */
+    if (ui.dirty && now - lastSave > SAVE_EVERY_MS) {
+      save(); ui.dirty = false; lastSave = now;
+    }
     requestAnimationFrame(frame);
   }
 

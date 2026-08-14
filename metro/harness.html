@@ -50,12 +50,13 @@ td.mark{width:34px;text-align:center}
 <script src="js/terrain.js"></script>
 <script src="js/grid.js"></script>
 <script src="js/budget.js"></script>
+<script src="js/services.js"></script>
 <script src="js/zones.js"></script>
 <script src="js/sim.js"></script>
 <script>
 (function () {
   const T = window.LM_TERRAIN, G = window.LM_GRID, Z = window.LM_ZONES, S = window.LM_SIM;
-  const B = window.LM_BUDGET;
+  const B = window.LM_BUDGET, SV = window.LM_SERVICES;
   const K = window.LM_DATA.K;
 
   /* Generation is the expensive step (a full-map sun raycast), so scenarios
@@ -680,6 +681,158 @@ td.mark{width:34px;text-align:center}
             Math.abs(s.expenses - (s.deptExpenses + s.zoneUpkeep)) < 1e-6, true],
           ['a 30-day projection is thirty times the daily rate',
             Math.abs(B.monthly(s, Z.tally(s)).revenue - s.revenue * 30) < 1e-6, true]
+        ];
+      } },
+
+    /* ---------- phase 4: civic coverage and the dust field ---------- */
+
+    { name: 'Civic coverage falls off with distance and saturates',
+      why: 'a flat circle would make placement trivial and stacking six medbays on one block would be the dominant strategy — falloff plus a saturating combine is what makes siting a decision',
+      run() {
+        const s = city();
+        S.place(s, T.tileAt(s, 60, 60), 'medbay');
+        const cov = SV.coverage(s, B.effects(s));
+        const h = cov.health;
+        const atCentre = h[G.idx(60, 60)];
+        const near = h[G.idx(63, 60)];
+        const far = h[G.idx(69, 60)];
+        const outside = h[G.idx(78, 60)];
+
+        /* a second medbay on the same spot must not double the value */
+        const s2 = city();
+        S.place(s2, T.tileAt(s2, 60, 60), 'medbay');
+        S.place(s2, T.tileAt(s2, 61, 60), 'medbay');
+        const stacked = SV.coverage(s2, B.effects(s2)).health[G.idx(60, 60)];
+        return [
+          ['coverage is strongest at the building', Math.round(atCentre * 100) / 100, 1],
+          ['it weakens with distance', near < atCentre && far < near, true],
+          ['and stops entirely beyond the radius', outside, 0],
+          ['two overlapping buildings never exceed full cover', stacked <= 1, true],
+          ['coverage never goes negative anywhere',
+            Array.from(h).every(v => v >= 0 && v <= 1), true]
+        ];
+      } },
+
+    { name: 'Starving a department shrinks the circles it pays for',
+      why: 'this is what connects the budget dials to the map — if funding did not move the radius, civic buildings would be immune to the economy',
+      run() {
+        const s = city();
+        S.place(s, T.tileAt(s, 60, 60), 'medbay');
+        s.funding.safety = 1;
+        const full = SV.coverage(s, B.effects(s)).health;
+        s.funding.safety = 0;
+        const starved = SV.coverage(s, B.effects(s)).health;
+        const reach = f => Array.from(f).filter(v => v > 0).length;
+        return [
+          ['a funded department covers real ground', reach(full), '>=100'],
+          ['starving it shrinks the covered area', reach(starved) < reach(full), true],
+          ['but never removes the building entirely', starved[G.idx(60, 60)], '>0']
+        ];
+      } },
+
+    { name: 'A repair depot buys back ground the central budget cannot hold',
+      why: 'the depot has to do something the safety slider alone cannot, or it is just a more expensive way to spend the same money',
+      run() {
+        const withDepot = servicedZone({ tube: true, power: true, air: true });
+        const without = servicedZone({ tube: true, power: true, air: true });
+        for (const s of [withDepot, without]) { for (let i = 0; i < 60; i++) S.tick(s); }
+        const grown = T.tileAt(without, 62, 62).zone.stage;
+
+        S.place(withDepot, T.tileAt(withDepot, 63, 63), 'depot');
+        withDepot.funding.safety = 0;
+        without.funding.safety = 0;
+        for (const s of [withDepot, without]) { for (let i = 0; i < 140; i++) S.tick(s); }
+        return [
+          ['both districts developed while funded', grown, '>=1'],
+          ['an unprotected district loses density once repair is cut',
+            T.tileAt(without, 62, 62).zone.stage < grown, true],
+          ['a district inside a depot holds more of it',
+            T.tileAt(withDepot, 62, 62).zone.stage > T.tileAt(without, 62, 62).zone.stage, true]
+        ];
+      } },
+
+    { name: 'Industry emits dust, which spreads and then settles',
+      why: 'dust has to behave like a field rather than a per-tile flag — it must reach ground the refinery does not occupy, and it must clear once the source is gone, or it is just a decal',
+      run() {
+        const s = city();
+        develop(s, 60, 60, 'industry', 'high', 3);
+        for (let i = 0; i < 40; i++) SV.diffuseDust(s);
+        const atSource = T.tileAt(s, 60, 60).dust;
+        const nearby = T.tileAt(s, 63, 60).dust;
+        const distant = T.tileAt(s, 78, 60).dust;
+
+        T.tileAt(s, 60, 60).zone = null;                  // shut the refinery down
+        for (let i = 0; i < 300; i++) SV.diffuseDust(s);
+        return [
+          ['dust accumulates at the source', atSource, '>0'],
+          ['it spreads to ground the refinery does not occupy', nearby, '>0'],
+          ['it is thicker at the source than away from it', atSource > nearby, true],
+          ['it thins out with distance', nearby > distant, true],
+          ['and it clears once the source is gone', T.tileAt(s, 60, 60).dust < atSource * 0.2, true]
+        ];
+      } },
+
+    { name: 'Dust fouls solar arrays and drags land value down',
+      why: 'this is the consequence that makes refinery placement matter — an array downwind of industry has to genuinely stop earning, not merely look dirty',
+      run() {
+        const clean = city(), dirty = city();
+        for (const s of [clean, dirty]) {
+          const t = T.tileAt(s, 60, 60); t.sun = 1; S.place(s, t, 'solar');
+        }
+        for (const t of dirty.map) t.dust = 1;
+        const gClean = Z.power(clean).gen, gDirty = Z.power(dirty).gen;
+
+        const ctxOf = s => ({ transit: () => true, transitMul: 1,
+                              indDist: Z.distanceField(s, () => false, 5), cov: null });
+        const vClean = Z.landValue(clean, ctxOf(clean), T.tileAt(clean, 65, 65));
+        const vDirty = Z.landValue(dirty, ctxOf(dirty), T.tileAt(dirty, 65, 65));
+        return [
+          ['a clean array delivers its full output', Math.round(gClean * 10) / 10, 7],
+          ['a fouled one delivers markedly less', gDirty < gClean, true],
+          ['the loss matches the stated dust penalty',
+            Math.round((1 - gDirty / gClean) * 100) / 100, window.LM_DATA.K.DUST_SOLAR_BITE],
+          ['dust also drags land value down', vDirty < vClean, true]
+        ];
+      } },
+
+    { name: 'Biodomes scrub dust as well as lifting land value',
+      why: 'the biodome is the one civic building with two jobs, and the second one has to be real or it is just an expensive park',
+      run() {
+        const s = city(), ctl = city();
+        for (const w of [s, ctl]) develop(w, 60, 60, 'industry', 'high', 3);
+        S.place(s, T.tileAt(s, 64, 60), 'biodome');
+        for (const w of [s, ctl]) for (let i = 0; i < 60; i++) SV.diffuseDust(w);
+        const scrubbed = T.tileAt(s, 64, 60).dust, untouched = T.tileAt(ctl, 64, 60).dust;
+
+        const cov = SV.coverage(s, B.effects(s));
+        return [
+          ['the control district really is dusty', untouched, '>0'],
+          ['a biodome measurably clears the air near it', scrubbed < untouched, true],
+          ['and it still projects amenity cover', cov.amenity[G.idx(64, 60)], '>0']
+        ];
+      } },
+
+    { name: 'Civic buildings draw power and labs multiply research',
+      why: 'services must cost the grid something, and a lab that did not beat funding science alone would be a worse building than no building',
+      run() {
+        const s = city();
+        const before = Z.power(s).o2Draw;
+        S.place(s, T.tileAt(s, 60, 60), 'medbay');
+        S.place(s, T.tileAt(s, 62, 60), 'lab');
+        const after = Z.power(s).o2Draw;
+
+        const withLab = servicedZone({ tube: true, power: true, air: true });
+        const without = servicedZone({ tube: true, power: true, air: true });
+        for (const w of [withLab, without]) for (let i = 0; i < 40; i++) S.tick(w);
+        S.place(withLab, T.tileAt(withLab, 63, 63), 'lab');
+        const a0 = withLab.research, b0 = without.research;
+        for (const w of [withLab, without]) for (let i = 0; i < 60; i++) S.tick(w);
+        return [
+          ['civic buildings add to the grid load', after > before, true],
+          ['the added draw matches their ratings', after - before,
+            S.buildById('medbay').drawKw + S.buildById('lab').drawKw],
+          ['a lab beats funding science alone',
+            (withLab.research - a0) > (without.research - b0), true]
         ];
       } }
   ];

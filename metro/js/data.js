@@ -66,7 +66,19 @@ const K = {
   MAX_TAX: 20,
   HAB_TAX_PER_HEAD: 1.15,  // residents are taxable activity too, not just trade
   TAX_DEMAND_BITE: 0.02,   // demand lost per point of tax above the base rate
-  BROKE_FUNDING: 0.5       // services run at half effect while the treasury is negative
+  BROKE_FUNDING: 0.5,      // services run at half effect while the treasury is negative
+
+  /* ---- regolith dust ----
+     Lunar dust is abrasive, electrostatically clingy and the single most
+     documented nuisance of working on the Moon — Apollo crews lost seals and
+     radiator efficiency to it. Here it is a diffusing field emitted by
+     industry that fouls solar arrays and drags land value down, which makes
+     where you put the refineries a real decision rather than a cosmetic one. */
+  DUST_EMIT: 0.055,        // per industrial stage, per day
+  DUST_DECAY: 0.982,       // settles out slowly
+  DUST_SPREAD: 0.085,      // fraction bleeding to each orthogonal neighbour
+  DUST_SOLAR_BITE: 0.55,   // most of an array's output a full dust load costs
+  DUST_VALUE_BITE: 0.40    // land value lost under a full dust load
 };
 
 /* Ground types. Height does most of the work that terrain type did in
@@ -156,7 +168,38 @@ const BUILDINGS = [
   { id: 'reactor', name: 'Fission Plant', cost: 5600, group: 'power', kw: 60,
     desc: 'A Kilopower-class surface reactor. Expensive, and indifferent to sunlight — which is the entire point through the long night.' },
   { id: 'o2', name: 'Oxygen Plant', cost: 950, group: 'life', drawKw: 5, air: K.AIR_PER_PLANT,
-    desc: 'Cracks oxygen and pressurises the mains. Draws real power, and pressurises a fixed number of colonists — build more as the city grows.' }
+    desc: 'Cracks oxygen and pressurises the mains. Draws real power, and pressurises a fixed number of colonists — build more as the city grows.' },
+
+  /* Civic buildings. Each projects a circle of coverage that falls off with
+     distance, exactly as SimCity 2000's police and fire stations do, and the
+     relevant department's funding scales how far that circle reaches. They
+     all draw power, so a service-rich city needs a bigger grid. */
+  { id: 'depot', name: 'Repair Depot', cost: 1200, group: 'service', service: 'safety',
+    radius: 9, drawKw: 2,
+    desc: 'Crews and spares. Ground inside its reach works off maintenance backlog instead of accumulating it.' },
+  { id: 'medbay', name: 'Medbay', cost: 1650, group: 'service', service: 'health',
+    radius: 10, drawKw: 3,
+    desc: 'Clinical care. Ground inside its reach is worth markedly more to live on.' },
+  { id: 'training', name: 'Training Centre', cost: 1900, group: 'service', service: 'education',
+    radius: 11, drawKw: 3,
+    desc: 'Schooling and certification. Raises land value, and skilled ground is what lets trade and industry densify.' },
+  { id: 'lab', name: 'Research Lab', cost: 2600, group: 'service', service: 'research',
+    radius: 9, drawKw: 4,
+    desc: 'Multiplies research banked by developed ground inside its reach — the fastest way to buy your way into the next era.' },
+  { id: 'biodome', name: 'Biodome', cost: 1400, group: 'service', service: 'amenity',
+    radius: 7, drawKw: 3,
+    desc: 'Green space under glass, descended directly from Lunar Farm. Nothing lifts land value faster, and it scrubs dust out of the air around it.' }
+];
+
+/* The five coverage services a civic building can project. Each names the
+   department whose funding scales its reach, so cutting a budget visibly
+   shrinks the circles on the map. */
+const SERVICES = [
+  { id: 'safety', name: 'Repair Cover', dept: 'safety', colour: '#ff9f6e' },
+  { id: 'health', name: 'Medical Cover', dept: 'safety', colour: '#ff7a9c' },
+  { id: 'education', name: 'Training Cover', dept: 'science', colour: '#8fd0ff' },
+  { id: 'research', name: 'Research Cover', dept: 'science', colour: '#c98bff' },
+  { id: 'amenity', name: 'Amenity', dept: 'transit', colour: '#6ee7a0' }
 ];
 
 /* City departments. Each dial runs 0..100% and every one of them has a real,
@@ -206,6 +249,12 @@ const TOOLS = [
   { id: 'reactor', name: 'Fission Plant', glyph: '⚛', key: 'F', group: 'plant', build: 'reactor' },
   { id: 'o2', name: 'Oxygen Plant', glyph: '◍', key: 'O', group: 'plant', build: 'o2' },
 
+  { id: 'depot', name: 'Repair Depot', glyph: '🛠', key: 'Z', group: 'service', build: 'depot' },
+  { id: 'medbay', name: 'Medbay', glyph: '✚', key: 'M', group: 'service', build: 'medbay' },
+  { id: 'training', name: 'Training Centre', glyph: '🎓', key: 'N', group: 'service', build: 'training' },
+  { id: 'lab', name: 'Research Lab', glyph: '🔬', key: 'B', group: 'service', build: 'lab' },
+  { id: 'biodome', name: 'Biodome', glyph: '🌿', key: 'V', group: 'service', build: 'biodome' },
+
   { id: 'hab_low',   name: 'Habitation · Low',  glyph: '▨', key: 'Q', group: 'zone', zone: 'hab',      density: 'low',  drag: 'rect' },
   { id: 'hab_high',  name: 'Habitation · High', glyph: '▧', key: 'W', group: 'zone', zone: 'hab',      density: 'high', drag: 'rect' },
   { id: 'trade_low', name: 'Trade · Low',       glyph: '▨', key: 'E', group: 'zone', zone: 'trade',    density: 'low',  drag: 'rect' },
@@ -217,4 +266,4 @@ const TOOLS = [
     hint: 'Remove whatever is on a tile — zoning, network or structure.' }
 ];
 
-window.LM_DATA = { K, TERRAIN, DEPOSITS, ZONES, BUILDINGS, DEPARTMENTS, TOOLS };
+window.LM_DATA = { K, TERRAIN, DEPOSITS, ZONES, BUILDINGS, DEPARTMENTS, SERVICES, TOOLS };

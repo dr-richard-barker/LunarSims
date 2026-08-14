@@ -85,7 +85,13 @@
 
   /* Everything the simulation needs from the budget, in one call. */
   function effects(s) {
+    /* per-department effective funding, so civic coverage radii can shrink
+       when the department behind them is starved */
+    const deptFunding = {};
+    for (const d of DEPARTMENTS) deptFunding[d.id] = effFunding(s, d.id);
+
     return {
+      deptFunding,
       /* a starved grid delivers less than its rated output */
       genMul: 0.55 + 0.45 * effFunding(s, 'power'),
       /* and starved plants pressurise fewer people than their rating */
