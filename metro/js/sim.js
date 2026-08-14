@@ -13,10 +13,12 @@
   const T = window.LM_TERRAIN, G = window.LM_GRID, Z = window.LM_ZONES;
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
-  /* bump whenever the saved shape changes in a way older saves lack — the
-     budget added taxRate, funding and research, none of which a Phase 2
-     save carries */
-  const STATE_VERSION = 2;
+  /* Bump whenever the saved shape changes in a way older saves lack. v4 adds
+     the three mode switches and the disaster state, and — more importantly —
+     corrects the RCI ratios, which changes how an existing city behaves
+     rather than just what it stores. Carrying a v3 city forward would leave
+     it balanced against rules that no longer exist. */
+  const STATE_VERSION = 4;
   const buildById = id => BUILDINGS.find(b => b.id === id);
 
   function newGame(seed) {
@@ -26,11 +28,18 @@
       map: w.map,
       day: 1,
       credits: K.START_CREDITS,
-      pop: 0, housingCap: 0, jobs: 0,
+      pop: 0, peakPop: 0, housingCap: 0, jobs: 0,
       demand: { hab: 0, trade: 0, industry: 0 },
       gen: 0, ratedGen: 0, load: 0, airCap: 0,
       revenue: 0, expenses: 0, deptExpenses: 0, zoneUpkeep: 0,
       brownout: false, airShort: false,
+
+      /* Modes. Disasters start OFF: this is a sandbox city builder, and a
+         player who came to design a city should opt in to having one wrecked
+         rather than opt out. */
+      sandbox: false, disastersOn: false, autoPlay: false,
+      flareDays: 0, lastDisaster: -999,
+
       log: [], history: []
     };
     return Object.assign(s, window.LM_BUDGET.initial());
@@ -38,10 +47,57 @@
 
   /* ---------- placement ---------- */
 
+  /* A megadome has to sit beside an intact lava-tube skylight, and a mass
+     driver needs a long, high, level run. Both tie a wonder to terrain the
+     player either found or sculpted, rather than letting it drop anywhere. */
+  function nearSkylight(s, t) {
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const n = T.tileAt(s, t.x + dx, t.y + dy);
+        if (n && n.t === 'skylight') return true;
+      }
+    }
+    return false;
+  }
+
+  /* Seven tiles of level ground in a straight line, high enough to throw
+     from — checked along both axes. */
+  function onRidge(s, t) {
+    if (t.h < 7) return false;
+    for (const [dx, dy] of [[1, 0], [0, 1]]) {
+      let ok = true;
+      for (let i = -3; i <= 3; i++) {
+        const n = T.tileAt(s, t.x + dx * i, t.y + dy * i);
+        if (!n || n.h !== t.h || !T.buildable(n)) { ok = false; break; }
+      }
+      if (ok) return true;
+    }
+    return false;
+  }
+
+  /* Sandbox mode. Everything is free and every era-gated structure is
+     available immediately — the player (or the director) is designing a city
+     rather than earning one. It deliberately does NOT touch the era itself:
+     the city still advances through Outpost to Metropolis as it grows, so the
+     architecture still changes as it earns it. What sandbox removes is the
+     permission system, not the progression. */
+  const free = s => !!s.sandbox;
+  const cost = (s, n) => free(s) ? 0 : n;
+
   function canPlace(s, t, type) {
     const B = buildById(type);
     if (!B) return 'Unknown structure.';
     if (!t) return 'That is off the map.';
+    if (!free(s) && window.LM_ERAS && !window.LM_ERAS.unlocked(s, type)) {
+      return window.LM_ERAS.lockReason(s, type);
+    }
+    if (B.once && count(s, type) >= 1) return `The colony only builds one ${B.name}.`;
+    if (B.needsSkylight && !nearSkylight(s, t)) {
+      return 'A megadome must be built beside a lava-tube skylight.';
+    }
+    if (B.needsRidge && !onRidge(s, t)) {
+      return 'A mass driver needs seven tiles of level ground at height 7 or above to run along.';
+    }
     if (!T.buildable(t)) return t.t === 'boulder'
       ? 'Clear the boulders first.'
       : 'Nothing can be built on that ground.';
@@ -52,7 +108,7 @@
       if (t.b) return t.b.type === type ? 'Already built here.' : 'Something is already built here.';
       if (t.zone) return 'That ground is zoned — clear the zoning first.';
     }
-    if (s.credits < B.cost) return `That costs ${B.cost.toLocaleString()} credits.`;
+    if (s.credits < cost(s, B.cost)) return `That costs ${B.cost.toLocaleString()} credits.`;
     return null;
   }
 
@@ -60,7 +116,7 @@
     const err = canPlace(s, t, type);
     if (err) return err;
     const B = buildById(type);
-    s.credits -= B.cost;
+    s.credits -= cost(s, B.cost);
     if (B.subsurface) t.pipe = true;
     else t.b = { type };
     return null;
@@ -86,14 +142,14 @@
      refusing the whole drag — dragging across a boulder field should still
      zone everything either side of it. Returns how many tiles were set. */
   function paintZone(s, x, y, w, h, kind, density) {
-    const cost = zoneCost(kind, density);
+    const each = cost(s, zoneCost(kind, density));
     let painted = 0;
     for (let yy = y; yy < y + h; yy++) {
       for (let xx = x; xx < x + w; xx++) {
         const t = T.tileAt(s, xx, yy);
         if (canZone(s, t)) continue;
-        if (s.credits < cost) return painted;
-        s.credits -= cost;
+        if (s.credits < each) return painted;
+        s.credits -= each;
         t.zone = { kind, density, stage: 0, growth: 0, unserved: 0, decay: 0, served: false, value: 0 };
         painted++;
       }
@@ -113,6 +169,20 @@
   /* ---------- the daily tick ---------- */
 
   function tick(s) {
+    /* The director acts at the top of the day, before anything is evaluated,
+       so what it builds is reflected in the same day's growth rather than
+       lagging it by one. Loaded optionally — sim.js has no hard dependency on
+       autopilot.js, the same discipline the renderer follows. */
+    if (s.autoPlay && window.LM_AUTO) {
+      try { window.LM_AUTO.step(s); } catch (e) { console.error('autoplay', e); }
+    }
+    /* Then the dice, if the player opted in. */
+    if (s.disastersOn && window.LM_DISASTERS) window.LM_DISASTERS.maybeFire(s);
+    if (s.flareDays > 0) s.flareDays--;
+
+    /* Dust settles before growth is evaluated, so a district reacts to the
+       air it is actually breathing today rather than yesterday's. */
+    if (window.LM_SERVICES) window.LM_SERVICES.diffuseDust(s);
     const nets = G.services(s);
     const r = Z.growthTick(s, nets);
 
@@ -138,7 +208,16 @@
     s.expenses = exp.total + r.tally.upkeep;
     s.credits += s.revenue - s.expenses;
 
-    s.research += r.eff.sciencePerDay * developedCount(s);
+    /* Research accrues per developed tile, multiplied by any lab coverage
+       over it — so siting labs across the dense districts is worth far more
+       than parking them on the edge of the map. */
+    let sci = 0;
+    for (const t of s.map) {
+      if (!t.zone || t.zone.stage === 0) continue;
+      const boost = r.cov ? 1 + r.cov.research[G.idx(t.x, t.y)] : 1;
+      sci += r.eff.sciencePerDay * boost;
+    }
+    s.research += sci;
 
     /* Migration tracks the gap between people and pressurised housing.
        A colony that has over-extended its grid or its oxygen supply stops
@@ -146,11 +225,20 @@
        player can build their way out of, never a game over. */
     if (!r.brownout && !r.airShort) {
       const gap = Math.max(0, s.housingCap - s.pop);
-      s.pop += clamp(Math.round(gap * K.MIGRATION_RATE), 0, K.MIGRATION_CAP);
+      /* The ceiling on daily arrivals scales with the city. A flat cap is
+         right for an outpost with one landing pad and absurd for a
+         metropolis — held flat, a city with thousands of empty berths fills
+         them at eight people a day and never catches up to its own housing. */
+      const cap = Math.max(K.MIGRATION_CAP, Math.round(s.pop * K.MIGRATION_CAP_FRAC));
+      s.pop += clamp(Math.round(gap * K.MIGRATION_RATE), 0, cap);
     } else if (s.pop > 0) {
       s.pop = Math.max(0, s.pop - Math.max(1, Math.round(s.pop * 0.02)));
     }
     if (s.pop > s.housingCap) s.pop = s.housingCap;
+    /* Era progression reads the high-water mark rather than today's count,
+       so a temporary slump never retroactively demolishes a skyline the
+       city genuinely earned. */
+    if (s.pop > s.peakPop) s.peakPop = s.pop;
 
     s.day++;
     s.history.push({

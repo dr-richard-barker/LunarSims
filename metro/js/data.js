@@ -48,6 +48,24 @@ const K = {
   /* ---- city simulation ---- */
   START_CREDITS: 20000,
   DEMAND_SCALE: 60,        // divisor turning the jobs/population gap into an RCI index
+
+  /* RCI ratios. These three have to be consistent with each other or the
+     city hits a ceiling it can never grow through: habitation only develops
+     while jobs outrun population, while trade and industry only develop
+     while population outruns their own headcount. If the two job ratios sum
+     to less than one, the equilibrium the city settles at has fewer jobs
+     than residents — which leaves habitation demand permanently negative,
+     stalls population for good, and puts the later eras out of reach of any
+     player, however well they build.
+
+     So the two job ratios sum to exactly 1: at equilibrium there is one job
+     per resident. RESIDENTS_PER_JOB is then what makes a city grow at all —
+     each job supports slightly more than one resident, because not everyone
+     in a household works. That margin is the engine, and it stays bounded by
+     land, power, pressurisation, land value and the era ceiling. */
+  RESIDENTS_PER_JOB: 1.15,
+  TRADE_JOBS_PER_HEAD: 0.55,
+  IND_JOBS_PER_HEAD: 0.45,
   MAX_STAGE: 4,
   BASE_GROWTH: 0.16,       // stage progress per day under ideal conditions
   DECAY_RATE: 0.10,        // stage progress lost per day when demand is negative
@@ -55,7 +73,8 @@ const K = {
   AIR_PER_PLANT: 45,       // colonists one oxygen plant can pressurise
   KW_PER_STAGE: 0.5,       // grid draw of a developed tile, per stage reached
   MIGRATION_RATE: 0.10,    // fraction of the housing gap that moves in per day
-  MIGRATION_CAP: 8,
+  MIGRATION_CAP: 8,       // floor on daily arrivals, for a city too small to scale
+  MIGRATION_CAP_FRAC: 0.02, // and above that, arrivals scale with the city itself
 
   /* ---- budget ----
      BASE_TAX is the rate at which zone income arrives exactly as its stage
@@ -66,7 +85,50 @@ const K = {
   MAX_TAX: 20,
   HAB_TAX_PER_HEAD: 1.15,  // residents are taxable activity too, not just trade
   TAX_DEMAND_BITE: 0.02,   // demand lost per point of tax above the base rate
-  BROKE_FUNDING: 0.5       // services run at half effect while the treasury is negative
+  BROKE_FUNDING: 0.5,      // services run at half effect while the treasury is negative
+
+  /* ---- regolith dust ----
+     Lunar dust is abrasive, electrostatically clingy and the single most
+     documented nuisance of working on the Moon — Apollo crews lost seals and
+     radiator efficiency to it. Here it is a diffusing field emitted by
+     industry that fouls solar arrays and drags land value down, which makes
+     where you put the refineries a real decision rather than a cosmetic one. */
+  DUST_EMIT: 0.055,        // per industrial stage, per day
+  DUST_DECAY: 0.982,       // settles out slowly
+  DUST_SPREAD: 0.085,      // fraction bleeding to each orthogonal neighbour
+  DUST_SOLAR_BITE: 0.55,   // most of an array's output a full dust load costs
+  DUST_VALUE_BITE: 0.40,   // land value lost under a full dust load
+
+  /* ---- disasters ----
+     OFF by default. This is a sandbox city builder first: a player who wants
+     to design a city should not have one deleted by a dice roll they never
+     opted into. Nothing here can end a run either — the worst case is ground
+     you have to rebuild.
+
+     The rate is per day and deliberately low. It scales with how much there
+     is to hit, so an empty map is quiet and a real city is not, and a
+     cooldown stops two events landing on top of each other before the first
+     has been repaired. */
+  DISASTER_BASE_CHANCE: 0.0045,
+  DISASTER_SCALE_TILES: 400,   // developed tiles at which the rate has doubled
+  DISASTER_MAX_CHANCE: 0.02,
+  DISASTER_COOLDOWN: 45,       // days of quiet after one fires
+  DISASTER_GRACE: 20,          // no events at all before this day
+
+  /* ---- AI auto-play ----
+     Block spacing for the director's lattice. Tube streets every third row
+     put every tile within one of a tube, which is the adjacency the growth
+     model needs. */
+  AI_BLOCK: 3,
+  /* Conduit columns are sparser than the streets, because current also flows
+     through developed buildings and does not need its own tile everywhere.
+     Every fourth column leaves exactly one mid-block column relying on that
+     propagation; every sixth left three, which took visibly longer to light
+     up and held back the ground in between. */
+  AI_CONDUIT_EVERY: 4,
+  AI_RESERVE_FLOOR: 2500,  // never spend the treasury below this
+  AI_POWER_MARGIN: 1.3,    // build generation until it clears load by this factor
+  AI_AIR_MARGIN: 1.25      // and pressurisation until it clears population by this
 };
 
 /* Ground types. Height does most of the work that terrain type did in
@@ -153,10 +215,104 @@ const BUILDINGS = [
 
   { id: 'solar', name: 'Solar Array', cost: 380, group: 'power', kw: 7,
     desc: 'Output scales directly with how much sun the ground it stands on actually receives. On a peak of eternal light it runs near continuously; on a shadowed floor it is nearly worthless.' },
-  { id: 'reactor', name: 'Fission Plant', cost: 5600, group: 'power', kw: 60,
+  { id: 'reactor', name: 'Fission Plant', cost: 5600, group: 'power', kw: 60, era: 1,
     desc: 'A Kilopower-class surface reactor. Expensive, and indifferent to sunlight — which is the entire point through the long night.' },
   { id: 'o2', name: 'Oxygen Plant', cost: 950, group: 'life', drawKw: 5, air: K.AIR_PER_PLANT,
-    desc: 'Cracks oxygen and pressurises the mains. Draws real power, and pressurises a fixed number of colonists — build more as the city grows.' }
+    desc: 'Cracks oxygen and pressurises the mains. Draws real power, and pressurises a fixed number of colonists — build more as the city grows.' },
+
+  /* Civic buildings. Each projects a circle of coverage that falls off with
+     distance, exactly as SimCity 2000's police and fire stations do, and the
+     relevant department's funding scales how far that circle reaches. They
+     all draw power, so a service-rich city needs a bigger grid. */
+  { id: 'depot', name: 'Repair Depot', cost: 1200, group: 'service', service: 'safety',
+    radius: 9, drawKw: 2,
+    desc: 'Crews and spares. Ground inside its reach works off maintenance backlog instead of accumulating it.' },
+  { id: 'medbay', name: 'Medbay', cost: 1650, group: 'service', service: 'health',
+    radius: 10, drawKw: 3,
+    desc: 'Clinical care. Ground inside its reach is worth markedly more to live on.' },
+  { id: 'training', name: 'Training Centre', cost: 1900, group: 'service', service: 'education',
+    radius: 11, drawKw: 3,
+    desc: 'Schooling and certification. Raises land value, and skilled ground is what lets trade and industry densify.' },
+  { id: 'lab', name: 'Research Lab', cost: 2600, group: 'service', service: 'research',
+    radius: 9, drawKw: 4, era: 1,
+    desc: 'Multiplies research banked by developed ground inside its reach — the fastest way to buy your way into the next era.' },
+  { id: 'biodome', name: 'Biodome', cost: 1400, group: 'service', service: 'amenity',
+    radius: 7, drawKw: 3,
+    desc: 'Green space under glass, descended directly from Lunar Farm. Nothing lifts land value faster, and it scrubs dust out of the air around it.' },
+
+  /* Wonders — one to a colony, ruinously expensive, and each tied to a piece
+     of the terrain rather than droppable anywhere. They are the payoff for
+     an era, and the reason to have sculpted the map you did. */
+  { id: 'megadome', name: 'Lava-Tube Megadome', cost: 42000, group: 'wonder', era: 2,
+    once: true, needsSkylight: true, drawKw: 18, housing: 900,
+    desc: 'A sealed city built down into an intact lava tube — the most valuable real estate on the Moon, and the only structure that can use a skylight. Must be built beside one. Houses more people than any amount of surface zoning.' },
+  { id: 'massdriver', name: 'Mass Driver', cost: 68000, group: 'wonder', era: 3,
+    once: true, needsRidge: true, drawKw: 30, exportIncome: 640,
+    desc: 'An electromagnetic launch track flinging refined cargo to Earth orbit without rockets. Needs a long, high, level run to sit on, and pays a standing export income once it does.' }
+];
+
+/* The five coverage services a civic building can project. Each names the
+   department whose funding scales its reach, so cutting a budget visibly
+   shrinks the circles on the map. */
+const SERVICES = [
+  { id: 'safety', name: 'Repair Cover', dept: 'safety', colour: '#ff9f6e' },
+  { id: 'health', name: 'Medical Cover', dept: 'safety', colour: '#ff7a9c' },
+  { id: 'education', name: 'Training Cover', dept: 'science', colour: '#8fd0ff' },
+  { id: 'research', name: 'Research Cover', dept: 'science', colour: '#c98bff' },
+  { id: 'amenity', name: 'Amenity', dept: 'transit', colour: '#6ee7a0' }
+];
+
+/* Eras. A colony earns its way forward by growing AND by funding research —
+   both thresholds must be met, which is what stops the science dial being
+   something a player can safely zero out forever.
+
+   An era does three things: it raises the ceiling on how far any ground can
+   develop, it unlocks buildings, and it changes what the city looks like.
+   That last one is the point. Capping density by era is what gives the game
+   an arc — you cannot build a skyline on day one, you have to become the
+   kind of city that has one. */
+const ERAS = [
+  { id: 'outpost', name: 'Outpost', pop: 0, research: 0, stageCap: 1,
+    blurb: 'Bermed cans and pressurised shelters. Everything is temporary, and looks it.' },
+  { id: 'settlement', name: 'Settlement', pop: 60, research: 120, stageCap: 2,
+    blurb: 'Proper domes with viewports, joined by surface walkways. The colony starts to look permanent.' },
+  { id: 'colony', name: 'Colony', pop: 180, research: 500, stageCap: 3,
+    blurb: 'Multi-dome clusters and mid-rise blocks with lit windows and radiator fins.' },
+  { id: 'metropolis', name: 'Metropolis', pop: 450, research: 1400, stageCap: 4,
+    blurb: 'Towers, skyways between the dense blocks, and a skyline worth the name.' }
+];
+
+/* The disaster deck, rethemed for a city rather than a survival base.
+
+   Each one damages the city in a different currency, so no single defence
+   answers all four: the meteor takes ground, the blowout takes networks, the
+   dust surge takes economy, and the flare takes power. All four are survivable
+   and repairable — none can end a run.
+
+   `mitigatedBy` names the coverage field that reduces the damage, which is
+   what gives the Safety & Repair budget a second job besides holding density.
+
+   A note on the dust event: the Moon has no wind, so there are no dust storms
+   in the terrestrial sense. What it does have is electrostatic dust transport
+   — UV and solar-wind charging lofts fine grains above the surface, seen as
+   Surveyor's "horizon glow" and reported by Apollo crews near the terminator.
+   That is the real phenomenon this event models, hence the name. */
+const DISASTERS = [
+  { id: 'blowout', name: 'Seal Blowout', glyph: '💨', weight: 1.6, minDay: 25,
+    mitigatedBy: 'safety',
+    desc: 'A pressure seal lets go. The atmosphere mains around it vent to vacuum and the district above them loses density until the run is relaid.' },
+
+  { id: 'dustsurge', name: 'Electrostatic Dust Surge', glyph: '🌫', weight: 1.4, minDay: 20,
+    mitigatedBy: 'safety',
+    desc: 'Charged regolith lofts off the surface and settles over everything downrange, fouling solar arrays and dragging land value down until it clears.' },
+
+  { id: 'flare', name: 'Solar Flare', glyph: '⚡', weight: 1.2, minDay: 30,
+    mitigatedBy: 'safety',
+    desc: 'A particle event forces the grid into protective shutdown. Generation is cut city-wide for several days, but nothing is destroyed.' },
+
+  { id: 'meteor', name: 'Meteor Strike', glyph: '☄', weight: 0.8, minDay: 40,
+    mitigatedBy: 'safety',
+    desc: 'A meteoroid gets through. Everything inside the crater is gone and the ground itself is rewritten — the only event that changes the terrain.' }
 ];
 
 /* City departments. Each dial runs 0..100% and every one of them has a real,
@@ -206,6 +362,15 @@ const TOOLS = [
   { id: 'reactor', name: 'Fission Plant', glyph: '⚛', key: 'F', group: 'plant', build: 'reactor' },
   { id: 'o2', name: 'Oxygen Plant', glyph: '◍', key: 'O', group: 'plant', build: 'o2' },
 
+  { id: 'depot', name: 'Repair Depot', glyph: '🛠', key: 'Z', group: 'service', build: 'depot' },
+  { id: 'medbay', name: 'Medbay', glyph: '✚', key: 'M', group: 'service', build: 'medbay' },
+  { id: 'training', name: 'Training Centre', glyph: '🎓', key: 'N', group: 'service', build: 'training' },
+  { id: 'lab', name: 'Research Lab', glyph: '🔬', key: 'B', group: 'service', build: 'lab' },
+  { id: 'biodome', name: 'Biodome', glyph: '🌿', key: 'V', group: 'service', build: 'biodome' },
+
+  { id: 'megadome', name: 'Lava-Tube Megadome', glyph: '◈', key: 'J', group: 'wonder', build: 'megadome' },
+  { id: 'massdriver', name: 'Mass Driver', glyph: '⇗', key: 'K', group: 'wonder', build: 'massdriver' },
+
   { id: 'hab_low',   name: 'Habitation · Low',  glyph: '▨', key: 'Q', group: 'zone', zone: 'hab',      density: 'low',  drag: 'rect' },
   { id: 'hab_high',  name: 'Habitation · High', glyph: '▧', key: 'W', group: 'zone', zone: 'hab',      density: 'high', drag: 'rect' },
   { id: 'trade_low', name: 'Trade · Low',       glyph: '▨', key: 'E', group: 'zone', zone: 'trade',    density: 'low',  drag: 'rect' },
@@ -217,4 +382,4 @@ const TOOLS = [
     hint: 'Remove whatever is on a tile — zoning, network or structure.' }
 ];
 
-window.LM_DATA = { K, TERRAIN, DEPOSITS, ZONES, BUILDINGS, DEPARTMENTS, TOOLS };
+window.LM_DATA = { K, TERRAIN, DEPOSITS, ZONES, ERAS, BUILDINGS, DEPARTMENTS, SERVICES, TOOLS, DISASTERS };

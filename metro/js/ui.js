@@ -9,6 +9,7 @@
 (function () {
   const D = window.LM_DATA, T = window.LM_TERRAIN, G = window.LM_GRID;
   const Z = window.LM_ZONES, S = window.LM_SIM, R = window.LM_RENDER, B = window.LM_BUDGET;
+  const E = window.LM_ERAS;
   const K = D.K;
   const SAVE_KEY = 'lunar-metropolis.save.v2';
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -26,7 +27,13 @@
 
   const toolById = id => D.TOOLS.find(t => t.id === id);
   const current = () => toolById(ui.tool);
-  function refreshNets() { ui.nets = G.services(s); }
+  /* Networks and civic coverage are both map-wide derived data. Recompute
+     them together whenever the map actually changes, and cache — the
+     renderer reads the cache rather than recomputing per frame. */
+  function refreshNets() {
+    ui.nets = G.services(s);
+    ui.cov = window.LM_SERVICES ? window.LM_SERVICES.coverage(s, B.effects(s)) : null;
+  }
 
   /* ---------- canvas ---------- */
 
@@ -59,6 +66,8 @@
     { id: 'terrain', label: 'Terrain' },
     { id: 'network', label: 'Networks' },
     { id: 'plant', label: 'Power & Life Support' },
+    { id: 'service', label: 'Civic Services' },
+    { id: 'wonder', label: 'Wonders' },
     { id: 'zone', label: 'Zoning' }
   ];
 
@@ -73,13 +82,19 @@
       box.className = 'tools';
       D.TOOLS.filter(t => t.group === g.id).forEach(t => {
         const b = document.createElement('button');
+        /* Sandbox lifts the era locks as well as the prices, so the palette
+           has to agree with what canPlace will actually allow. */
+        const locked = !s.sandbox && t.build && E && !E.unlocked(s, t.build);
         b.className = 'tool' + (ui.tool === t.id ? ' on' : '');
-        const cost = t.build ? S.buildById(t.build).cost
+        if (locked) { b.disabled = true; b.style.opacity = 0.42; }
+        const listed = t.build ? S.buildById(t.build).cost
           : t.zone ? S.zoneCost(t.zone, t.density) : null;
-        b.innerHTML = `<span class="g">${t.glyph}</span><span class="n">${t.name}</span>` +
-          (cost !== null ? `<span class="c">${cost}</span>` : `<span class="k">${t.key}</span>`);
-        b.title = t.hint || (t.build ? S.buildById(t.build).desc : '') ||
-          (t.zone ? Z.zoneById(t.zone).desc : '');
+        const cost = listed === null ? null : (s.sandbox ? 0 : listed);
+        b.innerHTML = `<span class="g">${locked ? '🔒' : t.glyph}</span><span class="n">${t.name}</span>` +
+          (cost !== null ? `<span class="c">${cost.toLocaleString()}</span>` : `<span class="k">${t.key}</span>`);
+        b.title = locked ? E.lockReason(s, t.build)
+          : (t.hint || (t.build ? S.buildById(t.build).desc : '') ||
+             (t.zone ? Z.zoneById(t.zone).desc : ''));
         b.onclick = () => { ui.tool = t.id; ui.levelTarget = null; buildPalette(); setHint(); };
         box.appendChild(b);
       });
@@ -236,9 +251,23 @@
   });
 
   cv.addEventListener('pointerleave', () => { ui.hover = null; });
+  /* Zoom pinned to the cursor. Scaling without compensating the pan makes
+     the world slide out from under the pointer — zoom in on a district and
+     it drifts off screen, which is exactly the wrong behaviour when the map
+     is 128 tiles across. Solving for the world point beneath the cursor and
+     holding it fixed keeps whatever you are looking at under the mouse. */
   cv.addEventListener('wheel', e => {
     e.preventDefault();
-    ui.cam.z = clamp(ui.cam.z * (e.deltaY < 0 ? 1.1 : 0.9), 0.22, 2.6);
+    const rect = cv.getBoundingClientRect();
+    const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
+    const z0 = ui.cam.z;
+    const z1 = clamp(z0 * (e.deltaY < 0 ? 1.1 : 0.9), 0.22, 2.6);
+    if (z1 === z0) return;
+    const wx = (sx - rect.width / 2 - ui.cam.x) / z0;
+    const wy = (sy - 92 - ui.cam.y) / z0;
+    ui.cam.z = z1;
+    ui.cam.x = sx - rect.width / 2 - wx * z1;
+    ui.cam.y = sy - 92 - wy * z1;
   }, { passive: false });
 
   window.addEventListener('keydown', e => {
@@ -280,7 +309,13 @@
         <div class="row"><span class="k">Power</span>${yn(hasP)}</div>
         <div class="row"><span class="k">Atmosphere</span>${yn(hasA)}</div>
         ${t.pipe ? `<div class="row"><span class="k">Buried main</span><span class="v good">yes</span></div>` : ''}
+        <div class="row"><span class="k">Dust</span><span class="v${(t.dust || 0) > 0.35 ? ' bad' : (t.dust || 0) > 0.12 ? ' warn' : ''}">${Math.round((t.dust || 0) * 100)}%</span></div>
       </div>
+      ${ui.cov ? `<h3 class="sec">Civic coverage</h3><div class="rows">${
+        D.SERVICES.map(sv => {
+          const c = Math.round(ui.cov[sv.id][T.idx(t.x, t.y)] * 100);
+          return `<div class="row"><span class="k">${sv.name}</span><span class="v${c >= 50 ? ' good' : c === 0 ? ' bad' : ''}">${c}%</span></div>`;
+        }).join('')}</div>` : ''}
       <p class="note">${t.b ? S.buildById(t.b.type).desc : t.zone ? Z.zoneById(t.zone.kind).desc : kind.note}</p>
       ${dep ? `<p class="note"><b>${dep.name}</b> — richness ${Math.round(t.deposit.richness * 100)}%. ${dep.note}</p>` : ''}`;
   }
@@ -313,6 +348,7 @@
       `<div class="chip"><b>${s.day.toLocaleString()}</b><span>Day</span></div>`;
 
     const warn = [];
+    if (s.flareDays > 0) warn.push(`A solar flare has the grid in protective shutdown for another ${s.flareDays} day${s.flareDays === 1 ? '' : 's'}. Generation is cut until it passes — nothing has been damaged.`);
     if (s.credits < 0) warn.push('The treasury is in deficit. Every department is running at half effect until it recovers — raise tax, or cut spending.');
     if (load > gen) warn.push('The grid is over capacity and growth has stopped. Build more generation, or restore the Power Grid budget.');
     if (s.pop > airCap) warn.push('Not enough pressurisation for this population. Build another oxygen plant, or restore the Atmosphere budget.');
@@ -323,6 +359,26 @@
 
     document.getElementById('demand').innerHTML =
       bar('Habitation', s.demand.hab) + bar('Trade', s.demand.trade) + bar('Industry', s.demand.industry);
+
+    /* Era readout. Shows both thresholds separately, because a city that has
+       the population but not the research needs to be told to fund science
+       rather than to keep building. */
+    const eraBox = document.getElementById('era');
+    if (eraBox && E) {
+      const cur = E.current(s), nx = E.next(s);
+      const pct = (v, label, need) =>
+        `<div class="meter"><div class="lab"><span>${label}</span><span>${need}</span></div>
+         <div class="track"><div class="fill" style="width:${Math.round(v * 100)}%;background:var(--accent)"></div></div></div>`;
+      eraBox.innerHTML =
+        `<div class="rows"><div class="row"><span class="k">Era</span><span class="v good">${cur.name}</span></div>
+         <div class="row"><span class="k">Density ceiling</span><span class="v">stage ${cur.stageCap}</span></div>
+         <div class="row"><span class="k">Research banked</span><span class="v">${Math.round(s.research).toLocaleString()}</span></div></div>
+         <p class="note">${cur.blurb}</p>` +
+        (nx ? `<p class="note" style="border-left-color:var(--accent-2)">Next: <b>${nx.era.name}</b></p>` +
+              pct(nx.popPct, 'Population', `${(s.peakPop || 0).toLocaleString()} / ${nx.era.pop.toLocaleString()}`) +
+              pct(nx.researchPct, 'Research', `${Math.round(s.research).toLocaleString()} / ${nx.era.research.toLocaleString()}`)
+            : `<p class="note">This colony has reached its final era.</p>`);
+    }
   }
 
   /* ---------- budget panel ---------- */
@@ -392,10 +448,73 @@
     }
   }
 
+  /* ---------- trends ---------- */
+
+  /* Inline SVG sparklines over s.history, which the simulation already keeps
+     (the last 400 days). No library, no canvas, and no data that is not
+     genuinely recorded — every series here is a field the tick actually
+     writes. */
+  function spark(series, colours, label, fmt) {
+    const n = series[0].length;
+    if (n < 2) return `<div class="meter"><div class="lab"><span>${label}</span><span>—</span></div>
+      <p class="note">Not enough history yet.</p></div>`;
+    let lo = Infinity, hi = -Infinity;
+    for (const s2 of series) for (const v of s2) { if (v < lo) lo = v; if (v > hi) hi = v; }
+    if (hi === lo) { hi = lo + 1; }
+    const W = 260, H = 46;
+    const path = arr => arr.map((v, i) =>
+      `${i ? 'L' : 'M'}${(i / (n - 1) * W).toFixed(1)},${(H - (v - lo) / (hi - lo) * H).toFixed(1)}`).join('');
+    const lines = series.map((s2, i) =>
+      `<path d="${path(s2)}" fill="none" stroke="${colours[i]}" stroke-width="1.6"/>`).join('');
+    const last = series.map(s2 => fmt(s2[n - 1])).join(' / ');
+    return `<div class="meter">
+      <div class="lab"><span>${label}</span><span style="font-family:var(--mono)">${last}</span></div>
+      <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"
+           style="width:100%;height:46px;display:block;background:rgba(255,255,255,.03);border-radius:4px">
+        ${lines}
+      </svg>
+      <div class="lab" style="opacity:.6"><span>${fmt(lo)}</span><span>${fmt(hi)}</span></div>
+    </div>`;
+  }
+
+  function buildTrends() {
+    const el = document.getElementById('pane-trends');
+    const h = s.history || [];
+    const num = v => Math.round(v).toLocaleString();
+    const pick = k => h.map(r => r[k] || 0);
+
+    el.innerHTML = `
+      <h3 class="sec">The city so far</h3>
+      <div class="rows">
+        <div class="row"><span class="k">Day</span><span class="v">${s.day.toLocaleString()}</span></div>
+        <div class="row"><span class="k">Population</span><span class="v">${s.pop.toLocaleString()}</span></div>
+        <div class="row"><span class="k">Peak population</span><span class="v">${(s.peakPop || 0).toLocaleString()}</span></div>
+        <div class="row"><span class="k">Jobs</span><span class="v">${s.jobs.toLocaleString()}</span></div>
+        <div class="row"><span class="k">Developed tiles</span><span class="v">${S.developedCount(s).toLocaleString()} of ${S.zonedCount(s).toLocaleString()} zoned</span></div>
+        <div class="row"><span class="k">Era</span><span class="v good">${E ? E.current(s).name : '—'}</span></div>
+        <div class="row"><span class="k">Research banked</span><span class="v">${num(s.research)}</span></div>
+      </div>
+
+      <h3 class="sec">Trends</h3>
+      <p class="note">The last ${h.length} recorded days.</p>
+      ${spark([pick('pop'), pick('housingCap')], ['#6ee7a0', '#5fc9ff'], 'Population / housing capacity', num)}
+      ${spark([pick('gen'), pick('load')], ['#ffd479', '#ff9f6e'], 'Generation / load (kW)', v => v.toFixed(0))}
+      ${spark([pick('revenue'), pick('expenses')], ['#6ee7a0', '#ff7a9c'], 'Revenue / expenses per day', num)}
+      ${spark([pick('credits')], ['#c98bff'], 'Treasury', num)}
+
+      <h3 class="sec">Modes</h3>
+      <div class="rows">
+        <div class="row"><span class="k">Auto-play</span><span class="v${s.autoPlay ? ' good' : ''}">${s.autoPlay ? 'on' : 'off'}</span></div>
+        <div class="row"><span class="k">Sandbox</span><span class="v${s.sandbox ? ' good' : ''}">${s.sandbox ? 'on' : 'off'}</span></div>
+        <div class="row"><span class="k">Disasters</span><span class="v${s.disastersOn ? ' warn' : ''}">${s.disastersOn ? 'armed' : 'off'}</span></div>
+      </div>`;
+  }
+
   document.querySelectorAll('.tab').forEach(t => t.onclick = () => {
     document.querySelectorAll('.tab').forEach(x => x.classList.toggle('on', x === t));
     document.querySelectorAll('.tabpane').forEach(p => p.classList.toggle('on', p.id === 'pane-' + t.dataset.tab));
     if (t.dataset.tab === 'budget') buildBudget();
+    if (t.dataset.tab === 'trends') buildTrends();
   });
 
   document.querySelectorAll('#viewBar button').forEach(b => b.onclick = () => {
@@ -407,14 +526,89 @@
     document.querySelectorAll('.sp').forEach(x => x.classList.toggle('on', x === b));
   });
 
+  /* ---------- modes ---------- */
+
+  /* Three independent switches, all persisted with the save. Auto-play and
+     Sandbox compose deliberately: the director building a free city is a
+     legitimate way to watch the whole era arc play out quickly. */
+  function markModes() {
+    document.getElementById('btnAuto').classList.toggle('on', !!s.autoPlay);
+    document.getElementById('btnSandbox').classList.toggle('on', !!s.sandbox);
+    document.getElementById('btnDisasters').classList.toggle('on', !!s.disastersOn);
+  }
+
+  document.getElementById('btnAuto').onclick = () => {
+    s.autoPlay = !s.autoPlay;
+    markModes();
+    toast(s.autoPlay
+      ? 'Auto-play on. The director will build and manage the city — your tools still work alongside it.'
+      : 'Auto-play off. The city is yours again.');
+    save();
+  };
+  document.getElementById('btnSandbox').onclick = () => {
+    s.sandbox = !s.sandbox;
+    markModes();
+    /* Costs are shown on every palette button, so the palette has to be
+       rebuilt for the prices — and the locks — to reflect the new mode. */
+    buildPalette(); renderHUD();
+    toast(s.sandbox
+      ? 'Sandbox on. Everything is free and nothing is locked.'
+      : 'Sandbox off. Costs and era locks are back.');
+    save();
+  };
+  document.getElementById('btnDisasters').onclick = () => {
+    s.disastersOn = !s.disastersOn;
+    markModes();
+    toast(s.disastersOn
+      ? 'Disasters armed. Nothing here can end the run — the worst case is ground to rebuild.'
+      : 'Disasters off.');
+    save();
+  };
+
+  /* ---------- log ---------- */
+
+  function renderLog() {
+    const box = document.getElementById('log');
+    if (!box) return;
+    if (!s.log || !s.log.length) {
+      box.className = 'empty';
+      box.textContent = 'Nothing has happened yet.';
+      return;
+    }
+    box.className = '';
+    box.innerHTML = s.log.slice(0, 8).map(e =>
+      `<p class="note"><b style="font-family:var(--mono)">Day ${e.day}</b> — ${e.msg}</p>`).join('');
+  }
+
   document.getElementById('btnNew').onclick = () => {
     if (!confirm('Start a new colony on fresh terrain? This clears the current city.')) return;
-    s = S.newGame();
+    /* The three mode switches are a statement about how the player wants to
+       play, not part of the city — carry them across a new map rather than
+       making them set them again. */
+    const modes = { sandbox: s.sandbox, disastersOn: s.disastersOn, autoPlay: s.autoPlay };
+    s = Object.assign(S.newGame(), modes);
     ui.selected = null; ui.levelTarget = null;
     centreOn(K.COLS / 2, K.ROWS / 2);
-    refreshNets(); renderTile(); renderHUD(); setHint(); save();
+    refreshNets(); buildPalette(); renderTile(); renderHUD(); renderLog(); markModes();
+    setHint(); save();
   };
-  document.getElementById('btnCentre').onclick = () => centreOn(K.COLS / 2, K.ROWS / 2);
+  /* Centres on the city rather than on the map. The two are only the same
+     thing on day one — a player settles wherever the terrain suited them, and
+     the AI director picks its own site, which on a 128-tile map can be a long
+     way from the middle. Centring on empty regolith and calling it "Centre"
+     is how you lose a city you just built. */
+  function cityCentre() {
+    let sx = 0, sy = 0, n = 0;
+    for (const t of s.map) {
+      if (!t.b && !t.zone) continue;
+      sx += t.x; sy += t.y; n++;
+    }
+    return n ? { x: sx / n, y: sy / n } : { x: K.COLS / 2, y: K.ROWS / 2 };
+  }
+  document.getElementById('btnCentre').onclick = () => {
+    const c = cityCentre();
+    centreOn(c.x, c.y);
+  };
 
   /* ---------- toast ---------- */
 
@@ -442,7 +636,9 @@
   /* ---------- loop ---------- */
 
   const DAY_MS = 1100;
-  let last = performance.now(), acc = 0, frames = 0;
+  const SAVE_EVERY_MS = 4000;
+  let last = performance.now(), acc = 0, lastSave = 0, drawFailed = false;
+  let lastLogLen = -1, lastEra = -1;
 
   function frame(now) {
     const dt = Math.min(0.25, (now - last) / 1000); last = now;
@@ -457,14 +653,37 @@
         acc -= DAY_MS / 1000;
         ticked++;
       }
-      if (ticked) { refreshNets(); renderHUD(); renderTile(); renderBudgetNumbers(); }
+      if (ticked) {
+        refreshNets(); renderHUD(); renderTile(); renderBudgetNumbers(); ui.dirty = true;
+        /* The log only redraws when something was actually written to it, and
+           the palette only rebuilds when the era moved — both are full DOM
+           rewrites and neither belongs on every tick. */
+        const n = s.log ? s.log.length : 0;
+        if (n !== lastLogLen) { lastLogLen = n; renderLog(); }
+        const era = E ? E.index(s) : 0;
+        if (era !== lastEra) { lastEra = era; buildPalette(); }
+        /* Trends is a full rebuild, so it only redraws while it is the pane
+           actually on screen. */
+        const trends = document.getElementById('pane-trends');
+        if (trends && trends.classList.contains('on')) buildTrends();
+      }
     }
-    R.draw(ctx, s, ui);
-    if (frames++ % 30 === 0) save();
+    /* Guarded for the same reason the tick is: an exception thrown out of a
+       single frame would otherwise stop requestAnimationFrame for good and
+       leave a black canvas with no way back short of a reload. */
+    try { R.draw(ctx, s, ui); }
+    catch (e) { if (!drawFailed) { drawFailed = true; console.error('draw failed', e); } }
+    /* A full save is well over a megabyte of JSON on a 128x128 map, so it is
+       throttled and only written when something actually changed. Saving on
+       a frame counter meant rewriting the whole world roughly twice a second
+       — including while paused, with nothing to save. */
+    if (ui.dirty && now - lastSave > SAVE_EVERY_MS) {
+      save(); ui.dirty = false; lastSave = now;
+    }
     requestAnimationFrame(frame);
   }
 
   refreshNets();
-  buildPalette(); setHint(); renderTile(); renderHUD();
+  buildPalette(); setHint(); renderTile(); renderHUD(); renderLog(); markModes();
   requestAnimationFrame(t => { last = t; requestAnimationFrame(frame); });
 })();
