@@ -115,6 +115,19 @@ const K = {
   DISASTER_COOLDOWN: 45,       // days of quiet after one fires
   DISASTER_GRACE: 20,          // no events at all before this day
 
+  /* The invasion deck rolls on its own dice, on its own toggle. A little
+     more often than the disasters, because half of it is harmless and the
+     whole point of it is to be seen. */
+  INVASION_BASE_CHANCE: 0.007,
+  INVASION_MAX_CHANCE: 0.028,
+  INVASION_COOLDOWN: 30,
+  /* Matched to the earliest card in the deck. Set below it the grace period
+     did nothing at all, because every card's own minDay was already later —
+     a limit that can never be the binding one is a comment pretending to be
+     a constant. */
+  INVASION_GRACE: 15,
+  SNATCH_DAYS: 60,             // how long a snatched district stays wrong
+
   /* ---- AI auto-play ----
      Block spacing for the director's lattice. Tube streets every third row
      put every tile within one of a tube, which is the adjacency the growth
@@ -127,6 +140,14 @@ const K = {
      up and held back the ground in between. */
   AI_CONDUIT_EVERY: 4,
   AI_RESERVE_FLOOR: 2500,  // never spend the treasury below this
+
+  /* ---- the General's offer ----
+     SimCity 2000 offered a military base at 60,000 people and sited it for
+     you. This city curve is nowhere near that scale — a large run here is a
+     few thousand — so the threshold is scaled to the game rather than copied
+     from it. Terrain still decides which KIND of base you get, as it did in
+     the original. */
+  MILITARY_OFFER_POP: 900,
   AI_POWER_MARGIN: 1.3,    // build generation until it clears load by this factor
   AI_AIR_MARGIN: 1.25      // and pressurisation until it clears population by this
 };
@@ -190,7 +211,33 @@ const ZONES = [
     high: { cost: 180, maxStage: 4, stages: [
       { jobs: 0, income: 0, upkeep: 0 }, { jobs: 13, income: 34, upkeep: 5 },
       { jobs: 28, income: 78, upkeep: 11 }, { jobs: 48, income: 138, upkeep: 19 },
-      { jobs: 74, income: 220, upkeep: 30 }] } }
+      { jobs: 74, income: 220, upkeep: 30 }] } },
+
+  /* ---- the two special districts ----
+
+     Both are DEMAND-FREE: they carry no RCI index and build out whenever
+     they are serviced. That is not a shortcut, it is the point. A military
+     base does not appear because consumers wanted one, and neither did
+     SimCity 2000's — the General offers it, you accept, and it gets built.
+     The Launch Complex is the same shape of thing: a strategic decision by
+     the city, not a market response.
+
+     They still use the density bands so the zoning UI, the growth model and
+     the era ceiling all apply unchanged; each simply offers one band. */
+
+  { id: 'military', name: 'Military', colour: '#8fa87c',
+    desc: 'A garrison the General asked for. Employs a standing complement and pays no local tax, and nobody wants to live next to it.',
+    demandFree: true, offered: true, dragsValue: 0.10,
+    low:  { cost: 240, maxStage: 3, stages: [
+      { jobs: 0, income: 0, upkeep: 0 }, { jobs: 22, income: 0, upkeep: 6 },
+      { jobs: 48, income: 0, upkeep: 14 }, { jobs: 85, income: 0, upkeep: 26 }] } },
+
+  { id: 'launch', name: 'Launch Complex', colour: '#ff9f6e',
+    desc: 'Pads, gantries and fuel farms. Pays a standing export income, and throws regolith every time something lifts off.',
+    demandFree: true, dragsValue: 0.06, dustPerStage: 0.05,
+    low:  { cost: 300, maxStage: 3, stages: [
+      { jobs: 0, income: 0, upkeep: 0 }, { jobs: 18, income: 95, upkeep: 9 },
+      { jobs: 40, income: 235, upkeep: 20 }, { jobs: 70, income: 430, upkeep: 34 }] } }
 ];
 
 /* Placed structures.
@@ -246,6 +293,42 @@ const BUILDINGS = [
   { id: 'megadome', name: 'Lava-Tube Megadome', cost: 42000, group: 'wonder', era: 2,
     once: true, needsSkylight: true, drawKw: 18, housing: 900,
     desc: 'A sealed city built down into an intact lava tube — the most valuable real estate on the Moon, and the only structure that can use a skylight. Must be built beside one. Houses more people than any amount of surface zoning.' },
+  /* ---- the rest of the wonders ----
+
+     Every one is gated on terrain the player either found or sculpted, so a
+     wonder is a reward for reading the map rather than a thing you buy when
+     the number gets big enough. They reuse the existing systems: `service`
+     and `radius` feed the same coverage fields the civic buildings do, `kw`
+     feeds generation, `housing` and `exportIncome` feed the tally. */
+
+  { id: 'elevator', name: 'Space Elevator', cost: 120000, group: 'wonder', era: 3,
+    once: true, needsHeight: 11, drawKw: 45, exportIncome: 2400,
+    service: 'amenity', radius: 16,
+    desc: 'A tether run out to the L1 balance point. The Moon is one of the few places a space elevator is actually buildable with materials that exist — low gravity and no weather. Must stand on high ground, at least 11 levels up.' },
+
+  { id: 'eiffel', name: 'Lunar Eiffel', cost: 46000, group: 'wonder', era: 2,
+    once: true, needsLevel: 1, drawKw: 8,
+    service: 'amenity', radius: 20,
+    desc: 'A wrought lattice tower, built absurdly tall because at one sixth of a gravity it can be. Pure civic pride, and the land around it knows it. Needs level ground.' },
+
+  { id: 'telescope', name: 'Far-Side Radio Telescope', cost: 72000, group: 'wonder', era: 2,
+    once: true, needsShadow: true, drawKw: 18, researchPerDay: 34,
+    service: 'research', radius: 12,
+    desc: 'A wire mesh strung across a crater that shields it from Earth\'s radio noise — the real Lunar Crater Radio Telescope proposal. Must sit on a permanently shadowed crater floor.' },
+
+  { id: 'heliostat', name: 'Heliostat Crown', cost: 88000, group: 'wonder', era: 2,
+    once: true, needsPeakSun: true, kw: 110, drawKw: 6,
+    desc: 'A ring of steerable mirrors on a peak of eternal light, throwing sunlight down onto the floor below. Must be built where the sun genuinely never sets.' },
+
+  { id: 'arena', name: 'Olympus Arena', cost: 54000, group: 'wonder', era: 3,
+    once: true, needsOpen: 2, drawKw: 14,
+    service: 'amenity', radius: 22,
+    desc: 'Flying sports, only possible at one sixth of a gravity. Needs a clear, level five-by-five site — nobody wants the upper tiers looking at a crater wall.' },
+
+  { id: 'arcology', name: 'Launch Arcology', cost: 210000, group: 'wonder', era: 3,
+    once: true, needsLaunchPad: true, drawKw: 60, housing: 2600, departsEvery: 220,
+    desc: 'A self-contained tower of tens of thousands, built to leave. SimCity 2000\'s Launch Arcologies eventually lifted off with their residents aboard; this one dispatches a colony ship every so often and keeps filling back up. Must be built beside a launch complex.' },
+
   { id: 'massdriver', name: 'Mass Driver', cost: 68000, group: 'wonder', era: 3,
     once: true, needsRidge: true, drawKw: 30, exportIncome: 640,
     desc: 'An electromagnetic launch track flinging refined cargo to Earth orbit without rockets. Needs a long, high, level run to sit on, and pays a standing export income once it does.' }
@@ -315,6 +398,41 @@ const DISASTERS = [
     desc: 'A meteoroid gets through. Everything inside the crater is gone and the ground itself is rewritten — the only event that changes the terrain.' }
 ];
 
+/* The Invasion deck — a second, entirely separate roster from DISASTERS.
+
+   Kept apart on purpose. The disaster deck is grounded and is what the CoSE
+   Academy module leans on; this one is a 1950s B-movie and has its own
+   toggle, so a player choosing one is never forced into the other.
+
+   Every character here is a public-domain pulp archetype — flying saucers,
+   tractor beams, burrowing monsters, body snatchers — drawn originally. No
+   named or licensed characters: the chrome figure on a board is an archetype
+   older and broader than any one publisher's version of it, so this one is
+   the Chrome Herald, with its own design and its own joke.
+
+   The joke being that it is filed under invasions and is entirely good news. */
+const INVASIONS = [
+  { id: 'circles', name: 'Crop Circles', glyph: '◎', weight: 1.6, minDay: 15,
+    harmless: true,
+    desc: 'Geometric figures appear pressed into the regolith overnight. Nobody saw anything. Nothing is damaged and no one can explain them.' },
+
+  { id: 'ufo', name: 'UFO Raid', glyph: '🛸', weight: 1.3, minDay: 40,
+    desc: 'A saucer crosses the city at low altitude with a cutting beam lit, and burns a line straight through whatever was under it.' },
+
+  { id: 'abduction', name: 'Abduction Beam', glyph: '🔦', weight: 1.1, minDay: 35,
+    desc: 'A tractor beam settles over one structure and lifts it clean off the Moon, leaving a suspiciously tidy circle of swept ground.' },
+
+  { id: 'herald', name: 'The Chrome Herald', glyph: '✧', weight: 0.9, minDay: 30,
+    boon: true,
+    desc: 'A silver figure on a board passes overhead trailing light, and every speck of regolith dust in the district goes with it. The arrays have never been cleaner. Filed here for want of anywhere better to put it.' },
+
+  { id: 'worm', name: 'Regolith Worm', glyph: '🪱', weight: 0.9, minDay: 55,
+    desc: 'Something enormous surfaces, crosses the city and goes back under, leaving a trench where it went.' },
+
+  { id: 'snatchers', name: 'Body Snatchers', glyph: '🌱', weight: 0.8, minDay: 45,
+    desc: 'The residents of a district are all subtly, politely wrong. Land value collapses. It wears off, mostly.' }
+];
+
 /* City departments. Each dial runs 0..100% and every one of them has a real,
    present-tense effect — there are no placeholder sliders here. Funding a
    department costs credits every day in proportion to how much of that
@@ -370,6 +488,15 @@ const TOOLS = [
 
   { id: 'megadome', name: 'Lava-Tube Megadome', glyph: '◈', key: 'J', group: 'wonder', build: 'megadome' },
   { id: 'massdriver', name: 'Mass Driver', glyph: '⇗', key: 'K', group: 'wonder', build: 'massdriver' },
+  { id: 'elevator',  name: 'Space Elevator',  glyph: '↥', key: 'L', group: 'wonder', build: 'elevator' },
+  { id: 'eiffel',    name: 'Lunar Eiffel',    glyph: '⩕', key: 'P', group: 'wonder', build: 'eiffel' },
+  { id: 'telescope', name: 'Radio Telescope', glyph: '◠', key: 'H', group: 'wonder', build: 'telescope' },
+  { id: 'heliostat', name: 'Heliostat Crown', glyph: '❈', key: 'I', group: 'wonder', build: 'heliostat' },
+  /* Digits, because every letter on the keyboard is already a tool — the
+     first TOOLS entry matching a key wins, so a duplicate would silently
+     shadow whichever tool was declared earlier. */
+  { id: 'arena',     name: 'Olympus Arena',   glyph: '◎', key: '6', group: 'wonder', build: 'arena' },
+  { id: 'arcology',  name: 'Launch Arcology', glyph: '⬢', key: '7', group: 'wonder', build: 'arcology' },
 
   { id: 'hab_low',   name: 'Habitation · Low',  glyph: '▨', key: 'Q', group: 'zone', zone: 'hab',      density: 'low',  drag: 'rect' },
   { id: 'hab_high',  name: 'Habitation · High', glyph: '▧', key: 'W', group: 'zone', zone: 'hab',      density: 'high', drag: 'rect' },
@@ -378,8 +505,11 @@ const TOOLS = [
   { id: 'ind_low',   name: 'Industry · Low',    glyph: '▨', key: 'D', group: 'zone', zone: 'industry', density: 'low',  drag: 'rect' },
   { id: 'ind_high',  name: 'Industry · High',   glyph: '▧', key: 'G', group: 'zone', zone: 'industry', density: 'high', drag: 'rect' },
 
+  { id: 'military', name: 'Military Base',   glyph: '★', key: 'Y', group: 'district', zone: 'military', density: 'low', drag: 'rect' },
+  { id: 'launch',   name: 'Launch Complex', glyph: '▲', key: 'U', group: 'district', zone: 'launch',   density: 'low', drag: 'rect' },
+
   { id: 'bulldoze', name: 'Bulldoze', glyph: '💥', key: 'X', group: 'terrain',
     hint: 'Remove whatever is on a tile — zoning, network or structure.' }
 ];
 
-window.LM_DATA = { K, TERRAIN, DEPOSITS, ZONES, ERAS, BUILDINGS, DEPARTMENTS, SERVICES, TOOLS, DISASTERS };
+window.LM_DATA = { K, TERRAIN, DEPOSITS, ZONES, ERAS, BUILDINGS, DEPARTMENTS, SERVICES, TOOLS, DISASTERS, INVASIONS };

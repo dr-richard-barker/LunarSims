@@ -54,14 +54,18 @@ td.mark{width:34px;text-align:center}
 <script src="js/eras.js"></script>
 <script src="js/zones.js"></script>
 <script src="js/disasters.js"></script>
+<script src="js/invasion.js"></script>
 <script src="js/sim.js"></script>
 <script src="js/autopilot.js"></script>
+<script src="js/agents.js"></script>
+<script src="js/fx.js"></script>
 <script>
 (function () {
   const T = window.LM_TERRAIN, G = window.LM_GRID, Z = window.LM_ZONES, S = window.LM_SIM;
   const B = window.LM_BUDGET, SV = window.LM_SERVICES, E = window.LM_ERAS;
-  const AI = window.LM_AUTO, DIS = window.LM_DISASTERS;
-  const K = window.LM_DATA.K;
+  const AI = window.LM_AUTO, DIS = window.LM_DISASTERS, AG = window.LM_AGENTS;
+  const INV = window.LM_INVASION, FX = window.LM_FX;
+  const K = window.LM_DATA.K, LM_DATA = window.LM_DATA;
 
   /* A fixed-sequence stand-in for Math.random, so every scenario that rolls
      dice produces the same city twice. */
@@ -148,6 +152,30 @@ td.mark{width:34px;text-align:center}
     S.paintZone(s, 65, 62, 3, 1, 'trade', 'high');
     return s;
   }
+
+  /* One fully serviced tile at (x,y) with all three networks reaching it and
+     room around it, for tests about a single district rather than about a
+     whole city. mixedDistrict() has every serviced tile already spoken for,
+     which is fine for growth tests and useless for these. */
+  function servicedRow(x0, y, n) {
+    const s = city();
+    for (let i = 0; i < n; i++) {
+      S.place(s, T.tileAt(s, x0 + i, y - 1), 'tube');      // transit above
+      S.place(s, T.tileAt(s, x0 + i, y + 1), 'conduit');   // power below
+      S.place(s, T.tileAt(s, x0 + i, y), 'main');          // atmosphere underneath
+    }
+    S.place(s, T.tileAt(s, x0 - 1, y), 'o2');              // plant on the main
+    S.place(s, T.tileAt(s, x0 + n, y), 'o2');
+    /* Always at least four arrays: two oxygen plants alone draw 10 kW and a
+       single array makes 7, so a one-tile bed would sit in permanent brownout
+       and nothing would ever develop on it. */
+    for (let i = 0; i < Math.max(n, 4); i++) {
+      const g = T.tileAt(s, x0 + i, y + 2);
+      g.sun = 1; S.place(s, g, 'solar');                   // feeding the conduits
+    }
+    return s;
+  }
+  const servicedSpot = (x, y) => servicedRow(x, y, 1);
 
   /* The tallest stage anywhere in a district — the era ceiling is a cap on
      the whole city, so read the city's best rather than one arbitrary tile. */
@@ -1337,6 +1365,689 @@ td.mark{width:34px;text-align:center}
           ['and it keeps growing through it', s.pop > popBefore, true],
           ['the director rebuilds past where it was', peak >= devBefore, true],
           ['while staying solvent', s.credits, '>=0']
+        ];
+      } },
+
+    /* ---------- v2 phase 1: the human layer ---------- */
+
+    { name: 'Traffic finds the streets, and the streets only',
+      why: 'the whole point of a cosmetic layer is that it reads as the city working — a bus cutting across open regolith would read as a bug, not as life',
+      run() {
+        const s = S.newGame(555);
+        s.autoPlay = true;
+        for (let i = 0; i < 260; i++) S.tick(s);
+        AG.reset(); AG.invalidate();
+        s.pop = Math.max(s.pop, 4000);          // enough to want every kind
+        for (let i = 0; i < 60; i++) AG.update(s, 1 / 30);
+
+        const list = AG.all();
+        const kinds = new Set(list.map(a => a.kind));
+        const onTube = a => {
+          const t = T.tileAt(s, Math.round(a.x), Math.round(a.y));
+          return AG.isTube(t);
+        };
+        const walkers = list.filter(a => a.kind === 'ped');
+        const road = list.filter(a => a.kind === 'car' || a.kind === 'bus');
+        /* Trains are held to the looser rule on purpose: they run avenues,
+           and an avenue spans the conduit pylons standing in it. */
+        const trains = list.filter(a => a.kind === 'train');
+        const onCorridor = a =>
+          AG.isCorridorCell(T.tileAt(s, Math.round(a.x), Math.round(a.y)));
+        return [
+          ['it spawns something', list.length, '>0'],
+          ['pedestrians and vehicles both', kinds.has('ped') && kinds.has('car'), true],
+          ['every car and bus is on a transit tube', road.every(onTube), true],
+          ['every train is on a street of some kind', trains.every(onCorridor), true],
+          ['every pedestrian is somewhere a person could be',
+            walkers.every(a => AG.isWalkable(T.tileAt(s, Math.round(a.x), Math.round(a.y)))), true],
+          ['and nothing has wandered off the map',
+            list.every(a => a.x >= 0 && a.y >= 0 && a.x < K.COLS && a.y < K.ROWS), true]
+        ];
+      } },
+
+    { name: 'Traffic actually moves, and keeps moving',
+      why: 'an agent that stops on a dead-end node or pins itself at p=1 is invisible as a bug — it just looks like a parked car forever',
+      run() {
+        const s = S.newGame(555);
+        s.autoPlay = true;
+        for (let i = 0; i < 260; i++) S.tick(s);
+        AG.reset(); AG.invalidate();
+        s.pop = Math.max(s.pop, 4000);
+        for (let i = 0; i < 30; i++) AG.update(s, 1 / 30);
+
+        const before = AG.all().map(a => ({ id: a, x: a.x, y: a.y }));
+        for (let i = 0; i < 90; i++) AG.update(s, 1 / 30);   // three more seconds
+        const movedFrac = before.filter(b => b.id.x !== b.x || b.id.y !== b.y).length /
+                          Math.max(1, before.length);
+        return [
+          ['there were agents to watch', before.length, '>=10'],
+          ['essentially all of them moved over three seconds', movedFrac, '>=0.95'],
+          ['no agent ended up at a broken position',
+            AG.all().every(a => Number.isFinite(a.x) && Number.isFinite(a.y)), true]
+        ];
+      } },
+
+    { name: 'The crowd scales with the city, both ways',
+      why: 'spawn counts that only ever grow would leave a bombed-out district as busy as it was before, and an uncapped crowd would follow a metropolis to ten thousand sprites',
+      run() {
+        const s = S.newGame(555);
+        s.autoPlay = true;
+        for (let i = 0; i < 300; i++) S.tick(s);
+        AG.reset(); AG.invalidate();
+
+        const at = pop => {
+          s.pop = pop;
+          for (let i = 0; i < 40; i++) AG.update(s, 1 / 30);
+          return AG.all().length;
+        };
+        const small = at(200);
+        const big = at(9000);
+        const shrunk = at(200);
+        const huge = at(500000);
+        return [
+          ['a small city has a small crowd', small, '>0'],
+          ['a big one has a bigger crowd', big > small, true],
+          ['the crowd shrinks again when the city does', shrunk < big, true],
+          ['and it is capped rather than unbounded', huge, '<=160']
+        ];
+      } },
+
+    { name: 'Trains only run corridors long enough to be worth one',
+      why: 'a train retargeting at every junction like a car would just read as a very long car — it needs a straight run, and there should be none to find on an empty map',
+      run() {
+        const bare = S.newGame(555);
+        const none = AG.corridors(bare).length;
+
+        const s = city();
+        for (let x = 50; x < 50 + AG.MIN_CORRIDOR; x++) S.place(s, T.tileAt(s, x, 70), 'tube');
+        const justShort = AG.corridors(s).filter(c => c.ay === 70).length;
+        S.place(s, T.tileAt(s, 50 + AG.MIN_CORRIDOR, 70), 'tube');
+        const runs = AG.corridors(s).filter(c => c.ay === 70);
+
+        const stub = city();
+        for (let x = 55; x < 55 + AG.MIN_CORRIDOR - 3; x++) S.place(stub, T.tileAt(stub, x, 60), 'tube');
+        return [
+          ['an unbuilt map has no corridors', none, 0],
+          ['a run of exactly the minimum length counts', justShort, 1],
+          ['extending it keeps it as one corridor, not two', runs.length, 1],
+          ['and the corridor spans the whole run', runs[0].len, AG.MIN_CORRIDOR],
+          ['a run too short for a train is not offered',
+            AG.corridors(stub).filter(c => c.ay === 60).length, 0]
+        ];
+      } },
+
+    { name: 'An avenue crossed by power conduits is still one avenue',
+      why: 'the director gives the conduit column the tile at every street crossing, which it must — so counting only tubes found a longest run of three tiles in a fully built city and no train could ever exist',
+      run() {
+        const s = city();
+        /* a long street with a conduit pylon standing in it every fourth tile,
+           exactly the lattice the AI director builds */
+        for (let x = 40; x < 60; x++) {
+          const t = T.tileAt(s, x, 66);
+          S.place(s, t, x % 4 === 0 ? 'conduit' : 'tube');
+        }
+        const runs = AG.corridors(s).filter(c => c.ay === 66);
+
+        /* but a bare line of pylons across open ground is not an avenue */
+        const pylons = city();
+        for (let x = 40; x < 60; x++) S.place(pylons, T.tileAt(pylons, x, 70), 'conduit');
+
+        /* and a full AI city must actually produce some */
+        const built = S.newGame(555);
+        built.autoPlay = true;
+        for (let i = 0; i < 300; i++) S.tick(built);
+
+        return [
+          ['the crossed street is one corridor', runs.length, 1],
+          ['spanning its whole length', runs[0].len, 19],
+          ['a line of bare conduits is not a corridor',
+            AG.corridors(pylons).filter(c => c.ay === 70).length, 0],
+          ['and a city the director built has avenues to run trains on',
+            AG.corridors(built).length, '>0']
+        ];
+      } },
+
+    { name: 'The traffic layer never touches the simulation',
+      why: 'this is the one-way dependency the whole testing discipline rests on — the day a cosmetic layer writes to the city is the day the harness stops proving anything',
+      run() {
+        const s = S.newGame(555);
+        s.autoPlay = true;
+        for (let i = 0; i < 220; i++) S.tick(s);
+        AG.reset(); AG.invalidate();
+        s.pop = 4000;
+
+        const snapshot = () => JSON.stringify({
+          day: s.day, credits: s.credits, pop: s.pop, research: s.research,
+          zoned: S.zonedCount(s), developed: S.developedCount(s),
+          built: s.map.filter(t => t.b).length,
+          stages: s.map.reduce((a, t) => a + (t.zone ? t.zone.stage : 0), 0)
+        });
+        const before = snapshot();
+        for (let i = 0; i < 200; i++) AG.update(s, 1 / 30);
+        return [
+          ['running the traffic layer changes nothing in the city', snapshot(), before],
+          ['and no agent state leaked onto a tile',
+            s.map.every(t => t.agent === undefined && t.kind === undefined), true]
+        ];
+      } },
+
+    /* ---------- v2 phase 3: the special districts ---------- */
+
+    { name: 'The General calls once, at the threshold, and never again',
+      why: 'an offer that re-fired every day would be nagging, and one that fired before the city could use it would be noise',
+      run() {
+        const s = S.newGame(555);
+        s.pop = K.MILITARY_OFFER_POP - 1;
+        const early = S.offerMilitary(s);
+        s.pop = K.MILITARY_OFFER_POP;
+        const fired = S.offerMilitary(s);
+        const again = S.offerMilitary(s);
+        S.declineMilitary(s);
+        const afterDecline = S.offerMilitary(s);
+        return [
+          ['nothing is offered below the threshold', early, false],
+          ['the offer fires on reaching it', fired, true],
+          ['it names a base kind', !!S.BASE_KINDS[s.military.kind], true],
+          ['it does not fire twice', again, false],
+          ['and a declined offer does not come back', afterDecline, false],
+          ['declining is remembered', s.military.state, 'declined']
+        ];
+      } },
+
+    { name: 'The terrain decides which kind of base the General offers',
+      why: 'this is the part of SimCity 2000 worth keeping — the original picked Army, Air Force, Navy or silos from the ground, and picking at random would throw that away',
+      run() {
+        const mk = shape => {
+          const s = S.newGame(555);
+          /* a small city so cityBounds has something to read */
+          for (let y = 60; y <= 66; y++) for (let x = 60; x <= 66; x++) {
+            const t = T.tileAt(s, x, y);
+            t.zone = { kind: 'hab', density: 'low', stage: 1, growth: 0, unserved: 0, decay: 0, served: true, value: 0.5 };
+          }
+          for (let y = 54; y <= 72; y++) for (let x = 54; x <= 72; x++) {
+            const t = T.tileAt(s, x, y);
+            if (!t) continue;
+            shape(t);
+          }
+          return S.baseKindFor(s);
+        };
+        const flat = mk(t => { t.t = 'flat'; t.sun = 0.9; });
+        const broken = mk(t => { t.t = 'rough'; t.sun = 0.9; });
+        const shadowed = mk(t => { t.t = 'flat'; t.sun = 0.05; });
+        return [
+          ['flat open ground gets a landing field', flat, 'landing'],
+          ['broken ground gets a garrison', broken, 'garrison'],
+          ['deep shadowed craters get silos', shadowed, 'silos'],
+          ['every answer is a real base kind',
+            [flat, broken, shadowed].every(k => !!S.BASE_KINDS[k]), true]
+        ];
+      } },
+
+    { name: 'The military brush is refused until the offer is accepted',
+      why: 'a lock that only greys out a palette button but still lets the paint through would be no lock at all — the same rule the era gates already follow',
+      run() {
+        const s = city();
+        const before = S.paintZone(s, 60, 60, 2, 2, 'military', 'low');
+        const reason = S.canZoneKind(s, 'military');
+        S.offerMilitary({ ...s, pop: 99999 });          // does not touch s
+        s.pop = 99999; S.offerMilitary(s); S.acceptMilitary(s);
+        const after = S.paintZone(s, 60, 60, 2, 2, 'military', 'low');
+
+        const sand = city(); sand.sandbox = true;
+        const inSandbox = S.paintZone(sand, 60, 60, 1, 1, 'military', 'low');
+        return [
+          ['painting is refused before the offer', before, 0],
+          ['and the refusal says why', /authorised/i.test(reason || ''), true],
+          ['accepting unlocks the brush', after, 4],
+          ['and sandbox lifts the gate outright', inSandbox, 1]
+        ];
+      } },
+
+    { name: 'A special district builds out on service alone, with no demand index',
+      why: 'a garrison does not appear because consumers wanted one, and it must not close down because the shops are overbuilt either — that is the whole reason these are demand-free',
+      run() {
+        const s = servicedSpot(62, 62);
+        grantEra(s);
+        s.pop = 99999; S.offerMilitary(s); S.acceptMilitary(s);
+        const painted = S.paintZone(s, 62, 62, 1, 1, 'military', 'low');
+        for (let i = 0; i < 500; i++) S.tick(s);
+        const base = T.tileAt(s, 62, 62).zone;
+
+        /* now crush every demand index and confirm it holds */
+        const held = base.stage;
+        s.taxRate = K.MAX_TAX;
+        for (let i = 0; i < 300; i++) S.tick(s);
+        return [
+          ['the base was actually painted', painted, 1],
+          ['it developed without any demand to answer', base.stage, '>=1'],
+          ['reaching its own ceiling', base.stage, Z.zoneById('military').low.maxStage],
+          ['and it does not decay when demand collapses',
+            T.tileAt(s, 62, 62).zone.stage >= held, true]
+        ];
+      } },
+
+    { name: 'The districts pay their way in the right currencies',
+      why: 'a garrison should employ people and pay no tax, a launch complex should export — if both just made money they would be one district with two skins',
+      run() {
+        const s = city();
+        grantEra(s);
+        const base = Z.tally(s);
+        for (let i = 0; i < 3; i++) develop(s, 60 + i, 60, 'military', 'low', 3);
+        const withMil = Z.tally(s);
+        for (let i = 0; i < 3; i++) develop(s, 60 + i, 64, 'launch', 'low', 3);
+        const withBoth = Z.tally(s);
+        return [
+          ['a garrison employs people', withMil.jobs > base.jobs, true],
+          ['but earns the treasury nothing directly', withMil.income, base.income],
+          ['a launch complex earns real export income', withBoth.income > withMil.income, true],
+          ['neither counts as trade or industry for demand',
+            withBoth.tradeJobs === base.tradeJobs && withBoth.industryJobs === base.industryJobs, true],
+          ['both show up as special employment', withBoth.specialJobs, '>0']
+        ];
+      } },
+
+    { name: 'Both districts drag the land value around them, and launches throw dust',
+      why: 'if siting one cost nothing they would be free money stamped on the cheapest ground — the whole point is that where you put them is a decision',
+      run() {
+        /* Housing at 60..62 either way; in one city the rest of the same
+           serviced row is a launch complex, in the other it is more housing.
+           Same servicing, same ground — the only difference is the pad. */
+        const build = withPad => {
+          const s = servicedRow(60, 62, 8);
+          grantEra(s);
+          S.paintZone(s, 60, 62, 3, 1, 'hab', 'low');
+          if (withPad) S.paintZone(s, 64, 62, 3, 1, 'launch', 'low');
+          for (let i = 0; i < 260; i++) S.tick(s);
+          return s;
+        };
+        const clean = build(false), nasty = build(true);
+
+        const val = (s, x) => (T.tileAt(s, x, 62).zone || {}).value || 0;
+        return [
+          ['the quiet city holds its land value', val(clean, 62), '>0'],
+          ['siting a launch complex two tiles away drags it down',
+            val(nasty, 62) < val(clean, 62), true],
+          ['the pad fouls its own ground with regolith',
+            T.tileAt(nasty, 65, 62).dust || 0, '>0.1'],
+          ['and the dust spreads to its neighbours rather than staying put',
+            T.tileAt(nasty, 65, 61).dust || 0, '>0']
+        ];
+      } },
+
+    { name: 'The director accepts the offer and builds both districts',
+      why: 'auto-play has to keep working across every feature added to the game, and a director that ignored half the roster would be advertising a smaller game than the one that shipped',
+      run() {
+        const s = S.newGame(555);
+        s.autoPlay = true;
+        for (let i = 0; i < 700; i++) S.tick(s);
+        const count = kind => s.map.filter(t => t.zone && t.zone.kind === kind).length;
+        return [
+          ['it took the General up on the offer', s.military && s.military.state, 'accepted'],
+          ['it sited a base', count('military'), '>0'],
+          ['it built a launch complex', count('launch'), '>0'],
+          ['and the city still works', s.pop, '>=500'],
+          ['and is still solvent', s.credits, '>=0']
+        ];
+      } },
+
+    /* ---------- v2 phase 4: the wonders ---------- */
+
+    { name: 'Every wonder is gated on ground you had to find or make',
+      why: 'a wonder you can drop anywhere once the number is big enough is just an expensive building — the gate is what makes it a reward for reading the map',
+      run() {
+        const s = city();
+        grantEra(s); s.credits = 1e9;
+        /* the middle of the cleared test area: flat, open, mid-height, sunlit
+           and nowhere near a skylight, ridge, crater or launch pad */
+        const plain = T.tileAt(s, 62, 70);
+        const wonders = LM_DATA.BUILDINGS.filter(b => b.group === 'wonder');
+        const refusedOnPlainGround = wonders
+          .filter(b => S.canPlace(s, plain, b.id) !== null)
+          .map(b => b.id);
+        return [
+          ['there are eight wonders in the roster', wonders.length, 8],
+          ['every one of them carries a terrain requirement',
+            wonders.every(b => b.needsSkylight || b.needsRidge || b.needsHeight ||
+                               b.needsLevel || b.needsOpen || b.needsShadow ||
+                               b.needsPeakSun || b.needsLaunchPad), true],
+          ['and all but the level-ground ones are refused on plain flat ground',
+            refusedOnPlainGround.length, '>=6'],
+          ['each refusal explains what it wants',
+            wonders.every(b => {
+              const e = S.canPlace(s, plain, b.id);
+              return e === null || e.length > 20;
+            }), true]
+        ];
+      } },
+
+    { name: 'The terrain gates accept exactly the ground they describe',
+      why: 'a gate that refuses everything is the same bug as a gate that allows everything, and neither shows up until someone plays for an hour looking for a valid site',
+      run() {
+        const mk = () => { const s = city(); grantEra(s); s.credits = 1e9; return s; };
+
+        /* space elevator: high ground */
+        const a = mk();
+        const lowT = T.tileAt(a, 62, 70); lowT.h = 3;
+        const noHigh = S.canPlace(a, lowT, 'elevator');
+        for (let y = 66; y <= 74; y++) for (let x = 58; x <= 66; x++) T.tileAt(a, x, y).h = 12;
+        const yesHigh = S.canPlace(a, T.tileAt(a, 62, 70), 'elevator');
+
+        /* telescope: a genuinely shadowed crater floor, rim above it */
+        const b = mk();
+        for (let y = 64; y <= 76; y++) for (let x = 56; x <= 68; x++) {
+          const t = T.tileAt(b, x, y);
+          const d = Math.max(Math.abs(x - 62), Math.abs(y - 70));
+          t.h = d >= 4 ? 9 : 2; t.sun = d >= 4 ? 0.9 : 0.05;
+        }
+        const yesCrater = S.canPlace(b, T.tileAt(b, 62, 70), 'telescope');
+        const noRim = S.canPlace(b, T.tileAt(b, 57, 70), 'telescope');
+
+        /* heliostat: a peak of eternal light */
+        const c = mk();
+        const peak = T.tileAt(c, 62, 70);
+        const noDim = (peak.h = 10, peak.sun = 0.4, S.canPlace(c, peak, 'heliostat'));
+        peak.sun = 0.95;
+        const yesPeak = S.canPlace(c, peak, 'heliostat');
+
+        /* arcology: beside a working launch complex */
+        const d = mk();
+        const beside = T.tileAt(d, 62, 70);
+        const noPad = S.canPlace(d, beside, 'arcology');
+        develop(d, 63, 70, 'launch', 'low', 2);
+        const yesPad = S.canPlace(d, beside, 'arcology');
+
+        return [
+          ['an elevator is refused on low ground', noHigh !== null, true],
+          ['and allowed once the ground is high enough', yesHigh, null],
+          ['a telescope is allowed on a shadowed crater floor', yesCrater, null],
+          ['but refused up on the sunlit rim', noRim !== null, true],
+          ['a heliostat is refused where the sun does not stay', noDim !== null, true],
+          ['and allowed on a peak of eternal light', yesPeak, null],
+          ['an arcology is refused with no pad beside it', noPad !== null, true],
+          ['and allowed next to a working launch complex', yesPad, null]
+        ];
+      } },
+
+    { name: 'Wonders pay out in the currency they promise',
+      why: 'six wonders that all just made money would be one wonder with six skins — each has to move a different number, and the data has to drive it rather than a list of names in the tally',
+      run() {
+        const put = (id, setup) => {
+          const s = city(); grantEra(s); s.credits = 1e9;
+          const t = T.tileAt(s, 62, 70);
+          if (setup) setup(s, t);
+          const err = S.place(s, t, id);
+          return { s, t, err };
+        };
+        const base = Z.tally(city());
+        const basePower = Z.power(city()).gen;
+
+        const elev = put('elevator', (s) => {
+          for (let y = 66; y <= 74; y++) for (let x = 58; x <= 66; x++) T.tileAt(s, x, y).h = 12;
+        });
+        const heli = put('heliostat', (s, t) => { t.h = 10; t.sun = 0.95; });
+        const arc = put('arcology', (s) => develop(s, 63, 70, 'launch', 'low', 2));
+
+        /* the telescope's research is added by the tick, not by the tally */
+        const tel = put('telescope', (s) => {
+          for (let y = 64; y <= 76; y++) for (let x = 56; x <= 68; x++) {
+            const q = T.tileAt(s, x, y);
+            const d = Math.max(Math.abs(x - 62), Math.abs(y - 70));
+            q.h = d >= 4 ? 9 : 2; q.sun = d >= 4 ? 0.9 : 0.05;
+          }
+        });
+        const sci0 = tel.s.research;
+        for (let i = 0; i < 10; i++) S.tick(tel.s);
+
+        return [
+          ['all four were actually placed',
+            [elev.err, heli.err, arc.err, tel.err].every(e => e === null), true],
+          ['the space elevator pays a large export income',
+            Z.tally(elev.s).income - base.income, '>=2400'],
+          ['the heliostat crown generates real power',
+            Z.power(heli.s).gen - basePower, '>=110'],
+          ['the arcology houses tens of thousands',
+            Z.tally(arc.s).housingCap - base.housingCap, '>=2600'],
+          ['the telescope does research on an empty crater floor',
+            tel.s.research - sci0, '>=300'],
+          ['and every one of them draws power',
+            [elev, heli, arc, tel].every(o => Z.power(o.s).o2Draw > 0), true]
+        ];
+      } },
+
+    { name: 'Wonders feed the same coverage fields the civic buildings do',
+      why: 'the amenity wonders are supposed to lift the neighbourhood — if they did not touch the coverage field they would be expensive scenery with a nice description',
+      run() {
+        const s = city(); grantEra(s); s.credits = 1e9;
+        flatten(s, 62, 70, 3, 5);            // the tower wants level ground
+        const eff = B.effects(s);
+        const before = SV.coverage(s, eff).amenity[G.idx(62, 70)];
+        const err = S.place(s, T.tileAt(s, 62, 70), 'eiffel');
+        if (err) return [['the tower could not be placed at all', err, null]];
+        const after = SV.coverage(s, eff).amenity[G.idx(62, 70)];
+        const faraway = SV.coverage(s, eff).amenity[G.idx(62, 70 + 25)];
+        return [
+          ['the site had no amenity cover to begin with', before, 0],
+          ['the tower blankets its own ground', after, '>=0.9'],
+          ['the effect reaches a long way', SV.coverage(s, eff).amenity[G.idx(62, 82)], '>0'],
+          ['but not across the whole map', faraway, 0]
+        ];
+      } },
+
+    { name: 'The arcology dispatches colony ships and keeps its residents',
+      why: 'SimCity 2000 launched its arcologies away with everyone aboard, which in a game with no fail state would be the nearest thing to one — the homage has to land without deleting the player\'s city',
+      run() {
+        const s = city(); grantEra(s); s.credits = 1e9;
+        develop(s, 63, 70, 'launch', 'low', 2);
+        S.place(s, T.tileAt(s, 62, 70), 'arcology');
+        const cap0 = Z.tally(s).housingCap;
+        const B2 = S.buildById('arcology');
+        for (let i = 0; i < B2.departsEvery * 2 + 3; i++) S.tick(s);
+        return [
+          ['ships have gone out', s.departed, '>0'],
+          ['more than one of them', s.departed, '>=' + (B2.housing * 2)],
+          ['each departure is logged',
+            s.log.filter(e => /colony ship/i.test(e.msg)).length, '>=2'],
+          ['and the arcology still houses its people afterwards',
+            Z.tally(s).housingCap, cap0]
+        ];
+      } },
+
+    /* ---------- v2 phase 5: the invasion deck ---------- */
+
+    { name: 'The invasion deck is a separate opt-in from the disasters',
+      why: 'the grounded deck is what the teaching module leans on — a player who wants flying saucers must not be forced to take them with their electrostatic dust transport, or vice versa',
+      run() {
+        /* needs something on the map: both decks aim at the city, and an
+           empty world has no bounds to aim at */
+        const s = city();
+        develop(s, 62, 62, 'hab', 'high', 3);
+        s.day = 500;
+        const noneByDefault = INV.maybeFire(s, () => 0);
+        s.disastersOn = true;
+        const stillNone = INV.maybeFire(s, () => 0);
+        s.disastersOn = false; s.invasionOn = true;
+        const fires = INV.maybeFire(s, () => 0);
+        /* and the other direction */
+        const d = city(); develop(d, 62, 62, 'hab', 'high', 3);
+        d.day = 500; d.invasionOn = true;
+        const noDisaster = DIS.maybeFire(d, () => 0);
+        return [
+          ['invasion is off in a new city', S.newGame(1).invasionOn, false],
+          ['nothing fires with both toggles off', noneByDefault, null],
+          ['arming disasters does not arm the invasion deck', stillNone, null],
+          ['arming the invasion deck does', fires !== null, true],
+          ['and it does not arm the disasters either', noDisaster, null],
+          ['the two decks are genuinely different rosters',
+            LM_DATA.INVASIONS.every(i => !LM_DATA.DISASTERS.some(d2 => d2.id === i.id)), true]
+        ];
+      } },
+
+    { name: 'Half the invasion deck does no damage at all',
+      why: 'an invasion roster where every card costs you something is just the disaster deck in a rubber mask — the harmless ones are what make it a different feature rather than a reskin',
+      run() {
+        const mk = () => {
+          const s = city();
+          grantEra(s);
+          for (let y = 58; y <= 66; y++) for (let x = 58; x <= 66; x++) {
+            develop(s, x, y, 'hab', 'high', 3);
+            T.tileAt(s, x, y).dust = 0.6;
+          }
+          return s;
+        };
+        const census = s => ({
+          built: s.map.filter(t => t.b).length,
+          zoned: s.map.filter(t => t.zone).length,
+          stages: s.map.reduce((a, t) => a + (t.zone ? t.zone.stage : 0), 0),
+          height: s.map.reduce((a, t) => a + t.h, 0)
+        });
+
+        const c = mk(); const before = JSON.stringify(census(c));
+        INV.fire(c, 'circles', T.tileAt(c, 62, 62), seededRnd(4));
+        const marked = c.map.filter(t => t.pattern).length;
+
+        const h = mk(); const hBefore = JSON.stringify(census(h));
+        const dust0 = T.tileAt(h, 62, 62).dust;
+        const sci0 = h.research;
+        INV.fire(h, 'herald', T.tileAt(h, 62, 62), seededRnd(5));
+
+        const sn = mk(); const snBefore = JSON.stringify(census(sn));
+        INV.fire(sn, 'snatchers', T.tileAt(sn, 62, 62), seededRnd(6));
+
+        return [
+          ['crop circles mark the ground', marked, '>0'],
+          ['and break absolutely nothing', JSON.stringify(census(c)), before],
+          ['the herald scrubs the dust field', T.tileAt(h, 62, 62).dust, 0],
+          ['it started dusty, so that is a real change', dust0, '>0.5'],
+          ['and it pays a research windfall', h.research - sci0, '>0'],
+          ['while breaking nothing either', JSON.stringify(census(h)), hBefore],
+          ['body snatchers damage no structures', JSON.stringify(census(sn)), snBefore],
+          ['they just make the district wrong',
+            sn.map.filter(t => INV.isSnatched(sn, t)).length, '>0']
+        ];
+      } },
+
+    { name: 'The destructive cards each destroy in a different shape',
+      why: 'a saucer, a worm and a tractor beam that all razed the same disc would be one event with three animations',
+      run() {
+        const mk = () => {
+          const s = city();
+          grantEra(s);
+          for (let y = 52; y <= 76; y++) for (let x = 52; x <= 76; x++) develop(s, x, y, 'hab', 'high', 3);
+          return s;
+        };
+        const razed = s => s.map.filter(t => t.zone === null || t.zone === undefined).length;
+
+        const u = mk(); const u0 = razed(u);
+        /* the generator's ground is not level, so compare before with after
+           rather than asserting the row is flat */
+        const rowH = s2 => s2.map.filter(t => t.y === 64 && t.x >= 52 && t.x <= 76)
+                             .map(t => t.h).join(',');
+        const hBefore = rowH(u);
+        const ufo = INV.fire(u, 'ufo', T.tileAt(u, 64, 64), seededRnd(11));
+
+        const w = mk(); const wH0 = w.map.reduce((a, t) => a + t.h, 0);
+        const worm = INV.fire(w, 'worm', T.tileAt(w, 64, 64), seededRnd(12));
+
+        const ab = mk(); const ab0 = razed(ab);
+        const abd = INV.fire(ab, 'abduction', T.tileAt(ab, 64, 64), seededRnd(13));
+
+        return [
+          ['the saucer cuts a line, not a blob', ufo.path.length, '>=16'],
+          ['and it razes what was under it', razed(u) - u0, '>=16'],
+          ['but leaves the ground at exactly the height it found it',
+            rowH(u), hBefore],
+          ['the worm digs — it is the one that moves terrain',
+            w.map.reduce((a, t) => a + t.h, 0) < wH0, true],
+          ['the beam takes exactly one thing', razed(ab) - ab0, 1],
+          ['and it names what it took', /took the/.test(abd.msg), true],
+          ['every card writes one line to the log',
+            [u, w, ab].every(s2 => s2.log.length === 1), true]
+        ];
+      } },
+
+    { name: 'A snatched district loses its value and then gets it back',
+      why: 'the whole cost of that card is the land value, so if it did not move — or if it never wore off — the event would either be nothing or be permanent, and neither is the joke',
+      run() {
+        const s = servicedRow(60, 62, 6);
+        grantEra(s);
+        S.paintZone(s, 60, 62, 6, 1, 'hab', 'low');
+        for (let i = 0; i < 260; i++) S.tick(s);
+        const healthy = T.tileAt(s, 62, 62).zone.value;
+
+        INV.fire(s, 'snatchers', T.tileAt(s, 62, 62), seededRnd(21));
+        for (let i = 0; i < 5; i++) S.tick(s);
+        const wrong = T.tileAt(s, 62, 62).zone.value;
+        const flagged = INV.isSnatched(s, T.tileAt(s, 62, 62));
+
+        for (let i = 0; i < K.SNATCH_DAYS + 40; i++) S.tick(s);
+        const recovered = T.tileAt(s, 62, 62).zone.value;
+        return [
+          ['the district was worth something first', healthy, '>0.2'],
+          ['being snatched craters its value', wrong < healthy - 0.3, true],
+          ['it is flagged while it lasts', flagged, true],
+          ['it wears off on its own', INV.isSnatched(s, T.tileAt(s, 62, 62)), false],
+          ['and the value comes back', recovered > wrong + 0.2, true]
+        ];
+      } },
+
+    { name: 'Set pieces run on an injectable clock and retire themselves',
+      why: 'this is the only reason any of these animations can be verified at all — requestAnimationFrame is throttled to about a third of a frame per second here, so a seven-second effect cannot be caught by screenshotting and hoping',
+      run() {
+        FX.clear();
+        let t = 0;
+        FX.setClock(() => t);
+
+        const fx = FX.spawn('saucer', { path: [[10, 10], [20, 10]], dur: 1000 });
+        const atStart = FX.progress(fx);
+        t = 250; const quarter = FX.progress(fx);
+        t = 500; const half = FX.progress(fx);
+        t = 900; const late = FX.progress(fx);
+        const aliveBefore = (FX.update(), FX.count());
+        t = 1100; FX.update();
+        const aliveAfter = FX.count();
+
+        /* and it never reports outside 0..1 even past its life */
+        t = 99999; const clamped = FX.progress(fx);
+        FX.setClock(null); FX.clear();
+        return [
+          ['a fresh set piece is at the start', atStart, 0],
+          ['a quarter of the way through', quarter, 0.25],
+          ['halfway', half, 0.5],
+          ['nearly done', late, 0.9],
+          ['still alive before its time is up', aliveBefore, 1],
+          ['retired once it is', aliveAfter, 0],
+          ['and progress never runs past the end', clamped, 1]
+        ];
+      } },
+
+    { name: 'Invasions are rate-limited and never end a run',
+      why: 'the same discipline the disaster deck follows — this is a sandbox builder, and the worst any card may do is give you ground to rebuild',
+      run() {
+        const s = city();
+        grantEra(s);
+        for (let y = 58; y <= 70; y++) for (let x = 58; x <= 70; x++) develop(s, x, y, 'hab', 'high', 3);
+        s.invasionOn = true;
+        const always = () => 0;
+        s.day = 5;
+        const tooEarly = INV.maybeFire(s, always);
+        s.day = K.INVASION_GRACE + 1;
+        const first = INV.maybeFire(s, always);
+        const immediately = INV.maybeFire(s, always);
+        s.day += K.INVASION_COOLDOWN + 1;
+        const later = INV.maybeFire(s, always);
+
+        /* now let a big city take a long run of them and confirm it survives */
+        const long = S.newGame(555);
+        long.autoPlay = true; long.invasionOn = true; long.disastersOn = true;
+        for (let i = 0; i < 900; i++) S.tick(long);
+        return [
+          ['nothing fires in the opening grace period', tooEarly, null],
+          ['the first one fires once the city is established', first !== null, true],
+          ['a second cannot land straight behind it', immediately, null],
+          ['but one can once the cooldown has passed', later !== null, true],
+          ['a city under both decks for 900 days still stands', long.pop, '>0'],
+          ['and is still solvent', long.credits, '>=0'],
+          ['and something actually happened to it', long.log.length, '>0']
         ];
       } }
   ];

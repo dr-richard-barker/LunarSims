@@ -47,6 +47,17 @@
   /* The director will cut tax below the base rate to buy demand, but not to
      nothing — it still has departments to pay for. */
   const AI_MIN_TAX = 5;
+
+  /* Utilities are built in BATCHES sized to the shortfall, not one per day.
+
+     One plant a day is fine for a young colony and hopeless later: arrivals
+     scale with the city, so a 20,000-person colony gains around 400 people a
+     day while a single oxygen plant adds 45 of capacity. The director fell
+     permanently behind its own pressurisation target somewhere past 15,000
+     residents and could never catch up — it was not short of money or of
+     ground, it was short of a loop. Still capped per day, so a city reads as
+     being built rather than appearing fully formed. */
+  const BUILD_BATCH = 8;
   const afford = (s, cost) => s.sandbox || (s.credits - cost) >= reserveFloor(s);
   const buildCost = id => S.buildById(id).cost;
 
@@ -201,30 +212,53 @@
        sun model exists is that where an array goes changes what it earns —
        but an unlit column outranks a sunny tile on a column that already has
        power, because connecting new ground is worth more than more kilowatts
-       into ground that is already served. */
-    let best = null, bestScore = -1;
-    walkArea(a, (x, y) => {
-      if (!isInterior(a, x, y)) return;
-      const t = T.tileAt(s, x, y);
-      if (!t || t.b || t.zone || !T.buildable(t)) return;
-      let dark = false, touches = false;
-      for (const [dx, dy] of G.DIRS) {
-        const n = T.tileAt(s, x + dx, y + dy);
-        if (n && isConduit(n)) { touches = true; if (isDark(n)) dark = true; }
-      }
-      if (!touches) return;
-      const score = t.sun - (t.dust || 0) * 0.5 + (dark ? 2 : 0);
-      if (score > bestScore) { bestScore = score; best = t; }
-    });
-    return best ? !S.place(s, best, 'solar') : false;
+       into ground that is already served.
+
+       Batched for the same reason the oxygen plants are: an array is worth
+       about 7 kW and a large city's load climbs far faster than one a day. */
+    const pickSite = () => {
+      let best = null, bestScore = -1;
+      walkArea(a, (x, y) => {
+        if (!isInterior(a, x, y)) return;
+        const t = T.tileAt(s, x, y);
+        if (!t || t.b || t.zone || !T.buildable(t)) return;
+        let dark = false, touches = false;
+        for (const [dx, dy] of G.DIRS) {
+          const n = T.tileAt(s, x + dx, y + dy);
+          if (n && isConduit(n)) { touches = true; if (isDark(n)) dark = true; }
+        }
+        if (!touches) return;
+        const score = t.sun - (t.dust || 0) * 0.5 + (dark ? 2 : 0);
+        if (score > bestScore) { bestScore = score; best = t; }
+      });
+      return best;
+    };
+    const deficit = Math.max(0, g.load * K.AI_POWER_MARGIN - g.gen);
+    const need = Math.min(BUILD_BATCH, Math.max(1, Math.ceil(deficit / 6)));
+    let built = 0;
+    for (let i = 0; i < need; i++) {
+      if (!afford(s, buildCost('solar'))) break;
+      const t = pickSite();
+      if (!t || S.place(s, t, 'solar')) break;
+      built++;
+    }
+    return built > 0;
   }
 
   function ensureAir(s, a) {
     const g = readGrid(s);
-    if (g.airCap >= Math.max(20, s.pop * K.AI_AIR_MARGIN)) return false;
-    if (!afford(s, buildCost('o2'))) return false;
-    const t = spot(s, a, tt => tt.pipe || nextTo(s, tt, n => n.pipe));
-    return t ? !S.place(s, t, 'o2') : false;
+    const target = Math.max(20, s.pop * K.AI_AIR_MARGIN);
+    if (g.airCap >= target) return false;
+    const per = Math.max(1, K.AIR_PER_PLANT * g.eff.airMul);
+    const need = Math.min(BUILD_BATCH, Math.ceil((target - g.airCap) / per));
+    let built = 0;
+    for (let i = 0; i < need; i++) {
+      if (!afford(s, buildCost('o2'))) break;
+      const t = spot(s, a, tt => tt.pipe || nextTo(s, tt, n => n.pipe));
+      if (!t || S.place(s, t, 'o2')) break;
+      built++;
+    }
+    return built > 0;
   }
 
   /* ---------- ground clearance ---------- */
@@ -281,9 +315,12 @@
 
   /* ---------- zoning ---------- */
 
+  /* Only the three RCI kinds. The special districts answer no demand index,
+     so counting them here would put a NaN in the tally and tell the director
+     nothing it can act on. */
   function zoneCounts(s) {
     const c = { hab: 0, trade: 0, industry: 0 };
-    for (const t of s.map) if (t.zone) c[t.zone.kind]++;
+    for (const t of s.map) if (t.zone && c[t.zone.kind] !== undefined) c[t.zone.kind]++;
     return c;
   }
 
@@ -371,6 +408,46 @@
     return false;
   }
 
+  /* ---------- the special districts ---------- */
+
+  /* Both are demand-free, so the director cannot read an index to decide it
+     wants one — it decides on the city's size instead, the same way the
+     General does. Kept small: a handful of tiles each, sited away from the
+     habitation it drags the value of. */
+  function districtTiles(s, kind) {
+    let n = 0;
+    for (const t of s.map) if (t.zone && t.zone.kind === kind) n++;
+    return n;
+  }
+
+  function growDistrict(s, a, kind, want) {
+    if (districtTiles(s, kind) >= want) return false;
+    if (S.canZoneKind(s, kind)) return false;
+    if (!afford(s, S.zoneCost(kind, 'low'))) return false;
+    /* Out at the lattice edge rather than through the middle of downtown —
+       both districts drag the land value of whatever they sit beside. */
+    let best = null, bestD = -1;
+    walkArea(a, (x, y) => {
+      if (!isInterior(a, x, y)) return;
+      const t = T.tileAt(s, x, y);
+      if (!t || t.b || t.zone || S.canZone(s, t)) return;
+      if (!G.hasTransit(s, x, y)) return;
+      const d = Math.max(Math.abs(x - a.ox), Math.abs(y - a.oy));
+      if (d > bestD) { bestD = d; best = t; }
+    });
+    return best ? S.paintZone(s, best.x, best.y, 1, 1, kind, 'low') > 0 : false;
+  }
+
+  function ensureDistricts(s, a) {
+    /* The General's offer is free money in employment terms and the director
+       has no reason to refuse it. */
+    if (s.military && s.military.state === 'pending') S.acceptMilitary(s);
+    const pop = s.pop || 0;
+    if (pop > 1500 && growDistrict(s, a, 'launch', Math.min(9, 3 + Math.floor(pop / 2500)))) return true;
+    if (growDistrict(s, a, 'military', Math.min(6, Math.floor(pop / 700)))) return true;
+    return false;
+  }
+
   /* ---------- wonders ---------- */
 
   /* Both are terrain-gated, so the director does not sculpt for them — it
@@ -427,13 +504,14 @@
     growNetworks(s, a, 10);
     growZoning(s, a, 4);
     ensureServices(s, a);
+    ensureDistricts(s, a);
     ensureWonders(s, a);
     maybeExpand(s, a);
   }
 
   window.LM_AUTO = {
     step, ensureSeed, manageBudget, clearObstacles, ensurePower, ensureAir,
-    growNetworks, growZoning, ensureServices, ensureWonders, maybeExpand,
+    growNetworks, growZoning, ensureServices, ensureDistricts, ensureWonders, maybeExpand,
     isStreetRow, isConduitCol, isInterior, reserveFloor
   };
 })();

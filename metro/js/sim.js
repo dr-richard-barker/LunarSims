@@ -37,8 +37,9 @@
       /* Modes. Disasters start OFF: this is a sandbox city builder, and a
          player who came to design a city should opt in to having one wrecked
          rather than opt out. */
-      sandbox: false, disastersOn: false, autoPlay: false,
-      flareDays: 0, lastDisaster: -999,
+      sandbox: false, disastersOn: false, invasionOn: false, autoPlay: false,
+      flareDays: 0, lastDisaster: -999, lastInvasion: -999, departed: 0,
+      military: null,          // null until the General calls; see offerMilitary
 
       log: [], history: []
     };
@@ -84,6 +85,64 @@
   const free = s => !!s.sandbox;
   const cost = (s, n) => free(s) ? 0 : n;
 
+  /* Level ground: this tile and all eight neighbours at the same height, and
+     all of them buildable. */
+  function isLevel(s, t, r) {
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        const n = T.tileAt(s, t.x + dx, t.y + dy);
+        if (!n || n.h !== t.h || !T.buildable(n)) return false;
+      }
+    }
+    return true;
+  }
+
+  /* Clear as well as level — nothing already standing on it or zoned. Used by
+     the arena, which wants a real site rather than a gap between towers. */
+  function isOpen(s, t, r) {
+    if (!isLevel(s, t, r)) return false;
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        const n = T.tileAt(s, t.x + dx, t.y + dy);
+        if (n.b || n.zone) return false;
+      }
+    }
+    return true;
+  }
+
+  /* A crater floor the sun never reaches: dark, and genuinely lower than the
+     ground around it rather than merely shaded by a neighbouring tower. */
+  /* Scanned five tiles out, not three. A crater floor wide enough to be worth
+     stringing a dish across is wider than a three-tile scan can see — with
+     the tighter radius the middle of a large crater could not find its own
+     rim and reported flat ground, which refused exactly the sites the
+     telescope exists for. */
+  function inShadowedCrater(s, t) {
+    if (t.sun > K.SUN_SHADOW) return false;
+    let higher = 0, n = 0;
+    for (let dy = -5; dy <= 5; dy++) {
+      for (let dx = -5; dx <= 5; dx++) {
+        const q = T.tileAt(s, t.x + dx, t.y + dy);
+        if (!q) continue;
+        n++;
+        if (q.h > t.h) higher++;
+      }
+    }
+    return n > 0 && higher / n >= 0.25;
+  }
+
+  const onPeakOfLight = (s, t) => t.sun >= K.SUN_PEAK && t.h >= 8;
+
+  function besideLaunchPad(s, t) {
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const n = T.tileAt(s, t.x + dx, t.y + dy);
+        if (n && n.zone && n.zone.kind === 'launch' && n.zone.stage > 0) return true;
+      }
+    }
+    return false;
+  }
+
   function canPlace(s, t, type) {
     const B = buildById(type);
     if (!B) return 'Unknown structure.';
@@ -97,6 +156,24 @@
     }
     if (B.needsRidge && !onRidge(s, t)) {
       return 'A mass driver needs seven tiles of level ground at height 7 or above to run along.';
+    }
+    if (B.needsHeight && t.h < B.needsHeight) {
+      return `A space elevator has to be anchored at height ${B.needsHeight} or above — this ground is at ${t.h}.`;
+    }
+    if (B.needsLevel && !isLevel(s, t, B.needsLevel)) {
+      return 'That needs level ground — flatten the site first.';
+    }
+    if (B.needsOpen && !isOpen(s, t, B.needsOpen)) {
+      return `That needs a clear, level ${B.needsOpen * 2 + 1}x${B.needsOpen * 2 + 1} site.`;
+    }
+    if (B.needsShadow && !inShadowedCrater(s, t)) {
+      return 'A radio telescope has to sit on a permanently shadowed crater floor, with the rim above it to screen out Earth.';
+    }
+    if (B.needsPeakSun && !onPeakOfLight(s, t)) {
+      return 'A heliostat crown belongs on a peak of eternal light — high ground the sun never leaves.';
+    }
+    if (B.needsLaunchPad && !besideLaunchPad(s, t)) {
+      return 'A launch arcology has to be built beside a working launch complex.';
     }
     if (!T.buildable(t)) return t.t === 'boulder'
       ? 'Clear the boulders first.'
@@ -124,6 +201,107 @@
 
   /* ---------- zoning ---------- */
 
+  /* ---------- the General's offer ----------
+
+     SimCity 2000 offered a military base once the city was big enough and
+     then sited it for you, choosing Army, Air Force, Navy or Missile Silos
+     from the terrain. Here you site it yourself — but the terrain still
+     decides which kind of base you are getting, which is the part of the
+     original worth keeping. */
+
+  const BASE_KINDS = {
+    landing: { name: 'Landing Field', why: 'the ground around the city is flat enough to set heavy lifters down on' },
+    garrison: { name: 'Garrison', why: 'the broken ground around the city suits a dug-in garrison' },
+    silos: { name: 'Silo Field', why: 'the deep shadowed craters around the city will take hardened silos' }
+  };
+
+  /* Reads the ground the city actually occupies, not the whole map. */
+  function baseKindFor(s) {
+    let n = 0, flat = 0, rough = 0, deep = 0, sumH = 0;
+    const built = [];
+    for (const t of s.map) if (t.b || t.zone) built.push(t);
+    if (!built.length) return 'garrison';
+    let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+    for (const t of built) {
+      if (t.x < x0) x0 = t.x; if (t.x > x1) x1 = t.x;
+      if (t.y < y0) y0 = t.y; if (t.y > y1) y1 = t.y;
+    }
+    for (let y = y0 - 4; y <= y1 + 4; y++) {
+      for (let x = x0 - 4; x <= x1 + 4; x++) {
+        const t = T.tileAt(s, x, y);
+        if (!t) continue;
+        n++; sumH += t.h;
+        if (t.t === 'flat') flat++;
+        if (t.t === 'rough' || t.t === 'boulder') rough++;
+        if (t.sun <= K.SUN_SHADOW) deep++;
+      }
+    }
+    if (!n) return 'garrison';
+    if (deep / n > 0.18) return 'silos';
+    if (rough / n > 0.30) return 'garrison';
+    return flat / n > 0.55 ? 'landing' : 'garrison';
+  }
+
+  function offerMilitary(s) {
+    if (s.military !== undefined && s.military !== null) return false;
+    if (s.pop < K.MILITARY_OFFER_POP) return false;
+    s.military = { state: 'pending', kind: baseKindFor(s), day: s.day };
+    pushLog(s, `★ A General is on the line. The colony is large enough to ` +
+      `warrant a military presence, and ${BASE_KINDS[s.military.kind].why} — ` +
+      `they are offering a ${BASE_KINDS[s.military.kind].name}.`);
+    return true;
+  }
+
+  function acceptMilitary(s) {
+    if (!s.military || s.military.state !== 'pending') return 'There is no offer on the table.';
+    s.military.state = 'accepted';
+    pushLog(s, `★ ${BASE_KINDS[s.military.kind].name} approved. The military brush is now available — site it yourself.`);
+    return null;
+  }
+  function declineMilitary(s) {
+    if (!s.military || s.military.state !== 'pending') return 'There is no offer on the table.';
+    s.military.state = 'declined';
+    pushLog(s, '★ The General has been turned down. The offer will not come again.');
+    return null;
+  }
+  const militaryUnlocked = s => !!s.sandbox || !!(s.military && s.military.state === 'accepted');
+
+  /* ---------- the arcology exodus ----------
+
+     SimCity 2000's Launch Arcologies eventually lifted off with everyone
+     inside. Here one dispatches a colony ship periodically and then fills
+     back up, so it reads as the same idea without deleting a chunk of the
+     player's city every few years — this game has no fail state and taking
+     thousands of residents away permanently would be the nearest thing to
+     one. The counter is the score: it is the only number in the game that
+     only ever goes up. */
+  function launchColonyShips(s) {
+    for (const t of s.map) {
+      if (!t.b) continue;
+      const B = buildById(t.b.type);
+      if (!B || !B.departsEvery) continue;
+      if (!t.b.built) t.b.built = s.day;
+      if ((s.day - t.b.built) > 0 && (s.day - t.b.built) % B.departsEvery === 0) {
+        s.departed = (s.departed || 0) + B.housing;
+        pushLog(s, `⬢ A colony ship has left the ${B.name} at ${t.x + 1}, ${t.y + 1} ` +
+          `carrying ${B.housing.toLocaleString()} settlers outbound. ` +
+          `${s.departed.toLocaleString()} have now gone on from here.`);
+      }
+    }
+  }
+
+  /* Zoning gates that depend on the KIND being painted rather than on the
+     ground. canZone answers "can anything be zoned here"; this answers "is
+     this brush available to you at all". */
+  function canZoneKind(s, kind) {
+    if (kind === 'military' && !militaryUnlocked(s)) {
+      return s.military && s.military.state === 'declined'
+        ? 'You turned the General down.'
+        : 'No military presence has been authorised here yet.';
+    }
+    return null;
+  }
+
   function canZone(s, t) {
     if (!t) return 'That is off the map.';
     if (!T.buildable(t)) return t.t === 'boulder'
@@ -142,6 +320,7 @@
      refusing the whole drag — dragging across a boulder field should still
      zone everything either side of it. Returns how many tiles were set. */
   function paintZone(s, x, y, w, h, kind, density) {
+    if (canZoneKind(s, kind)) return 0;
     const each = cost(s, zoneCost(kind, density));
     let painted = 0;
     for (let yy = y; yy < y + h; yy++) {
@@ -176,8 +355,12 @@
     if (s.autoPlay && window.LM_AUTO) {
       try { window.LM_AUTO.step(s); } catch (e) { console.error('autoplay', e); }
     }
-    /* Then the dice, if the player opted in. */
-    if (s.disastersOn && window.LM_DISASTERS) window.LM_DISASTERS.maybeFire(s);
+    /* Then the dice, if the player opted in. The two decks roll separately
+       and on separate toggles — see invasion.js for why they are kept apart. */
+    let disasterEvent = null, invasionEvent = null;
+    if (s.disastersOn && window.LM_DISASTERS) disasterEvent = window.LM_DISASTERS.maybeFire(s);
+    if (s.invasionOn && window.LM_INVASION) invasionEvent = window.LM_INVASION.maybeFire(s);
+    if (window.LM_INVASION) window.LM_INVASION.expireSnatched(s);
     if (s.flareDays > 0) s.flareDays--;
 
     /* Dust settles before growth is evaluated, so a district reacts to the
@@ -217,6 +400,14 @@
       const boost = r.cov ? 1 + r.cov.research[G.idx(t.x, t.y)] : 1;
       sci += r.eff.sciencePerDay * boost;
     }
+    /* Instruments that do research in their own right rather than by
+       multiplying what the districts under them produce — a telescope on an
+       empty crater floor is still doing science. */
+    for (const t of s.map) {
+      if (!t.b) continue;
+      const B = buildById(t.b.type);
+      if (B && B.researchPerDay) sci += B.researchPerDay;
+    }
     s.research += sci;
 
     /* Migration tracks the gap between people and pressurised housing.
@@ -239,6 +430,10 @@
        so a temporary slump never retroactively demolishes a skyline the
        city genuinely earned. */
     if (s.pop > s.peakPop) s.peakPop = s.pop;
+    /* Checked after migration, so the offer arrives on the day the colony
+       actually reaches the threshold rather than the day after. */
+    offerMilitary(s);
+    launchColonyShips(s);
 
     s.day++;
     s.history.push({
@@ -248,6 +443,11 @@
       revenue: Math.round(s.revenue), expenses: Math.round(s.expenses)
     });
     if (s.history.length > 400) s.history.shift();
+    /* Anything that fired today rides out on the tick result. The renderer
+       stages its animation from this; the simulation itself neither knows nor
+       cares whether one gets drawn. */
+    r.disaster = disasterEvent;
+    r.invasion = invasionEvent;
     return r;
   }
 
@@ -262,7 +462,10 @@
 
   window.LM_SIM = {
     newGame, STATE_VERSION, tick,
-    canPlace, place, canZone, paintZone, zoneCost, bulldoze,
-    buildById, count, zonedCount, developedCount, pushLog
+    canPlace, place, canZone, canZoneKind, paintZone, zoneCost, bulldoze,
+    buildById, count, zonedCount, developedCount, pushLog,
+    offerMilitary, acceptMilitary, declineMilitary, militaryUnlocked,
+    baseKindFor, BASE_KINDS, launchColonyShips,
+    isLevel, isOpen, inShadowedCrater, onPeakOfLight, besideLaunchPad
   };
 })();

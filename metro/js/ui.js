@@ -33,6 +33,10 @@
   function refreshNets() {
     ui.nets = G.services(s);
     ui.cov = window.LM_SERVICES ? window.LM_SERVICES.coverage(s, B.effects(s)) : null;
+    /* This is the one place that already knows the map changed, so it is
+       where the traffic layer is told its cached street graph is stale —
+       cheaper than having agents.js hash 16,384 tiles to work it out. */
+    if (window.LM_AGENTS) window.LM_AGENTS.invalidate();
   }
 
   /* ---------- canvas ---------- */
@@ -68,7 +72,8 @@
     { id: 'plant', label: 'Power & Life Support' },
     { id: 'service', label: 'Civic Services' },
     { id: 'wonder', label: 'Wonders' },
-    { id: 'zone', label: 'Zoning' }
+    { id: 'zone', label: 'Zoning' },
+    { id: 'district', label: 'Special Districts' }
   ];
 
   function buildPalette() {
@@ -83,8 +88,11 @@
       D.TOOLS.filter(t => t.group === g.id).forEach(t => {
         const b = document.createElement('button');
         /* Sandbox lifts the era locks as well as the prices, so the palette
-           has to agree with what canPlace will actually allow. */
-        const locked = !s.sandbox && t.build && E && !E.unlocked(s, t.build);
+           has to agree with what canPlace will actually allow. The military
+           brush is gated on the General's offer rather than on an era. */
+        const zoneGate = t.zone ? S.canZoneKind(s, t.zone) : null;
+        const locked = !!zoneGate ||
+          (!s.sandbox && t.build && E && !E.unlocked(s, t.build));
         b.className = 'tool' + (ui.tool === t.id ? ' on' : '');
         if (locked) { b.disabled = true; b.style.opacity = 0.42; }
         const listed = t.build ? S.buildById(t.build).cost
@@ -92,7 +100,8 @@
         const cost = listed === null ? null : (s.sandbox ? 0 : listed);
         b.innerHTML = `<span class="g">${locked ? '🔒' : t.glyph}</span><span class="n">${t.name}</span>` +
           (cost !== null ? `<span class="c">${cost.toLocaleString()}</span>` : `<span class="k">${t.key}</span>`);
-        b.title = locked ? E.lockReason(s, t.build)
+        b.title = zoneGate ? zoneGate
+          : locked ? E.lockReason(s, t.build)
           : (t.hint || (t.build ? S.buildById(t.build).desc : '') ||
              (t.zone ? Z.zoneById(t.zone).desc : ''));
         b.onclick = () => { ui.tool = t.id; ui.levelTarget = null; buildPalette(); setHint(); };
@@ -261,7 +270,10 @@
     const rect = cv.getBoundingClientRect();
     const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
     const z0 = ui.cam.z;
-    const z1 = clamp(z0 * (e.deltaY < 0 ? 1.1 : 0.9), 0.22, 2.6);
+    /* Ceiling raised from 2.6 — the near detail tier only starts paying off
+       above about 1.15, and there was very little zoom range left above that
+       to actually see it in. */
+    const z1 = clamp(z0 * (e.deltaY < 0 ? 1.1 : 0.9), 0.22, 4.0);
     if (z1 === z0) return;
     const wx = (sx - rect.width / 2 - ui.cam.x) / z0;
     const wy = (sy - 92 - ui.cam.y) / z0;
@@ -535,6 +547,7 @@
     document.getElementById('btnAuto').classList.toggle('on', !!s.autoPlay);
     document.getElementById('btnSandbox').classList.toggle('on', !!s.sandbox);
     document.getElementById('btnDisasters').classList.toggle('on', !!s.disastersOn);
+    document.getElementById('btnInvasion').classList.toggle('on', !!s.invasionOn);
   }
 
   document.getElementById('btnAuto').onclick = () => {
@@ -565,6 +578,68 @@
     save();
   };
 
+  document.getElementById('btnInvasion').onclick = () => {
+    s.invasionOn = !s.invasionOn;
+    markModes();
+    toast(s.invasionOn
+      ? 'Invasion deck armed. Half of it is harmless and one card is good news.'
+      : 'Invasion deck stood down.');
+    save();
+  };
+
+  /* Stages the animation for whatever the invasion deck just did. The
+     simulation returns a descriptor — the path a saucer flew, the tile a beam
+     came down on — and this is the only place that turns one into a picture,
+     so invasion.js never has to know a renderer exists. */
+  function stageInvasionFx(ev) {
+    const FX = window.LM_FX;
+    if (!FX || !ev) return;
+    if (ev.id === 'ufo') FX.spawn('saucer', { path: ev.path, dur: 7000 });
+    else if (ev.id === 'worm') FX.spawn('worm', { path: ev.path, dur: 6500 });
+    else if (ev.id === 'abduction' && ev.taken) FX.spawn('beam', { x: ev.taken.x, y: ev.taken.y, dur: 5200 });
+    else if (ev.id === 'herald') {
+      /* the herald leaves no path of its own, so give it one across the
+         district it cleaned */
+      const path = [];
+      for (let i = -14; i <= 14; i++) path.push([ev.x + i, ev.y]);
+      FX.spawn('herald', { path, dur: 7500 });
+    }
+  }
+
+  /* ---------- the General's offer ----------
+
+     A card in the City panel rather than a modal. SimCity 2000 stopped the
+     world to ask; this game deliberately never blocks the clock — there is no
+     fail state to protect you from, so an unanswered offer just sits there
+     until you feel like answering it. */
+  function renderOffer() {
+    const box = document.getElementById('offer');
+    if (!box) return;
+    const m = s.military;
+    if (!m || m.state !== 'pending') { box.innerHTML = ''; return; }
+    const kind = S.BASE_KINDS[m.kind];
+    box.innerHTML = `
+      <h3 class="sec">A call from the General</h3>
+      <p class="note" style="border-left-color:var(--accent-2)">
+        The colony is large enough to warrant a military presence, and
+        ${kind.why} — so they are offering a <b>${kind.name}</b>.
+        Accepting unlocks the military brush; you site it yourself.
+        It employs a standing complement, pays no tax, and nobody wants to
+        live next door to it.</p>
+      <div class="modes" style="justify-content:flex-start;gap:6px;margin:6px 0 10px">
+        <button id="offerYes" class="mode">Accept the ${kind.name}</button>
+        <button id="offerNo" class="mode">Decline</button>
+      </div>`;
+    box.querySelector('#offerYes').onclick = () => {
+      S.acceptMilitary(s); buildPalette(); renderOffer(); renderLog(); save();
+      toast('The military brush is now in Special Districts.');
+    };
+    box.querySelector('#offerNo').onclick = () => {
+      S.declineMilitary(s); renderOffer(); renderLog(); save();
+      toast('The General has been turned down.');
+    };
+  }
+
   /* ---------- log ---------- */
 
   function renderLog() {
@@ -588,9 +663,10 @@
     const modes = { sandbox: s.sandbox, disastersOn: s.disastersOn, autoPlay: s.autoPlay };
     s = Object.assign(S.newGame(), modes);
     ui.selected = null; ui.levelTarget = null;
+    if (window.LM_AGENTS) window.LM_AGENTS.reset();
     centreOn(K.COLS / 2, K.ROWS / 2);
-    refreshNets(); buildPalette(); renderTile(); renderHUD(); renderLog(); markModes();
-    setHint(); save();
+    refreshNets(); buildPalette(); renderTile(); renderHUD(); renderLog();
+    renderOffer(); markModes(); setHint(); save();
   };
   /* Centres on the city rather than on the map. The two are only the same
      thing on day one — a player settles wherever the terrain suited them, and
@@ -638,7 +714,7 @@
   const DAY_MS = 1100;
   const SAVE_EVERY_MS = 4000;
   let last = performance.now(), acc = 0, lastSave = 0, drawFailed = false;
-  let lastLogLen = -1, lastEra = -1;
+  let lastLogLen = -1, lastEra = -1, agentsFailed = false;
 
   function frame(now) {
     const dt = Math.min(0.25, (now - last) / 1000); last = now;
@@ -649,7 +725,10 @@
     if (ui.speed > 0) {
       acc += dt * ui.speed;
       while (acc > DAY_MS / 1000 && ticked < 12) {
-        try { S.tick(s); } catch (e) { console.error(e); }
+        try {
+          const r = S.tick(s);
+          if (r && r.invasion) stageInvasionFx(r.invasion);
+        } catch (e) { console.error(e); }
         acc -= DAY_MS / 1000;
         ticked++;
       }
@@ -659,7 +738,7 @@
            the palette only rebuilds when the era moved — both are full DOM
            rewrites and neither belongs on every tick. */
         const n = s.log ? s.log.length : 0;
-        if (n !== lastLogLen) { lastLogLen = n; renderLog(); }
+        if (n !== lastLogLen) { lastLogLen = n; renderLog(); renderOffer(); }
         const era = E ? E.index(s) : 0;
         if (era !== lastEra) { lastEra = era; buildPalette(); }
         /* Trends is a full rebuild, so it only redraws while it is the pane
@@ -667,6 +746,18 @@
         const trends = document.getElementById('pane-trends');
         if (trends && trends.classList.contains('on')) buildTrends();
       }
+    }
+    /* Set pieces retire themselves on their own clock, which keeps running
+       while the city is paused — an eight-second animation should finish
+       playing even if you hit pause halfway through it. */
+    if (window.LM_FX) window.LM_FX.update();
+    /* Traffic moves only while the clock does — a paused city should be a
+       still photograph, not a diorama with the cars still running. Scaled by
+       game speed so 12x reads as rush hour. Guarded like everything else in
+       this loop so a cosmetic layer can never take the frame down. */
+    if (ui.speed > 0 && window.LM_AGENTS) {
+      try { window.LM_AGENTS.update(s, dt * Math.min(ui.speed, 4)); }
+      catch (e) { if (!agentsFailed) { agentsFailed = true; console.error('agents', e); } }
     }
     /* Guarded for the same reason the tick is: an exception thrown out of a
        single frame would otherwise stop requestAnimationFrame for good and
@@ -683,7 +774,28 @@
     requestAnimationFrame(frame);
   }
 
+  /* Debug handle, matching farm/'s window.__lf. requestAnimationFrame is
+     throttled hard in some embedded browsers, so the only reliable way to
+     verify the renderer or the traffic layer is to drive them directly and
+     put the camera exactly where the thing under test is. Read-only as far
+     as the game is concerned — nothing in here is wired to gameplay. */
+  window.__lm = {
+    get s() { return s; }, ui, ctx, R, S, T, G, Z, E,
+    centreOn, redraw: () => R.draw(ctx, s, ui),
+    /* Centres on a tile AS DRAWN, not on its flat footprint. A tile at height
+       12 is painted 168 world units above where centreOn puts it, which at
+       high zoom is most of a screen — looking at a mountaintop with the plain
+       version puts the thing you wanted off the top of the view. */
+    look(tx, ty, z) {
+      if (z) ui.cam.z = z;
+      centreOn(tx, ty);
+      const t = T.tileAt(s, Math.round(tx), Math.round(ty));
+      if (t) ui.cam.y += t.h * K.LEVEL_PX * ui.cam.z;
+      R.draw(ctx, s, ui);
+    }
+  };
+
   refreshNets();
-  buildPalette(); setHint(); renderTile(); renderHUD(); renderLog(); markModes();
+  buildPalette(); setHint(); renderTile(); renderHUD(); renderLog(); renderOffer(); markModes();
   requestAnimationFrame(t => { last = t; requestAnimationFrame(frame); });
 })();

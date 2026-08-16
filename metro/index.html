@@ -30,6 +30,7 @@
       <button id="btnAuto" class="mode" title="Hand the city to the AI director. It lays the networks, zones to demand, keeps the grid and the air ahead of the city, and manages the budget — all with a bias toward growth.">🤖 Auto-play</button>
       <button id="btnSandbox" class="mode" title="Everything free, nothing locked. The city still advances through its eras as it grows — sandbox removes the price tag, not the progression.">∞ Sandbox</button>
       <button id="btnDisasters" class="mode" title="Meteor strikes, seal blowouts, dust surges and solar flares. Off by default. Nothing here can end a run.">☄ Disasters</button>
+      <button id="btnInvasion" class="mode" title="A separate, sillier deck: flying saucers, tractor beams, crop circles and a chrome figure on a board who is entirely good news. Off by default, independent of Disasters.">👽 Invasion</button>
     </div>
     <div class="modes">
       <button id="btnCentre" class="mode" title="Recentre the camera on the middle of the map">Centre</button>
@@ -70,6 +71,7 @@
     <div class="tabpane on" id="pane-info">
       <h3 class="sec">Era</h3>
       <div id="era"></div>
+      <div id="offer"></div>
       <h3 class="sec">Demand</h3>
       <div id="demand"></div>
       <div id="advisor"></div>
@@ -93,8 +95,11 @@
 <script src="js/eras.js"></script>
 <script src="js/zones.js"></script>
 <script src="js/disasters.js"></script>
+<script src="js/invasion.js"></script>
 <script src="js/sim.js"></script>
 <script src="js/autopilot.js"></script>
+<script src="js/agents.js"></script>
+<script src="js/fx.js"></script>
 <script src="js/render.js"></script>
 <script src="js/ui.js"></script>
 </body>
