@@ -285,9 +285,45 @@ ceiling, unlocks buildings, and changes what the city looks like: bermed
 regolith cans, then domes and mid-rise, then radiator fins and lit viewports,
 then towers with window grids and skyways between the dense blocks.
 
-### The three modes
+### Districts, wonders and traffic
 
-All three are off by default and all three persist with the save.
+Alongside the six RCI zoning brushes there are two **special districts**, both
+demand-free — they answer no RCI index and build out whenever they are
+serviced, because a garrison does not appear because consumers wanted one.
+
+- **Military**, gated on the General's offer. SimCity 2000 offered a base once
+  the city was big enough and sited it for you, choosing from the terrain; here
+  you site it yourself but the ground still decides *which kind* you get —
+  flat open ground a Landing Field, broken ground a Garrison, deep shadowed
+  craters a Silo Field.
+- **Launch Complex** — pads, gantries and fuel farms paying an export income,
+  fouling their own ground with regolith every time something lifts off.
+
+**Eight wonders**, each gated on terrain you had to find or sculpt rather than
+on a bank balance: the Lava-Tube Megadome (beside a skylight), Mass Driver
+(a long level ridge), Space Elevator (high ground), Lunar Eiffel (level
+ground), Far-Side Radio Telescope (a shadowed crater floor), Heliostat Crown
+(a peak of eternal light), Olympus Arena (a clear level site) and the Launch
+Arcology (beside a working pad). Two are real proposals — the telescope is the
+Lunar Crater Radio Telescope, and a space elevator genuinely *is* buildable at
+one sixth of a gravity with materials that exist.
+
+The city is also **populated**: suited pedestrians on the developed ground and
+in the biodomes, moon cars and buses on the tube streets, and trains running
+the long avenues. Purely cosmetic, never saved, and paused when the clock is.
+
+### The sun moves
+
+Not the way it would on Earth. At a polar site the sun does not rise and set —
+it tracks around the horizon at very low elevation over the 29.5-day cycle,
+which is the whole reason the peaks of eternal light and the permanently
+shadowed floors exist at all. So the sun's **azimuth** sweeps a full turn each
+month and the shading of every cliff and every building face swings round with
+it. How *much* light a tile gets never changes; only the direction does.
+
+### The four modes
+
+All four are off by default and all four persist with the save.
 
 - **🤖 Auto-play** — an AI director builds and manages the city on a priority
   ladder: budget, ground clearance, power, air, networks, zoning, civic
@@ -303,21 +339,39 @@ All three are off by default and all three persist with the save.
   different: a seal blowout takes networks, a dust surge takes economy, a solar
   flare takes power city-wide for a few days, and a meteor is the only one that
   rewrites terrain. Repair coverage mitigates all four. None can end a run.
+- **👽 Invasion** — a second, entirely separate deck on its own toggle: crop
+  circles, a UFO raid, an abduction beam, a regolith worm, body snatchers, and
+  the Chrome Herald, who scours the dust field clean and is filed here for want
+  of anywhere better to put him. Three of the six break nothing at all.
+
+The two decks are kept apart on purpose. The disaster deck is grounded and is
+what the Academy module leans on; the invasion deck is a 1950s B-movie. Nobody
+who wants one is forced to take the other.
 
 The dust event is electrostatic transport rather than a storm — the Moon has no
 wind. Charging by UV and the solar wind lofts fine grains off the surface, which
 is the phenomenon behind Surveyor's "horizon glow" and the reports from Apollo
 crews near the terminator.
 
+Everything in the invasion deck is a public-domain pulp archetype drawn from
+scratch — saucers, tractor beams, burrowing monsters, body snatchers. There are
+no named or licensed characters anywhere in it.
+
 ### Testing
 
-`metro/js/{data,terrain,grid,budget,services,eras,zones,disasters,sim,autopilot}.js`
-have no DOM references, so `metro/harness.html` drives the whole simulation
-headlessly: terrain cascade invariants, sun derivation, three-network
-reachability, RCI growth and decay, the budget, coverage radii, the dust field,
-era gating, every disaster, and complete AI-director runs of several hundred
-simulated days. Open it in a browser and re-run it after any change to those
-files.
+Everything under `metro/js/` except `render.js` and `ui.js` is DOM-free, so
+`metro/harness.html` drives the whole simulation headlessly: terrain cascade
+invariants, sun derivation, three-network reachability, RCI growth and decay,
+the budget, coverage radii, the dust field, era gating, both event decks, every
+wonder's terrain gate, the traffic graph, and complete AI-director runs of
+several hundred simulated days. **360 checks across 82 scenarios.** Open it in
+a browser and re-run it after any change to those files.
+
+Two things exist purely so this remains verifiable in a browser whose
+`requestAnimationFrame` is throttled to a fraction of a frame per second:
+`LM_FX` takes an **injectable clock**, so any moment of any animation can be
+pinned and screenshotted, and `window.__lm` (matching `farm/`'s `window.__lf`)
+exposes the renderer and camera so a given tile can be looked at directly.
 
 ### Layout
 
@@ -326,18 +380,21 @@ metro/
   index.html        game shell
   harness.html       headless simulation tests — open it in a browser
   style.css
-  js/data.js         constants, terrain, zones, buildings, eras, departments, disasters
+  js/data.js         constants, terrain, zones, buildings, eras, departments, both decks
   js/terrain.js       map generation, height editing, the sun raycast
   js/grid.js           one flood fill serving all three networks
   js/budget.js          tax rate, departmental funding, and what each dial does
   js/services.js         civic coverage fields and the diffusing dust field
   js/eras.js              era thresholds and what each one unlocks
   js/zones.js              RCI demand, land value, per-tile growth and decay
-  js/disasters.js           the four-event deck
-  js/sim.js                  the simulation — one tick is one day
-  js/autopilot.js             the AI auto-play director
-  js/render.js                 isometric canvas renderer, procedural throughout
-  js/ui.js                      tools, camera, panels, trends, main loop, saving
+  js/disasters.js           the grounded four-event deck
+  js/invasion.js             the B-movie six-event deck
+  js/sim.js                   the simulation — one tick is one day
+  js/autopilot.js              the AI auto-play director
+  js/agents.js                  pedestrians, cars, buses and trains (cosmetic)
+  js/fx.js                       transient set pieces, on an injectable clock
+  js/render.js                    isometric renderer, procedural, three detail tiers
+  js/ui.js                         tools, camera, panels, trends, main loop, saving
 ```
 
 ## On the crop list
