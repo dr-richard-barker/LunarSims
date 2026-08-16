@@ -37,8 +37,8 @@
       /* Modes. Disasters start OFF: this is a sandbox city builder, and a
          player who came to design a city should opt in to having one wrecked
          rather than opt out. */
-      sandbox: false, disastersOn: false, autoPlay: false,
-      flareDays: 0, lastDisaster: -999,
+      sandbox: false, disastersOn: false, invasionOn: false, autoPlay: false,
+      flareDays: 0, lastDisaster: -999, lastInvasion: -999, departed: 0,
       military: null,          // null until the General calls; see offerMilitary
 
       log: [], history: []
@@ -355,8 +355,12 @@
     if (s.autoPlay && window.LM_AUTO) {
       try { window.LM_AUTO.step(s); } catch (e) { console.error('autoplay', e); }
     }
-    /* Then the dice, if the player opted in. */
-    if (s.disastersOn && window.LM_DISASTERS) window.LM_DISASTERS.maybeFire(s);
+    /* Then the dice, if the player opted in. The two decks roll separately
+       and on separate toggles — see invasion.js for why they are kept apart. */
+    let disasterEvent = null, invasionEvent = null;
+    if (s.disastersOn && window.LM_DISASTERS) disasterEvent = window.LM_DISASTERS.maybeFire(s);
+    if (s.invasionOn && window.LM_INVASION) invasionEvent = window.LM_INVASION.maybeFire(s);
+    if (window.LM_INVASION) window.LM_INVASION.expireSnatched(s);
     if (s.flareDays > 0) s.flareDays--;
 
     /* Dust settles before growth is evaluated, so a district reacts to the
@@ -439,6 +443,11 @@
       revenue: Math.round(s.revenue), expenses: Math.round(s.expenses)
     });
     if (s.history.length > 400) s.history.shift();
+    /* Anything that fired today rides out on the tick result. The renderer
+       stages its animation from this; the simulation itself neither knows nor
+       cares whether one gets drawn. */
+    r.disaster = disasterEvent;
+    r.invasion = invasionEvent;
     return r;
   }
 

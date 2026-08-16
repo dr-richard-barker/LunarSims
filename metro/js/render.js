@@ -214,6 +214,22 @@
       ctx.fillRect(q.x - 1, q.y - 1 - z, 2, 2);
     }
 
+    /* Crop circles. Pressed into the ground, read by nothing else in the
+       game, and the only trace the harmless half of the invasion deck
+       leaves behind. */
+    if (t.pattern) {
+      ctx.strokeStyle = `rgba(214,236,255,${0.22 + Math.min(3, t.pattern) * 0.13})`;
+      ctx.lineWidth = 1.6;
+      const c = iso(t.x + 0.5, t.y + 0.5);
+      ctx.beginPath();
+      ctx.ellipse(c.x, c.y - z, TW * 0.34, TH * 0.34, 0, 0, 7);
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(200,230,255,0.10)';
+      ctx.beginPath();
+      ctx.ellipse(c.x, c.y - z, TW * 0.30, TH * 0.30, 0, 0, 7);
+      ctx.fill();
+    }
+
     if (t.t === 'boulder') {
       for (let i = 0; i < 2; i++) {
         const u = 0.24 + ((t.v * 700 + i * 150) % 52) / 100;
@@ -454,6 +470,7 @@
     const stage = zn.stage;
     const v = variant(t);
     const ring = `rgba(${ZONE_RING[zn.kind]},0.55)`;
+    const snatched = window.LM_INVASION ? window.LM_INVASION.isSnatched(s, t) : false;
 
     if (stage === 0) {                       // zoned, nothing built yet
       ctx.globalAlpha = 0.5;
@@ -517,7 +534,10 @@
           const on = ((t.v * 7919 + r * 131 + c * 17) % 100) / 100 > 0.28;
           const u = 0.28 + c * 0.22;
           const q = iso(t.x + u, t.y + 0.8);
-          ctx.fillStyle = on ? `rgba(255,214,140,${0.30 + l * 0.4})`
+          /* A snatched district reads wrong before you have worked out why:
+             every window in it is lit the same sickly green. */
+          ctx.fillStyle = on ? (snatched ? `rgba(150,255,170,${0.35 + l * 0.4})`
+                                         : `rgba(255,214,140,${0.30 + l * 0.4})`)
                              : `rgba(40,52,74,${0.35 + l * 0.25})`;
           ctx.fillRect(q.x - 1.6, q.y - wy - 2.4, 3.2, dense ? 2.2 : 3.4);
         }
@@ -1063,6 +1083,169 @@
     }
   }
 
+  /* ---------- invasion set pieces (cosmetic, from fx.js) ----------
+
+     Drawn in world space AFTER the tile walk, because every one of them is
+     either in the sky or a column of light going up — they belong in front of
+     the city, not sorted into it. Timing comes from LM_FX's injectable clock,
+     which is what lets a frame of any of these be frozen and screenshotted in
+     a browser whose animation clock is throttled to a third of a frame per
+     second. */
+
+  function drawFx(ctx, s) {
+    const FX = window.LM_FX;
+    if (!FX || !FX.count()) return;
+
+    /* Beams and the herald first, then the path-followers, so a saucer
+       crosses in front of a beam rather than behind it. */
+    for (const fx of FX.all()) {
+      const p = FX.progress(fx);
+      if (fx.kind === 'beam') drawBeam(ctx, s, fx, p);
+      else if (fx.kind === 'herald') drawHerald(ctx, s, fx, p);
+    }
+    for (const fx of FX.all()) {
+      if (fx.kind !== 'saucer' && fx.kind !== 'worm') continue;
+      drawTraveller(ctx, s, fx, FX.progress(fx));
+    }
+  }
+
+  /* A saucer riding its cut, or a worm surfacing along its trench. Both
+     follow a path the simulation already decided on. */
+  function drawTraveller(ctx, s, fx, p) {
+    const path = fx.path || [];
+    if (path.length < 2) return;
+    const i = Math.min(path.length - 1, Math.floor(p * (path.length - 1)));
+    const [tx, ty] = path[i];
+    const t = T.tileAt(s, tx, ty);
+    const z = t ? lift(t) : 0;
+    const q = iso(tx + 0.5, ty + 0.5);
+
+    if (fx.kind === 'worm') {
+      /* segments arcing out of the ground and back into it */
+      for (let k = -3; k <= 3; k++) {
+        const j = Math.max(0, Math.min(path.length - 1, i + k));
+        const [px, py] = path[j];
+        const w = T.tileAt(s, px, py);
+        const wz = w ? lift(w) : 0;
+        const c = iso(px + 0.5, py + 0.5);
+        const arc = Math.max(0, Math.cos((k / 3) * Math.PI / 2)) * 26;
+        ctx.fillStyle = `rgba(${120 - k * 4},${86},${74},0.95)`;
+        ctx.beginPath();
+        ctx.ellipse(c.x, c.y - wz - arc, 15 - Math.abs(k) * 1.4, 9 - Math.abs(k) * 0.8, 0, 0, 7);
+        ctx.fill();
+        if (k === 0) {                      // the business end
+          ctx.fillStyle = 'rgba(255,120,90,0.9)';
+          ctx.beginPath(); ctx.ellipse(c.x, c.y - wz - arc, 6, 4, 0, 0, 7); ctx.fill();
+        }
+      }
+      return;
+    }
+
+    /* saucer: hull, dome, running lights, and the beam it is cutting with */
+    const alt = 120;
+    const cx = q.x, cy = q.y - z - alt;
+
+    const beam = ctx.createLinearGradient(cx, cy, cx, q.y - z);
+    beam.addColorStop(0, 'rgba(180,255,210,0.55)');
+    beam.addColorStop(1, 'rgba(120,255,170,0.06)');
+    ctx.fillStyle = beam;
+    ctx.beginPath();
+    ctx.moveTo(cx - 5, cy + 4); ctx.lineTo(cx + 5, cy + 4);
+    ctx.lineTo(cx + 26, q.y - z); ctx.lineTo(cx - 26, q.y - z);
+    ctx.closePath(); ctx.fill();
+    /* the scorch where it is landing right now */
+    ctx.fillStyle = 'rgba(255,150,80,0.55)';
+    ctx.beginPath(); ctx.ellipse(q.x, q.y - z, 22, 11, 0, 0, 7); ctx.fill();
+
+    ctx.fillStyle = '#2b3340';
+    ctx.beginPath(); ctx.ellipse(cx, cy, 34, 12, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = '#59667d';
+    ctx.beginPath(); ctx.ellipse(cx, cy - 4, 34, 11, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = '#9fb6d4';
+    ctx.beginPath(); ctx.ellipse(cx, cy - 10, 15, 8, 0, 0, 7); ctx.fill();
+    for (let k = 0; k < 7; k++) {
+      const a = (k / 7) * Math.PI * 2 + Date.now() / 400;
+      ctx.fillStyle = `rgba(255,${180 + k * 8},120,0.95)`;
+      ctx.beginPath();
+      ctx.arc(cx + Math.cos(a) * 28, cy + Math.sin(a) * 9, 2.2, 0, 7);
+      ctx.fill();
+    }
+  }
+
+  /* A tractor beam, with whatever it is taking rising up inside it. */
+  function drawBeam(ctx, s, fx, p) {
+    const t = T.tileAt(s, fx.x, fx.y);
+    const z = t ? lift(t) : 0;
+    const q = iso(fx.x + 0.5, fx.y + 0.5);
+    const top = q.y - z - 320;
+    const flare = Math.sin(Math.min(1, p * 1.6) * Math.PI);
+
+    const g = ctx.createLinearGradient(q.x, top, q.x, q.y - z);
+    g.addColorStop(0, `rgba(190,255,235,${0.05 + flare * 0.20})`);
+    g.addColorStop(0.7, `rgba(150,255,220,${0.12 + flare * 0.30})`);
+    g.addColorStop(1, `rgba(120,255,200,${0.20 + flare * 0.45})`);
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.moveTo(q.x - 8, top); ctx.lineTo(q.x + 8, top);
+    ctx.lineTo(q.x + 46, q.y - z); ctx.lineTo(q.x - 46, q.y - z);
+    ctx.closePath(); ctx.fill();
+
+    ctx.fillStyle = `rgba(200,255,235,${0.35 + flare * 0.4})`;
+    ctx.beginPath(); ctx.ellipse(q.x, q.y - z, 46, 22, 0, 0, 7); ctx.fill();
+
+    /* the abductee, tumbling upward and shrinking as it goes */
+    const rise = p * 300;
+    const sc = Math.max(0.1, 1 - p);
+    ctx.save();
+    ctx.translate(q.x, q.y - z - 18 - rise);
+    ctx.rotate(p * 3.2);
+    ctx.fillStyle = `rgba(205,214,226,${0.95 - p * 0.5})`;
+    ctx.fillRect(-13 * sc, -13 * sc, 26 * sc, 26 * sc);
+    ctx.restore();
+  }
+
+  /* The Chrome Herald: a figure on a board, trailing light. */
+  function drawHerald(ctx, s, fx, p) {
+    const path = fx.path || [];
+    if (path.length < 2) return;
+    const i = Math.min(path.length - 1, Math.floor(p * (path.length - 1)));
+    const [tx, ty] = path[i];
+    const t = T.tileAt(s, tx, ty);
+    const z = t ? lift(t) : 0;
+    const q = iso(tx + 0.5, ty + 0.5);
+    const alt = 150 + Math.sin(p * Math.PI * 3) * 22;
+    const cx = q.x, cy = q.y - z - alt;
+
+    /* the trail, drawn back along the path it has already covered */
+    ctx.lineWidth = 5; ctx.lineCap = 'round';
+    for (let k = 1; k <= 14; k++) {
+      const j = Math.max(0, i - k);
+      const [ax, ay] = path[j], [bx, by] = path[Math.max(0, i - k + 1)];
+      const at = T.tileAt(s, ax, ay), bt = T.tileAt(s, bx, by);
+      const a = iso(ax + 0.5, ay + 0.5), b = iso(bx + 0.5, by + 0.5);
+      ctx.strokeStyle = `rgba(215,245,255,${0.5 * (1 - k / 14)})`;
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y - (at ? lift(at) : 0) - alt);
+      ctx.lineTo(b.x, b.y - (bt ? lift(bt) : 0) - alt);
+      ctx.stroke();
+    }
+    ctx.lineCap = 'butt';
+
+    const glow = ctx.createRadialGradient(cx, cy, 0, cx, cy, 40);
+    glow.addColorStop(0, 'rgba(235,250,255,0.65)');
+    glow.addColorStop(1, 'rgba(200,240,255,0)');
+    ctx.fillStyle = glow;
+    ctx.beginPath(); ctx.arc(cx, cy, 40, 0, 7); ctx.fill();
+
+    ctx.fillStyle = '#dfeaf6';                       // the board
+    ctx.beginPath(); ctx.ellipse(cx, cy + 6, 22, 5, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = '#eef5ff';                       // and the figure on it
+    ctx.fillRect(cx - 2.6, cy - 16, 5.2, 16);
+    ctx.beginPath(); ctx.arc(cx, cy - 20, 4, 0, 7); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    ctx.fillRect(cx - 9, cy - 11, 18, 2.4);          // arms out
+  }
+
   /* ---------- viewport culling ---------- */
 
   /* Padded generously on the far side: a tall tile is drawn well above its
@@ -1232,6 +1415,9 @@
 
     /* the ones a tower is standing in front of, as silhouettes over the top */
     for (const a of traffic.hidden) drawGhost(ctx, s, a);
+
+    /* set pieces last: they are in the sky, or a column of light going up */
+    drawFx(ctx, s);
 
     if (ui.view && ui.view !== 'terrain') drawOverlay(ctx, s, ui, range);
     if (ui.preview) drawPreview(ctx, s, ui.preview);

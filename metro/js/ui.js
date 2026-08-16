@@ -547,6 +547,7 @@
     document.getElementById('btnAuto').classList.toggle('on', !!s.autoPlay);
     document.getElementById('btnSandbox').classList.toggle('on', !!s.sandbox);
     document.getElementById('btnDisasters').classList.toggle('on', !!s.disastersOn);
+    document.getElementById('btnInvasion').classList.toggle('on', !!s.invasionOn);
   }
 
   document.getElementById('btnAuto').onclick = () => {
@@ -576,6 +577,34 @@
       : 'Disasters off.');
     save();
   };
+
+  document.getElementById('btnInvasion').onclick = () => {
+    s.invasionOn = !s.invasionOn;
+    markModes();
+    toast(s.invasionOn
+      ? 'Invasion deck armed. Half of it is harmless and one card is good news.'
+      : 'Invasion deck stood down.');
+    save();
+  };
+
+  /* Stages the animation for whatever the invasion deck just did. The
+     simulation returns a descriptor — the path a saucer flew, the tile a beam
+     came down on — and this is the only place that turns one into a picture,
+     so invasion.js never has to know a renderer exists. */
+  function stageInvasionFx(ev) {
+    const FX = window.LM_FX;
+    if (!FX || !ev) return;
+    if (ev.id === 'ufo') FX.spawn('saucer', { path: ev.path, dur: 7000 });
+    else if (ev.id === 'worm') FX.spawn('worm', { path: ev.path, dur: 6500 });
+    else if (ev.id === 'abduction' && ev.taken) FX.spawn('beam', { x: ev.taken.x, y: ev.taken.y, dur: 5200 });
+    else if (ev.id === 'herald') {
+      /* the herald leaves no path of its own, so give it one across the
+         district it cleaned */
+      const path = [];
+      for (let i = -14; i <= 14; i++) path.push([ev.x + i, ev.y]);
+      FX.spawn('herald', { path, dur: 7500 });
+    }
+  }
 
   /* ---------- the General's offer ----------
 
@@ -696,7 +725,10 @@
     if (ui.speed > 0) {
       acc += dt * ui.speed;
       while (acc > DAY_MS / 1000 && ticked < 12) {
-        try { S.tick(s); } catch (e) { console.error(e); }
+        try {
+          const r = S.tick(s);
+          if (r && r.invasion) stageInvasionFx(r.invasion);
+        } catch (e) { console.error(e); }
         acc -= DAY_MS / 1000;
         ticked++;
       }
@@ -715,6 +747,10 @@
         if (trends && trends.classList.contains('on')) buildTrends();
       }
     }
+    /* Set pieces retire themselves on their own clock, which keeps running
+       while the city is paused — an eight-second animation should finish
+       playing even if you hit pause halfway through it. */
+    if (window.LM_FX) window.LM_FX.update();
     /* Traffic moves only while the clock does — a paused city should be a
        still photograph, not a diorama with the cars still running. Scaled by
        game speed so 12x reads as rush hour. Guarded like everything else in

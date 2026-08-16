@@ -147,6 +147,10 @@
        every existing caller. */
     const dSpec = ctx.specialDist ? ctx.specialDist[k] : 99;
     if (dSpec <= 4) v -= (5 - dSpec) * 0.05;
+    /* A snatched district is structurally fine and nobody wants to live in
+       it. The entire cost of that invasion event is right here, and it
+       expires on its own. */
+    if (ctx.snatched && ctx.snatched(tile)) v -= 0.55;
     return clamp(v, 0, 1);
   }
 
@@ -174,6 +178,7 @@
     const ctx = {
       transit: (x, y) => G.hasTransit(s, x, y),
       indDist, specialDist,
+      snatched: t => window.LM_INVASION ? window.LM_INVASION.isSnatched(s, t) : false,
       transitMul: eff.transitMul,
       cov
     };

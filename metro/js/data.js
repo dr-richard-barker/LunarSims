@@ -115,6 +115,19 @@ const K = {
   DISASTER_COOLDOWN: 45,       // days of quiet after one fires
   DISASTER_GRACE: 20,          // no events at all before this day
 
+  /* The invasion deck rolls on its own dice, on its own toggle. A little
+     more often than the disasters, because half of it is harmless and the
+     whole point of it is to be seen. */
+  INVASION_BASE_CHANCE: 0.007,
+  INVASION_MAX_CHANCE: 0.028,
+  INVASION_COOLDOWN: 30,
+  /* Matched to the earliest card in the deck. Set below it the grace period
+     did nothing at all, because every card's own minDay was already later —
+     a limit that can never be the binding one is a comment pretending to be
+     a constant. */
+  INVASION_GRACE: 15,
+  SNATCH_DAYS: 60,             // how long a snatched district stays wrong
+
   /* ---- AI auto-play ----
      Block spacing for the director's lattice. Tube streets every third row
      put every tile within one of a tube, which is the adjacency the growth
@@ -385,6 +398,41 @@ const DISASTERS = [
     desc: 'A meteoroid gets through. Everything inside the crater is gone and the ground itself is rewritten — the only event that changes the terrain.' }
 ];
 
+/* The Invasion deck — a second, entirely separate roster from DISASTERS.
+
+   Kept apart on purpose. The disaster deck is grounded and is what the CoSE
+   Academy module leans on; this one is a 1950s B-movie and has its own
+   toggle, so a player choosing one is never forced into the other.
+
+   Every character here is a public-domain pulp archetype — flying saucers,
+   tractor beams, burrowing monsters, body snatchers — drawn originally. No
+   named or licensed characters: the chrome figure on a board is an archetype
+   older and broader than any one publisher's version of it, so this one is
+   the Chrome Herald, with its own design and its own joke.
+
+   The joke being that it is filed under invasions and is entirely good news. */
+const INVASIONS = [
+  { id: 'circles', name: 'Crop Circles', glyph: '◎', weight: 1.6, minDay: 15,
+    harmless: true,
+    desc: 'Geometric figures appear pressed into the regolith overnight. Nobody saw anything. Nothing is damaged and no one can explain them.' },
+
+  { id: 'ufo', name: 'UFO Raid', glyph: '🛸', weight: 1.3, minDay: 40,
+    desc: 'A saucer crosses the city at low altitude with a cutting beam lit, and burns a line straight through whatever was under it.' },
+
+  { id: 'abduction', name: 'Abduction Beam', glyph: '🔦', weight: 1.1, minDay: 35,
+    desc: 'A tractor beam settles over one structure and lifts it clean off the Moon, leaving a suspiciously tidy circle of swept ground.' },
+
+  { id: 'herald', name: 'The Chrome Herald', glyph: '✧', weight: 0.9, minDay: 30,
+    boon: true,
+    desc: 'A silver figure on a board passes overhead trailing light, and every speck of regolith dust in the district goes with it. The arrays have never been cleaner. Filed here for want of anywhere better to put it.' },
+
+  { id: 'worm', name: 'Regolith Worm', glyph: '🪱', weight: 0.9, minDay: 55,
+    desc: 'Something enormous surfaces, crosses the city and goes back under, leaving a trench where it went.' },
+
+  { id: 'snatchers', name: 'Body Snatchers', glyph: '🌱', weight: 0.8, minDay: 45,
+    desc: 'The residents of a district are all subtly, politely wrong. Land value collapses. It wears off, mostly.' }
+];
+
 /* City departments. Each dial runs 0..100% and every one of them has a real,
    present-tense effect — there are no placeholder sliders here. Funding a
    department costs credits every day in proportion to how much of that
@@ -464,4 +512,4 @@ const TOOLS = [
     hint: 'Remove whatever is on a tile — zoning, network or structure.' }
 ];
 
-window.LM_DATA = { K, TERRAIN, DEPOSITS, ZONES, ERAS, BUILDINGS, DEPARTMENTS, SERVICES, TOOLS, DISASTERS };
+window.LM_DATA = { K, TERRAIN, DEPOSITS, ZONES, ERAS, BUILDINGS, DEPARTMENTS, SERVICES, TOOLS, DISASTERS, INVASIONS };

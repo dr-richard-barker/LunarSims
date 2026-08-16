@@ -54,14 +54,17 @@ td.mark{width:34px;text-align:center}
 <script src="js/eras.js"></script>
 <script src="js/zones.js"></script>
 <script src="js/disasters.js"></script>
+<script src="js/invasion.js"></script>
 <script src="js/sim.js"></script>
 <script src="js/autopilot.js"></script>
 <script src="js/agents.js"></script>
+<script src="js/fx.js"></script>
 <script>
 (function () {
   const T = window.LM_TERRAIN, G = window.LM_GRID, Z = window.LM_ZONES, S = window.LM_SIM;
   const B = window.LM_BUDGET, SV = window.LM_SERVICES, E = window.LM_ERAS;
   const AI = window.LM_AUTO, DIS = window.LM_DISASTERS, AG = window.LM_AGENTS;
+  const INV = window.LM_INVASION, FX = window.LM_FX;
   const K = window.LM_DATA.K, LM_DATA = window.LM_DATA;
 
   /* A fixed-sequence stand-in for Math.random, so every scenario that rolls
@@ -1846,6 +1849,205 @@ td.mark{width:34px;text-align:center}
             s.log.filter(e => /colony ship/i.test(e.msg)).length, '>=2'],
           ['and the arcology still houses its people afterwards',
             Z.tally(s).housingCap, cap0]
+        ];
+      } },
+
+    /* ---------- v2 phase 5: the invasion deck ---------- */
+
+    { name: 'The invasion deck is a separate opt-in from the disasters',
+      why: 'the grounded deck is what the teaching module leans on — a player who wants flying saucers must not be forced to take them with their electrostatic dust transport, or vice versa',
+      run() {
+        /* needs something on the map: both decks aim at the city, and an
+           empty world has no bounds to aim at */
+        const s = city();
+        develop(s, 62, 62, 'hab', 'high', 3);
+        s.day = 500;
+        const noneByDefault = INV.maybeFire(s, () => 0);
+        s.disastersOn = true;
+        const stillNone = INV.maybeFire(s, () => 0);
+        s.disastersOn = false; s.invasionOn = true;
+        const fires = INV.maybeFire(s, () => 0);
+        /* and the other direction */
+        const d = city(); develop(d, 62, 62, 'hab', 'high', 3);
+        d.day = 500; d.invasionOn = true;
+        const noDisaster = DIS.maybeFire(d, () => 0);
+        return [
+          ['invasion is off in a new city', S.newGame(1).invasionOn, false],
+          ['nothing fires with both toggles off', noneByDefault, null],
+          ['arming disasters does not arm the invasion deck', stillNone, null],
+          ['arming the invasion deck does', fires !== null, true],
+          ['and it does not arm the disasters either', noDisaster, null],
+          ['the two decks are genuinely different rosters',
+            LM_DATA.INVASIONS.every(i => !LM_DATA.DISASTERS.some(d2 => d2.id === i.id)), true]
+        ];
+      } },
+
+    { name: 'Half the invasion deck does no damage at all',
+      why: 'an invasion roster where every card costs you something is just the disaster deck in a rubber mask — the harmless ones are what make it a different feature rather than a reskin',
+      run() {
+        const mk = () => {
+          const s = city();
+          grantEra(s);
+          for (let y = 58; y <= 66; y++) for (let x = 58; x <= 66; x++) {
+            develop(s, x, y, 'hab', 'high', 3);
+            T.tileAt(s, x, y).dust = 0.6;
+          }
+          return s;
+        };
+        const census = s => ({
+          built: s.map.filter(t => t.b).length,
+          zoned: s.map.filter(t => t.zone).length,
+          stages: s.map.reduce((a, t) => a + (t.zone ? t.zone.stage : 0), 0),
+          height: s.map.reduce((a, t) => a + t.h, 0)
+        });
+
+        const c = mk(); const before = JSON.stringify(census(c));
+        INV.fire(c, 'circles', T.tileAt(c, 62, 62), seededRnd(4));
+        const marked = c.map.filter(t => t.pattern).length;
+
+        const h = mk(); const hBefore = JSON.stringify(census(h));
+        const dust0 = T.tileAt(h, 62, 62).dust;
+        const sci0 = h.research;
+        INV.fire(h, 'herald', T.tileAt(h, 62, 62), seededRnd(5));
+
+        const sn = mk(); const snBefore = JSON.stringify(census(sn));
+        INV.fire(sn, 'snatchers', T.tileAt(sn, 62, 62), seededRnd(6));
+
+        return [
+          ['crop circles mark the ground', marked, '>0'],
+          ['and break absolutely nothing', JSON.stringify(census(c)), before],
+          ['the herald scrubs the dust field', T.tileAt(h, 62, 62).dust, 0],
+          ['it started dusty, so that is a real change', dust0, '>0.5'],
+          ['and it pays a research windfall', h.research - sci0, '>0'],
+          ['while breaking nothing either', JSON.stringify(census(h)), hBefore],
+          ['body snatchers damage no structures', JSON.stringify(census(sn)), snBefore],
+          ['they just make the district wrong',
+            sn.map.filter(t => INV.isSnatched(sn, t)).length, '>0']
+        ];
+      } },
+
+    { name: 'The destructive cards each destroy in a different shape',
+      why: 'a saucer, a worm and a tractor beam that all razed the same disc would be one event with three animations',
+      run() {
+        const mk = () => {
+          const s = city();
+          grantEra(s);
+          for (let y = 52; y <= 76; y++) for (let x = 52; x <= 76; x++) develop(s, x, y, 'hab', 'high', 3);
+          return s;
+        };
+        const razed = s => s.map.filter(t => t.zone === null || t.zone === undefined).length;
+
+        const u = mk(); const u0 = razed(u);
+        /* the generator's ground is not level, so compare before with after
+           rather than asserting the row is flat */
+        const rowH = s2 => s2.map.filter(t => t.y === 64 && t.x >= 52 && t.x <= 76)
+                             .map(t => t.h).join(',');
+        const hBefore = rowH(u);
+        const ufo = INV.fire(u, 'ufo', T.tileAt(u, 64, 64), seededRnd(11));
+
+        const w = mk(); const wH0 = w.map.reduce((a, t) => a + t.h, 0);
+        const worm = INV.fire(w, 'worm', T.tileAt(w, 64, 64), seededRnd(12));
+
+        const ab = mk(); const ab0 = razed(ab);
+        const abd = INV.fire(ab, 'abduction', T.tileAt(ab, 64, 64), seededRnd(13));
+
+        return [
+          ['the saucer cuts a line, not a blob', ufo.path.length, '>=16'],
+          ['and it razes what was under it', razed(u) - u0, '>=16'],
+          ['but leaves the ground at exactly the height it found it',
+            rowH(u), hBefore],
+          ['the worm digs — it is the one that moves terrain',
+            w.map.reduce((a, t) => a + t.h, 0) < wH0, true],
+          ['the beam takes exactly one thing', razed(ab) - ab0, 1],
+          ['and it names what it took', /took the/.test(abd.msg), true],
+          ['every card writes one line to the log',
+            [u, w, ab].every(s2 => s2.log.length === 1), true]
+        ];
+      } },
+
+    { name: 'A snatched district loses its value and then gets it back',
+      why: 'the whole cost of that card is the land value, so if it did not move — or if it never wore off — the event would either be nothing or be permanent, and neither is the joke',
+      run() {
+        const s = servicedRow(60, 62, 6);
+        grantEra(s);
+        S.paintZone(s, 60, 62, 6, 1, 'hab', 'low');
+        for (let i = 0; i < 260; i++) S.tick(s);
+        const healthy = T.tileAt(s, 62, 62).zone.value;
+
+        INV.fire(s, 'snatchers', T.tileAt(s, 62, 62), seededRnd(21));
+        for (let i = 0; i < 5; i++) S.tick(s);
+        const wrong = T.tileAt(s, 62, 62).zone.value;
+        const flagged = INV.isSnatched(s, T.tileAt(s, 62, 62));
+
+        for (let i = 0; i < K.SNATCH_DAYS + 40; i++) S.tick(s);
+        const recovered = T.tileAt(s, 62, 62).zone.value;
+        return [
+          ['the district was worth something first', healthy, '>0.2'],
+          ['being snatched craters its value', wrong < healthy - 0.3, true],
+          ['it is flagged while it lasts', flagged, true],
+          ['it wears off on its own', INV.isSnatched(s, T.tileAt(s, 62, 62)), false],
+          ['and the value comes back', recovered > wrong + 0.2, true]
+        ];
+      } },
+
+    { name: 'Set pieces run on an injectable clock and retire themselves',
+      why: 'this is the only reason any of these animations can be verified at all — requestAnimationFrame is throttled to about a third of a frame per second here, so a seven-second effect cannot be caught by screenshotting and hoping',
+      run() {
+        FX.clear();
+        let t = 0;
+        FX.setClock(() => t);
+
+        const fx = FX.spawn('saucer', { path: [[10, 10], [20, 10]], dur: 1000 });
+        const atStart = FX.progress(fx);
+        t = 250; const quarter = FX.progress(fx);
+        t = 500; const half = FX.progress(fx);
+        t = 900; const late = FX.progress(fx);
+        const aliveBefore = (FX.update(), FX.count());
+        t = 1100; FX.update();
+        const aliveAfter = FX.count();
+
+        /* and it never reports outside 0..1 even past its life */
+        t = 99999; const clamped = FX.progress(fx);
+        FX.setClock(null); FX.clear();
+        return [
+          ['a fresh set piece is at the start', atStart, 0],
+          ['a quarter of the way through', quarter, 0.25],
+          ['halfway', half, 0.5],
+          ['nearly done', late, 0.9],
+          ['still alive before its time is up', aliveBefore, 1],
+          ['retired once it is', aliveAfter, 0],
+          ['and progress never runs past the end', clamped, 1]
+        ];
+      } },
+
+    { name: 'Invasions are rate-limited and never end a run',
+      why: 'the same discipline the disaster deck follows — this is a sandbox builder, and the worst any card may do is give you ground to rebuild',
+      run() {
+        const s = city();
+        grantEra(s);
+        for (let y = 58; y <= 70; y++) for (let x = 58; x <= 70; x++) develop(s, x, y, 'hab', 'high', 3);
+        s.invasionOn = true;
+        const always = () => 0;
+        s.day = 5;
+        const tooEarly = INV.maybeFire(s, always);
+        s.day = K.INVASION_GRACE + 1;
+        const first = INV.maybeFire(s, always);
+        const immediately = INV.maybeFire(s, always);
+        s.day += K.INVASION_COOLDOWN + 1;
+        const later = INV.maybeFire(s, always);
+
+        /* now let a big city take a long run of them and confirm it survives */
+        const long = S.newGame(555);
+        long.autoPlay = true; long.invasionOn = true; long.disastersOn = true;
+        for (let i = 0; i < 900; i++) S.tick(long);
+        return [
+          ['nothing fires in the opening grace period', tooEarly, null],
+          ['the first one fires once the city is established', first !== null, true],
+          ['a second cannot land straight behind it', immediately, null],
+          ['but one can once the cooldown has passed', later !== null, true],
+          ['a city under both decks for 900 days still stands', long.pop, '>0'],
+          ['and is still solvent', long.credits, '>=0'],
+          ['and something actually happened to it', long.log.length, '>0']
         ];
       } }
   ];
