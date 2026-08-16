@@ -62,7 +62,7 @@ td.mark{width:34px;text-align:center}
   const T = window.LM_TERRAIN, G = window.LM_GRID, Z = window.LM_ZONES, S = window.LM_SIM;
   const B = window.LM_BUDGET, SV = window.LM_SERVICES, E = window.LM_ERAS;
   const AI = window.LM_AUTO, DIS = window.LM_DISASTERS, AG = window.LM_AGENTS;
-  const K = window.LM_DATA.K;
+  const K = window.LM_DATA.K, LM_DATA = window.LM_DATA;
 
   /* A fixed-sequence stand-in for Math.random, so every scenario that rolls
      dice produces the same city twice. */
@@ -1684,6 +1684,168 @@ td.mark{width:34px;text-align:center}
           ['it built a launch complex', count('launch'), '>0'],
           ['and the city still works', s.pop, '>=500'],
           ['and is still solvent', s.credits, '>=0']
+        ];
+      } },
+
+    /* ---------- v2 phase 4: the wonders ---------- */
+
+    { name: 'Every wonder is gated on ground you had to find or make',
+      why: 'a wonder you can drop anywhere once the number is big enough is just an expensive building — the gate is what makes it a reward for reading the map',
+      run() {
+        const s = city();
+        grantEra(s); s.credits = 1e9;
+        /* the middle of the cleared test area: flat, open, mid-height, sunlit
+           and nowhere near a skylight, ridge, crater or launch pad */
+        const plain = T.tileAt(s, 62, 70);
+        const wonders = LM_DATA.BUILDINGS.filter(b => b.group === 'wonder');
+        const refusedOnPlainGround = wonders
+          .filter(b => S.canPlace(s, plain, b.id) !== null)
+          .map(b => b.id);
+        return [
+          ['there are eight wonders in the roster', wonders.length, 8],
+          ['every one of them carries a terrain requirement',
+            wonders.every(b => b.needsSkylight || b.needsRidge || b.needsHeight ||
+                               b.needsLevel || b.needsOpen || b.needsShadow ||
+                               b.needsPeakSun || b.needsLaunchPad), true],
+          ['and all but the level-ground ones are refused on plain flat ground',
+            refusedOnPlainGround.length, '>=6'],
+          ['each refusal explains what it wants',
+            wonders.every(b => {
+              const e = S.canPlace(s, plain, b.id);
+              return e === null || e.length > 20;
+            }), true]
+        ];
+      } },
+
+    { name: 'The terrain gates accept exactly the ground they describe',
+      why: 'a gate that refuses everything is the same bug as a gate that allows everything, and neither shows up until someone plays for an hour looking for a valid site',
+      run() {
+        const mk = () => { const s = city(); grantEra(s); s.credits = 1e9; return s; };
+
+        /* space elevator: high ground */
+        const a = mk();
+        const lowT = T.tileAt(a, 62, 70); lowT.h = 3;
+        const noHigh = S.canPlace(a, lowT, 'elevator');
+        for (let y = 66; y <= 74; y++) for (let x = 58; x <= 66; x++) T.tileAt(a, x, y).h = 12;
+        const yesHigh = S.canPlace(a, T.tileAt(a, 62, 70), 'elevator');
+
+        /* telescope: a genuinely shadowed crater floor, rim above it */
+        const b = mk();
+        for (let y = 64; y <= 76; y++) for (let x = 56; x <= 68; x++) {
+          const t = T.tileAt(b, x, y);
+          const d = Math.max(Math.abs(x - 62), Math.abs(y - 70));
+          t.h = d >= 4 ? 9 : 2; t.sun = d >= 4 ? 0.9 : 0.05;
+        }
+        const yesCrater = S.canPlace(b, T.tileAt(b, 62, 70), 'telescope');
+        const noRim = S.canPlace(b, T.tileAt(b, 57, 70), 'telescope');
+
+        /* heliostat: a peak of eternal light */
+        const c = mk();
+        const peak = T.tileAt(c, 62, 70);
+        const noDim = (peak.h = 10, peak.sun = 0.4, S.canPlace(c, peak, 'heliostat'));
+        peak.sun = 0.95;
+        const yesPeak = S.canPlace(c, peak, 'heliostat');
+
+        /* arcology: beside a working launch complex */
+        const d = mk();
+        const beside = T.tileAt(d, 62, 70);
+        const noPad = S.canPlace(d, beside, 'arcology');
+        develop(d, 63, 70, 'launch', 'low', 2);
+        const yesPad = S.canPlace(d, beside, 'arcology');
+
+        return [
+          ['an elevator is refused on low ground', noHigh !== null, true],
+          ['and allowed once the ground is high enough', yesHigh, null],
+          ['a telescope is allowed on a shadowed crater floor', yesCrater, null],
+          ['but refused up on the sunlit rim', noRim !== null, true],
+          ['a heliostat is refused where the sun does not stay', noDim !== null, true],
+          ['and allowed on a peak of eternal light', yesPeak, null],
+          ['an arcology is refused with no pad beside it', noPad !== null, true],
+          ['and allowed next to a working launch complex', yesPad, null]
+        ];
+      } },
+
+    { name: 'Wonders pay out in the currency they promise',
+      why: 'six wonders that all just made money would be one wonder with six skins — each has to move a different number, and the data has to drive it rather than a list of names in the tally',
+      run() {
+        const put = (id, setup) => {
+          const s = city(); grantEra(s); s.credits = 1e9;
+          const t = T.tileAt(s, 62, 70);
+          if (setup) setup(s, t);
+          const err = S.place(s, t, id);
+          return { s, t, err };
+        };
+        const base = Z.tally(city());
+        const basePower = Z.power(city()).gen;
+
+        const elev = put('elevator', (s) => {
+          for (let y = 66; y <= 74; y++) for (let x = 58; x <= 66; x++) T.tileAt(s, x, y).h = 12;
+        });
+        const heli = put('heliostat', (s, t) => { t.h = 10; t.sun = 0.95; });
+        const arc = put('arcology', (s) => develop(s, 63, 70, 'launch', 'low', 2));
+
+        /* the telescope's research is added by the tick, not by the tally */
+        const tel = put('telescope', (s) => {
+          for (let y = 64; y <= 76; y++) for (let x = 56; x <= 68; x++) {
+            const q = T.tileAt(s, x, y);
+            const d = Math.max(Math.abs(x - 62), Math.abs(y - 70));
+            q.h = d >= 4 ? 9 : 2; q.sun = d >= 4 ? 0.9 : 0.05;
+          }
+        });
+        const sci0 = tel.s.research;
+        for (let i = 0; i < 10; i++) S.tick(tel.s);
+
+        return [
+          ['all four were actually placed',
+            [elev.err, heli.err, arc.err, tel.err].every(e => e === null), true],
+          ['the space elevator pays a large export income',
+            Z.tally(elev.s).income - base.income, '>=2400'],
+          ['the heliostat crown generates real power',
+            Z.power(heli.s).gen - basePower, '>=110'],
+          ['the arcology houses tens of thousands',
+            Z.tally(arc.s).housingCap - base.housingCap, '>=2600'],
+          ['the telescope does research on an empty crater floor',
+            tel.s.research - sci0, '>=300'],
+          ['and every one of them draws power',
+            [elev, heli, arc, tel].every(o => Z.power(o.s).o2Draw > 0), true]
+        ];
+      } },
+
+    { name: 'Wonders feed the same coverage fields the civic buildings do',
+      why: 'the amenity wonders are supposed to lift the neighbourhood — if they did not touch the coverage field they would be expensive scenery with a nice description',
+      run() {
+        const s = city(); grantEra(s); s.credits = 1e9;
+        flatten(s, 62, 70, 3, 5);            // the tower wants level ground
+        const eff = B.effects(s);
+        const before = SV.coverage(s, eff).amenity[G.idx(62, 70)];
+        const err = S.place(s, T.tileAt(s, 62, 70), 'eiffel');
+        if (err) return [['the tower could not be placed at all', err, null]];
+        const after = SV.coverage(s, eff).amenity[G.idx(62, 70)];
+        const faraway = SV.coverage(s, eff).amenity[G.idx(62, 70 + 25)];
+        return [
+          ['the site had no amenity cover to begin with', before, 0],
+          ['the tower blankets its own ground', after, '>=0.9'],
+          ['the effect reaches a long way', SV.coverage(s, eff).amenity[G.idx(62, 82)], '>0'],
+          ['but not across the whole map', faraway, 0]
+        ];
+      } },
+
+    { name: 'The arcology dispatches colony ships and keeps its residents',
+      why: 'SimCity 2000 launched its arcologies away with everyone aboard, which in a game with no fail state would be the nearest thing to one — the homage has to land without deleting the player\'s city',
+      run() {
+        const s = city(); grantEra(s); s.credits = 1e9;
+        develop(s, 63, 70, 'launch', 'low', 2);
+        S.place(s, T.tileAt(s, 62, 70), 'arcology');
+        const cap0 = Z.tally(s).housingCap;
+        const B2 = S.buildById('arcology');
+        for (let i = 0; i < B2.departsEvery * 2 + 3; i++) S.tick(s);
+        return [
+          ['ships have gone out', s.departed, '>0'],
+          ['more than one of them', s.departed, '>=' + (B2.housing * 2)],
+          ['each departure is logged',
+            s.log.filter(e => /colony ship/i.test(e.msg)).length, '>=2'],
+          ['and the arcology still houses its people afterwards',
+            Z.tally(s).housingCap, cap0]
         ];
       } }
   ];

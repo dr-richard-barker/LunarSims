@@ -85,6 +85,64 @@
   const free = s => !!s.sandbox;
   const cost = (s, n) => free(s) ? 0 : n;
 
+  /* Level ground: this tile and all eight neighbours at the same height, and
+     all of them buildable. */
+  function isLevel(s, t, r) {
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        const n = T.tileAt(s, t.x + dx, t.y + dy);
+        if (!n || n.h !== t.h || !T.buildable(n)) return false;
+      }
+    }
+    return true;
+  }
+
+  /* Clear as well as level — nothing already standing on it or zoned. Used by
+     the arena, which wants a real site rather than a gap between towers. */
+  function isOpen(s, t, r) {
+    if (!isLevel(s, t, r)) return false;
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        const n = T.tileAt(s, t.x + dx, t.y + dy);
+        if (n.b || n.zone) return false;
+      }
+    }
+    return true;
+  }
+
+  /* A crater floor the sun never reaches: dark, and genuinely lower than the
+     ground around it rather than merely shaded by a neighbouring tower. */
+  /* Scanned five tiles out, not three. A crater floor wide enough to be worth
+     stringing a dish across is wider than a three-tile scan can see — with
+     the tighter radius the middle of a large crater could not find its own
+     rim and reported flat ground, which refused exactly the sites the
+     telescope exists for. */
+  function inShadowedCrater(s, t) {
+    if (t.sun > K.SUN_SHADOW) return false;
+    let higher = 0, n = 0;
+    for (let dy = -5; dy <= 5; dy++) {
+      for (let dx = -5; dx <= 5; dx++) {
+        const q = T.tileAt(s, t.x + dx, t.y + dy);
+        if (!q) continue;
+        n++;
+        if (q.h > t.h) higher++;
+      }
+    }
+    return n > 0 && higher / n >= 0.25;
+  }
+
+  const onPeakOfLight = (s, t) => t.sun >= K.SUN_PEAK && t.h >= 8;
+
+  function besideLaunchPad(s, t) {
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const n = T.tileAt(s, t.x + dx, t.y + dy);
+        if (n && n.zone && n.zone.kind === 'launch' && n.zone.stage > 0) return true;
+      }
+    }
+    return false;
+  }
+
   function canPlace(s, t, type) {
     const B = buildById(type);
     if (!B) return 'Unknown structure.';
@@ -98,6 +156,24 @@
     }
     if (B.needsRidge && !onRidge(s, t)) {
       return 'A mass driver needs seven tiles of level ground at height 7 or above to run along.';
+    }
+    if (B.needsHeight && t.h < B.needsHeight) {
+      return `A space elevator has to be anchored at height ${B.needsHeight} or above — this ground is at ${t.h}.`;
+    }
+    if (B.needsLevel && !isLevel(s, t, B.needsLevel)) {
+      return 'That needs level ground — flatten the site first.';
+    }
+    if (B.needsOpen && !isOpen(s, t, B.needsOpen)) {
+      return `That needs a clear, level ${B.needsOpen * 2 + 1}x${B.needsOpen * 2 + 1} site.`;
+    }
+    if (B.needsShadow && !inShadowedCrater(s, t)) {
+      return 'A radio telescope has to sit on a permanently shadowed crater floor, with the rim above it to screen out Earth.';
+    }
+    if (B.needsPeakSun && !onPeakOfLight(s, t)) {
+      return 'A heliostat crown belongs on a peak of eternal light — high ground the sun never leaves.';
+    }
+    if (B.needsLaunchPad && !besideLaunchPad(s, t)) {
+      return 'A launch arcology has to be built beside a working launch complex.';
     }
     if (!T.buildable(t)) return t.t === 'boulder'
       ? 'Clear the boulders first.'
@@ -189,6 +265,30 @@
     return null;
   }
   const militaryUnlocked = s => !!s.sandbox || !!(s.military && s.military.state === 'accepted');
+
+  /* ---------- the arcology exodus ----------
+
+     SimCity 2000's Launch Arcologies eventually lifted off with everyone
+     inside. Here one dispatches a colony ship periodically and then fills
+     back up, so it reads as the same idea without deleting a chunk of the
+     player's city every few years — this game has no fail state and taking
+     thousands of residents away permanently would be the nearest thing to
+     one. The counter is the score: it is the only number in the game that
+     only ever goes up. */
+  function launchColonyShips(s) {
+    for (const t of s.map) {
+      if (!t.b) continue;
+      const B = buildById(t.b.type);
+      if (!B || !B.departsEvery) continue;
+      if (!t.b.built) t.b.built = s.day;
+      if ((s.day - t.b.built) > 0 && (s.day - t.b.built) % B.departsEvery === 0) {
+        s.departed = (s.departed || 0) + B.housing;
+        pushLog(s, `⬢ A colony ship has left the ${B.name} at ${t.x + 1}, ${t.y + 1} ` +
+          `carrying ${B.housing.toLocaleString()} settlers outbound. ` +
+          `${s.departed.toLocaleString()} have now gone on from here.`);
+      }
+    }
+  }
 
   /* Zoning gates that depend on the KIND being painted rather than on the
      ground. canZone answers "can anything be zoned here"; this answers "is
@@ -296,6 +396,14 @@
       const boost = r.cov ? 1 + r.cov.research[G.idx(t.x, t.y)] : 1;
       sci += r.eff.sciencePerDay * boost;
     }
+    /* Instruments that do research in their own right rather than by
+       multiplying what the districts under them produce — a telescope on an
+       empty crater floor is still doing science. */
+    for (const t of s.map) {
+      if (!t.b) continue;
+      const B = buildById(t.b.type);
+      if (B && B.researchPerDay) sci += B.researchPerDay;
+    }
     s.research += sci;
 
     /* Migration tracks the gap between people and pressurised housing.
@@ -321,6 +429,7 @@
     /* Checked after migration, so the offer arrives on the day the colony
        actually reaches the threshold rather than the day after. */
     offerMilitary(s);
+    launchColonyShips(s);
 
     s.day++;
     s.history.push({
@@ -347,6 +456,7 @@
     canPlace, place, canZone, canZoneKind, paintZone, zoneCost, bulldoze,
     buildById, count, zonedCount, developedCount, pushLog,
     offerMilitary, acceptMilitary, declineMilitary, militaryUnlocked,
-    baseKindFor, BASE_KINDS
+    baseKindFor, BASE_KINDS, launchColonyShips,
+    isLevel, isOpen, inShadowedCrater, onPeakOfLight, besideLaunchPad
   };
 })();

@@ -746,7 +746,17 @@
   window.__lm = {
     get s() { return s; }, ui, ctx, R, S, T, G, Z, E,
     centreOn, redraw: () => R.draw(ctx, s, ui),
-    look(tx, ty, z) { if (z) ui.cam.z = z; centreOn(tx, ty); R.draw(ctx, s, ui); }
+    /* Centres on a tile AS DRAWN, not on its flat footprint. A tile at height
+       12 is painted 168 world units above where centreOn puts it, which at
+       high zoom is most of a screen — looking at a mountaintop with the plain
+       version puts the thing you wanted off the top of the view. */
+    look(tx, ty, z) {
+      if (z) ui.cam.z = z;
+      centreOn(tx, ty);
+      const t = T.tileAt(s, Math.round(tx), Math.round(ty));
+      if (t) ui.cam.y += t.h * K.LEVEL_PX * ui.cam.z;
+      R.draw(ctx, s, ui);
+    }
   };
 
   refreshNets();

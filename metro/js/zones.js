@@ -10,7 +10,7 @@
    feel like infrastructure rather than decoration. No DOM references. */
 
 (function () {
-  const { K, ZONES } = window.LM_DATA;
+  const { K, ZONES, BUILDINGS } = window.LM_DATA;
   const G = window.LM_GRID;
   const idx = G.idx, tileAt = G.tileAt, DIRS = G.DIRS;
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -65,11 +65,14 @@
 
     /* Wonders contribute directly rather than through the zone tables — a
        megadome houses more people than any amount of surface zoning, and a
-       mass driver pays a standing export income. */
+       mass driver pays a standing export income. Read off the building data
+       rather than named one by one, so adding a wonder is a data change. */
     for (const t of s.map) {
       if (!t.b) continue;
-      if (t.b.type === 'megadome') pop += 900;
-      else if (t.b.type === 'massdriver') income += 640;
+      const B = BUILDINGS.find(b => b.id === t.b.type);
+      if (!B) continue;
+      if (B.housing) pop += B.housing;
+      if (B.exportIncome) income += B.exportIncome;
     }
 
     return { housingCap: pop, tradeJobs, industryJobs, specialJobs,
@@ -91,6 +94,12 @@
         gen += 7 * t.sun * fouling;
       } else if (t.b.type === 'reactor') gen += 60;
       else if (t.b.type === 'o2') plants++;
+      else {
+        /* Any other structure carrying a kw rating generates too — the
+           heliostat crown is a power plant that happens to be a wonder. */
+        const B = BUILDINGS.find(b => b.id === t.b.type);
+        if (B && B.kw) gen += B.kw;
+      }
     }
     const svcDraw = window.LM_SERVICES ? window.LM_SERVICES.serviceDraw(s) : 0;
     return { gen, o2Plants: plants, o2Draw: plants * 5 + svcDraw };

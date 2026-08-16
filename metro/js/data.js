@@ -280,6 +280,42 @@ const BUILDINGS = [
   { id: 'megadome', name: 'Lava-Tube Megadome', cost: 42000, group: 'wonder', era: 2,
     once: true, needsSkylight: true, drawKw: 18, housing: 900,
     desc: 'A sealed city built down into an intact lava tube — the most valuable real estate on the Moon, and the only structure that can use a skylight. Must be built beside one. Houses more people than any amount of surface zoning.' },
+  /* ---- the rest of the wonders ----
+
+     Every one is gated on terrain the player either found or sculpted, so a
+     wonder is a reward for reading the map rather than a thing you buy when
+     the number gets big enough. They reuse the existing systems: `service`
+     and `radius` feed the same coverage fields the civic buildings do, `kw`
+     feeds generation, `housing` and `exportIncome` feed the tally. */
+
+  { id: 'elevator', name: 'Space Elevator', cost: 120000, group: 'wonder', era: 3,
+    once: true, needsHeight: 11, drawKw: 45, exportIncome: 2400,
+    service: 'amenity', radius: 16,
+    desc: 'A tether run out to the L1 balance point. The Moon is one of the few places a space elevator is actually buildable with materials that exist — low gravity and no weather. Must stand on high ground, at least 11 levels up.' },
+
+  { id: 'eiffel', name: 'Lunar Eiffel', cost: 46000, group: 'wonder', era: 2,
+    once: true, needsLevel: 1, drawKw: 8,
+    service: 'amenity', radius: 20,
+    desc: 'A wrought lattice tower, built absurdly tall because at one sixth of a gravity it can be. Pure civic pride, and the land around it knows it. Needs level ground.' },
+
+  { id: 'telescope', name: 'Far-Side Radio Telescope', cost: 72000, group: 'wonder', era: 2,
+    once: true, needsShadow: true, drawKw: 18, researchPerDay: 34,
+    service: 'research', radius: 12,
+    desc: 'A wire mesh strung across a crater that shields it from Earth\'s radio noise — the real Lunar Crater Radio Telescope proposal. Must sit on a permanently shadowed crater floor.' },
+
+  { id: 'heliostat', name: 'Heliostat Crown', cost: 88000, group: 'wonder', era: 2,
+    once: true, needsPeakSun: true, kw: 110, drawKw: 6,
+    desc: 'A ring of steerable mirrors on a peak of eternal light, throwing sunlight down onto the floor below. Must be built where the sun genuinely never sets.' },
+
+  { id: 'arena', name: 'Olympus Arena', cost: 54000, group: 'wonder', era: 3,
+    once: true, needsOpen: 2, drawKw: 14,
+    service: 'amenity', radius: 22,
+    desc: 'Flying sports, only possible at one sixth of a gravity. Needs a clear, level five-by-five site — nobody wants the upper tiers looking at a crater wall.' },
+
+  { id: 'arcology', name: 'Launch Arcology', cost: 210000, group: 'wonder', era: 3,
+    once: true, needsLaunchPad: true, drawKw: 60, housing: 2600, departsEvery: 220,
+    desc: 'A self-contained tower of tens of thousands, built to leave. SimCity 2000\'s Launch Arcologies eventually lifted off with their residents aboard; this one dispatches a colony ship every so often and keeps filling back up. Must be built beside a launch complex.' },
+
   { id: 'massdriver', name: 'Mass Driver', cost: 68000, group: 'wonder', era: 3,
     once: true, needsRidge: true, drawKw: 30, exportIncome: 640,
     desc: 'An electromagnetic launch track flinging refined cargo to Earth orbit without rockets. Needs a long, high, level run to sit on, and pays a standing export income once it does.' }
@@ -404,6 +440,15 @@ const TOOLS = [
 
   { id: 'megadome', name: 'Lava-Tube Megadome', glyph: '◈', key: 'J', group: 'wonder', build: 'megadome' },
   { id: 'massdriver', name: 'Mass Driver', glyph: '⇗', key: 'K', group: 'wonder', build: 'massdriver' },
+  { id: 'elevator',  name: 'Space Elevator',  glyph: '↥', key: 'L', group: 'wonder', build: 'elevator' },
+  { id: 'eiffel',    name: 'Lunar Eiffel',    glyph: '⩕', key: 'P', group: 'wonder', build: 'eiffel' },
+  { id: 'telescope', name: 'Radio Telescope', glyph: '◠', key: 'H', group: 'wonder', build: 'telescope' },
+  { id: 'heliostat', name: 'Heliostat Crown', glyph: '❈', key: 'I', group: 'wonder', build: 'heliostat' },
+  /* Digits, because every letter on the keyboard is already a tool — the
+     first TOOLS entry matching a key wins, so a duplicate would silently
+     shadow whichever tool was declared earlier. */
+  { id: 'arena',     name: 'Olympus Arena',   glyph: '◎', key: '6', group: 'wonder', build: 'arena' },
+  { id: 'arcology',  name: 'Launch Arcology', glyph: '⬢', key: '7', group: 'wonder', build: 'arcology' },
 
   { id: 'hab_low',   name: 'Habitation · Low',  glyph: '▨', key: 'Q', group: 'zone', zone: 'hab',      density: 'low',  drag: 'rect' },
   { id: 'hab_high',  name: 'Habitation · High', glyph: '▧', key: 'W', group: 'zone', zone: 'hab',      density: 'high', drag: 'rect' },

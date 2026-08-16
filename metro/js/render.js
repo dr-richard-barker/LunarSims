@@ -17,7 +17,7 @@
    genuinely read as bright — the elevation model showing its work. */
 
 (function () {
-  const { K, DEPOSITS, ZONES } = window.LM_DATA;
+  const { K, DEPOSITS, ZONES, BUILDINGS } = window.LM_DATA;
   const T = window.LM_TERRAIN, G = window.LM_GRID;
 
   const TW = 128, TH = 64;
@@ -696,6 +696,194 @@
       }
       ctx.fillStyle = `rgba(120,220,255,${0.5 + beatPulse() * 0.45})`;
       ctx.beginPath(); ctx.arc(b.x, b.y - z - 30, 3.2, 0, 7); ctx.fill();
+      return;
+    }
+
+    const p = iso(t.x + 0.5, t.y + 0.5);
+
+    if (type === 'elevator') {
+      /* The tether runs off the top of the screen, because that is what a
+         space elevator does — the anchor is the only part you can draw. */
+      box(ctx, t.x + 0.24, t.y + 0.24, 0.52, 0.52, 26, '#aab2c2', l, z,
+        { stroke: grey(160, l), lw: 1.2 });
+      for (let i = 0; i < 4; i++) {            // guy anchors splayed out
+        const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
+        const q = iso(t.x + 0.5 + Math.cos(a) * 0.62, t.y + 0.5 + Math.sin(a) * 0.62);
+        ctx.strokeStyle = grey(130, l); ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        ctx.moveTo(q.x, q.y - z); ctx.lineTo(p.x, p.y - z - 30); ctx.stroke();
+      }
+      const grad = ctx.createLinearGradient(p.x, p.y - z - 26, p.x, p.y - z - 640);
+      grad.addColorStop(0, `rgba(214,232,255,${0.55 + l * 0.35})`);
+      grad.addColorStop(0.55, 'rgba(190,220,255,0.30)');
+      grad.addColorStop(1, 'rgba(170,210,255,0)');
+      ctx.strokeStyle = grad; ctx.lineWidth = 3.2;
+      ctx.beginPath();
+      ctx.moveTo(p.x, p.y - z - 26); ctx.lineTo(p.x, p.y - z - 640); ctx.stroke();
+      /* climbers riding the ribbon */
+      for (let i = 0; i < 3; i++) {
+        const climb = ((Date.now() / 5200 + i / 3) % 1);
+        ctx.fillStyle = `rgba(255,236,180,${0.85 * (1 - climb)})`;
+        ctx.fillRect(p.x - 2.4, p.y - z - 30 - climb * 580, 4.8, 6);
+      }
+      return;
+    }
+
+    if (type === 'eiffel') {
+      /* A wrought lattice, drawn absurdly tall because at one sixth of a
+         gravity it can be. Four splayed legs meeting in a spire. */
+      const H = 190;
+      ctx.strokeStyle = tone('#c8b48a', l, 0.95); ctx.lineWidth = 2.4;
+      const legs = [[-0.34, -0.34], [0.34, -0.34], [0.34, 0.34], [-0.34, 0.34]];
+      const feet = legs.map(([dx, dy]) => iso(t.x + 0.5 + dx, t.y + 0.5 + dy));
+      for (const f of feet) {
+        ctx.beginPath();
+        ctx.moveTo(f.x, f.y - z);
+        ctx.quadraticCurveTo(f.x * 0.35 + p.x * 0.65, f.y - z - H * 0.45,
+                             p.x, p.y - z - H);
+        ctx.stroke();
+      }
+      /* the arch and the platforms */
+      ctx.lineWidth = 1.6;
+      for (const frac of [0.22, 0.46, 0.72]) {
+        const w = (1 - frac) * 28;
+        ctx.beginPath();
+        ctx.moveTo(p.x - w, p.y - z - H * frac);
+        ctx.lineTo(p.x + w, p.y - z - H * frac);
+        ctx.stroke();
+      }
+      if (FR.lod > LOD_FAR) {
+        ctx.strokeStyle = `rgba(255,226,150,${0.30 + l * 0.3})`; ctx.lineWidth = 1;
+        for (const frac of [0.30, 0.55]) {
+          const w = (1 - frac) * 26;
+          for (let i = -2; i <= 2; i++) {
+            ctx.beginPath();
+            ctx.moveTo(p.x + i * w / 2.5, p.y - z - H * frac);
+            ctx.lineTo(p.x, p.y - z - H * (frac + 0.16));
+            ctx.stroke();
+          }
+        }
+      }
+      ctx.fillStyle = `rgba(255,150,90,${0.45 + beatPulse() * 0.5})`;
+      ctx.beginPath(); ctx.arc(p.x, p.y - z - H - 4, 2.6, 0, 7); ctx.fill();
+      return;
+    }
+
+    if (type === 'telescope') {
+      /* Wire mesh slung across the crater floor, with a receiver on cables
+         above the centre — the LCRT proposal, more or less. */
+      ctx.fillStyle = `rgba(150,170,190,${0.20 + l * 0.2})`;
+      ctx.beginPath(); ctx.ellipse(p.x, p.y - z, TW * 0.62, TH * 0.62, 0, 0, 7); ctx.fill();
+      ctx.strokeStyle = `rgba(190,215,240,${0.35 + l * 0.35})`; ctx.lineWidth = 1;
+      for (let i = 1; i <= 3; i++) {
+        ctx.beginPath();
+        ctx.ellipse(p.x, p.y - z, TW * 0.62 * (i / 3.4), TH * 0.62 * (i / 3.4), 0, 0, 7);
+        ctx.stroke();
+      }
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2;
+        ctx.beginPath();
+        ctx.moveTo(p.x, p.y - z);
+        ctx.lineTo(p.x + Math.cos(a) * TW * 0.62, p.y - z + Math.sin(a) * TH * 0.62);
+        ctx.stroke();
+      }
+      ctx.strokeStyle = grey(150, Math.max(l, 0.4)); ctx.lineWidth = 1.2;
+      for (const sx of [-1, 1]) {
+        ctx.beginPath();
+        ctx.moveTo(p.x + sx * TW * 0.5, p.y - z);
+        ctx.lineTo(p.x, p.y - z - 34); ctx.stroke();
+      }
+      ctx.fillStyle = tone('#cfd6e2', l, 1);
+      ctx.beginPath(); ctx.arc(p.x, p.y - z - 34, 5, 0, 7); ctx.fill();
+      ctx.fillStyle = `rgba(200,140,255,${0.4 + beatPulse() * 0.45})`;
+      ctx.beginPath(); ctx.arc(p.x, p.y - z - 40, 2, 0, 7); ctx.fill();
+      return;
+    }
+
+    if (type === 'heliostat') {
+      /* A ring of steerable mirrors throwing light down the slope. */
+      const n = 10;
+      for (let i = 0; i < n; i++) {
+        const a = (i / n) * Math.PI * 2;
+        const q = iso(t.x + 0.5 + Math.cos(a) * 0.42, t.y + 0.5 + Math.sin(a) * 0.42);
+        ctx.strokeStyle = grey(140, l); ctx.lineWidth = 1.4;
+        ctx.beginPath(); ctx.moveTo(q.x, q.y - z); ctx.lineTo(q.x, q.y - z - 12); ctx.stroke();
+        ctx.fillStyle = tone('#dff0ff', Math.max(l, 0.7), 1);
+        ctx.beginPath();
+        ctx.moveTo(q.x - 6, q.y - z - 12);
+        ctx.lineTo(q.x + 6, q.y - z - 16);
+        ctx.lineTo(q.x + 6, q.y - z - 24);
+        ctx.lineTo(q.x - 6, q.y - z - 20);
+        ctx.closePath(); ctx.fill();
+      }
+      /* the beam they all throw at the tower in the middle */
+      const glow = ctx.createRadialGradient(p.x, p.y - z - 26, 0, p.x, p.y - z - 26, 46);
+      glow.addColorStop(0, `rgba(255,246,205,${0.55 + beatPulse() * 0.2})`);
+      glow.addColorStop(1, 'rgba(255,240,190,0)');
+      ctx.fillStyle = glow;
+      ctx.beginPath(); ctx.arc(p.x, p.y - z - 26, 46, 0, 7); ctx.fill();
+      box(ctx, t.x + 0.42, t.y + 0.42, 0.16, 0.16, 34, '#e6d9b0', l, z, { noShadow: true });
+      return;
+    }
+
+    if (type === 'arena') {
+      /* A bowl: outer ring, raked seating, and an open floor people fly in. */
+      ctx.fillStyle = regolith(180, l);
+      ctx.beginPath(); ctx.ellipse(p.x, p.y - z, TW * 0.72, TH * 0.72, 0, 0, 7); ctx.fill();
+      for (const ly of [{ r: 0.68, h: 26, c: '#b9c0cc' }, { r: 0.52, h: 18, c: '#cdd4e0' }]) {
+        ctx.fillStyle = tone(ly.c, l, faceLight(SOUTH) + 0.16);
+        ctx.beginPath();
+        ctx.ellipse(p.x, p.y - z - ly.h, TW * ly.r, TH * ly.r, 0, 0, Math.PI);
+        ctx.fill();
+        ctx.fillStyle = tone(ly.c, l, 1);
+        ctx.beginPath(); ctx.ellipse(p.x, p.y - z - ly.h, TW * ly.r, TH * ly.r, 0, 0, 7); ctx.fill();
+      }
+      ctx.fillStyle = tone('#6ee7a0', l, 0.75);
+      ctx.beginPath(); ctx.ellipse(p.x, p.y - z - 20, TW * 0.36, TH * 0.36, 0, 0, 7); ctx.fill();
+      if (FR.lod > LOD_FAR) {
+        for (let i = 0; i < 8; i++) {          // floodlight masts around the rim
+          const a = (i / 8) * Math.PI * 2;
+          const q = iso(t.x + 0.5 + Math.cos(a) * 0.62, t.y + 0.5 + Math.sin(a) * 0.62);
+          ctx.strokeStyle = grey(150, l); ctx.lineWidth = 1;
+          ctx.beginPath(); ctx.moveTo(q.x, q.y - z - 8); ctx.lineTo(q.x, q.y - z - 30); ctx.stroke();
+          ctx.fillStyle = `rgba(255,244,205,${0.55 + l * 0.3})`;
+          ctx.beginPath(); ctx.arc(q.x, q.y - z - 31, 2, 0, 7); ctx.fill();
+        }
+      }
+      return;
+    }
+
+    if (type === 'arcology') {
+      /* A stepped tower built to leave: hull, ring decks, and a lit throat at
+         the base where the ships go out from. */
+      const H = 150;
+      for (let i = 0; i < 4; i++) {
+        const w = 0.62 - i * 0.11;
+        const o = (1 - w) / 2;
+        box(ctx, t.x + o, t.y + o, w, w, H / 4, '#b6c2d4', l, z + i * (H / 4),
+          { stroke: grey(150, l), lw: 1, noShadow: i > 0 });
+      }
+      if (FR.lod > LOD_FAR) {
+        ctx.fillStyle = `rgba(255,224,160,${0.35 + l * 0.35})`;
+        for (let r = 1; r <= 10; r++) {
+          for (let c = -1; c <= 1; c++) {
+            const q = iso(t.x + 0.5 + c * 0.16, t.y + 0.82);
+            ctx.fillRect(q.x - 1.4, q.y - z - H * (r / 11) - 2, 2.8, 3);
+          }
+        }
+      }
+      /* the throat, and a departing ship on its way out */
+      const glow = ctx.createRadialGradient(p.x, p.y - z - 12, 0, p.x, p.y - z - 12, 30);
+      glow.addColorStop(0, `rgba(150,225,255,${0.5 + beatPulse() * 0.3})`);
+      glow.addColorStop(1, 'rgba(150,225,255,0)');
+      ctx.fillStyle = glow;
+      ctx.beginPath(); ctx.arc(p.x, p.y - z - 12, 30, 0, 7); ctx.fill();
+      const out = (Date.now() / 6400) % 1;
+      ctx.fillStyle = `rgba(255,240,200,${0.9 * (1 - out)})`;
+      ctx.beginPath();
+      ctx.ellipse(p.x, p.y - z - H - 10 - out * 260, 3.4 * (1 - out * 0.6), 6 * (1 - out * 0.6), 0, 0, 7);
+      ctx.fill();
+      return;
     }
   }
 
@@ -708,6 +896,11 @@
      one. Agents outside the viewport are never drawn because walkVisible
      never visits their tile. */
 
+  /* Every wonder, read from the data rather than named one by one, so adding
+     one is a data change here too. */
+  const WONDER_IDS = new Set(BUILDINGS.filter(b => b.group === 'wonder').map(b => b.id));
+  const isWonder = id => WONDER_IDS.has(id);
+
   /* Roughly how tall whatever stands on this tile is, in world units. Only
      used to decide whether it would hide a person standing behind it, so it
      mirrors the heights drawZoneBuilding actually uses without needing to be
@@ -716,7 +909,7 @@
     if (t.b) {
       const ty = t.b.type;
       if (ty === 'tube' || ty === 'conduit') return 0;
-      if (ty === 'megadome' || ty === 'massdriver') return 70;
+      if (isWonder(ty)) return 120;
       return 22;
     }
     if (!t.zone || t.zone.stage === 0) return 0;
@@ -1025,7 +1218,7 @@
       if (t.b) {
         if (t.b.type === 'tube') drawTube(ctx, s, t, litness(t));
         else if (t.b.type === 'conduit') drawConduit(ctx, s, t, litness(t));
-        else if (t.b.type === 'megadome' || t.b.type === 'massdriver') drawWonder(ctx, s, t, litness(t));
+        else if (isWonder(t.b.type)) drawWonder(ctx, s, t, litness(t));
         else drawPlant(ctx, s, t, litness(t));
       } else if (t.zone) {
         drawZoneBuilding(ctx, s, t, litness(t), era);
