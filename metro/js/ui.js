@@ -265,7 +265,10 @@
     const rect = cv.getBoundingClientRect();
     const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
     const z0 = ui.cam.z;
-    const z1 = clamp(z0 * (e.deltaY < 0 ? 1.1 : 0.9), 0.22, 2.6);
+    /* Ceiling raised from 2.6 — the near detail tier only starts paying off
+       above about 1.15, and there was very little zoom range left above that
+       to actually see it in. */
+    const z1 = clamp(z0 * (e.deltaY < 0 ? 1.1 : 0.9), 0.22, 4.0);
     if (z1 === z0) return;
     const wx = (sx - rect.width / 2 - ui.cam.x) / z0;
     const wy = (sy - 92 - ui.cam.y) / z0;

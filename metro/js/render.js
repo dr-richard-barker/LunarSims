@@ -52,6 +52,62 @@
      destroys the surface texture and the sense of a mid-tone landscape. */
   const litness = t => 0.28 + 0.62 * (t.sun === undefined ? 1 : t.sun);
 
+  /* ---------- detail tiers and the moving sun ----------
+
+     Frame context. Set once at the top of draw() and read by everything it
+     calls, rather than threaded through twenty signatures. Single-threaded
+     by construction — there is exactly one draw in flight at a time. */
+  const LOD_FAR = 0, LOD_MID = 1, LOD_NEAR = 2;
+  const FR = { lod: LOD_MID, az: 0 };
+
+  /* Zoomed out, a full map is 16,384 tiles and every one of them was paying
+     for a mottle ellipse, eight speckle rects and a full window grid that
+     landed on less than a pixel. Tiers let the far view get cheaper AND the
+     near view get richer at the same time. */
+  const lodFor = z => z < 0.5 ? LOD_FAR : z < 1.15 ? LOD_MID : LOD_NEAR;
+
+  /* THE SUN MOVES — but not the way it would on Earth, and this is the one
+     place the setting really asserts itself.
+
+     At a polar site the sun does not rise and set. It tracks around the
+     horizon at a very low elevation over the 29.5-day cycle, which is
+     exactly why the peaks of eternal light and the permanently shadowed
+     floors exist at all. So the honest animation is the sun's AZIMUTH
+     sweeping a full turn each month: how much light a tile gets barely
+     changes, but the DIRECTION everything is lit from swings right round,
+     and the shadows crawl with it.
+
+     That also keeps faith with the terrain model. `t.sun` is a static
+     raycast averaged over eight directions and remains the authority on how
+     much light a tile receives — a crater floor stays dark and a rim stays
+     bright all month. Only the shading direction is animated. A global
+     "lunar night" dimming would have been wrong here twice over: wrong for a
+     polar site, and it would have contradicted the sun model.
+
+     (K.LUNAR_CYCLE and K.HOURS_PER_DAY were declared in data.js from the
+     start and read by nothing until now.) */
+  function sunAzimuth(s) {
+    const d = s && s.day ? s.day : 0;
+    const phase = ((d % K.LUNAR_CYCLE) + K.LUNAR_CYCLE) % K.LUNAR_CYCLE / K.LUNAR_CYCLE;
+    return phase * Math.PI * 2;
+  }
+
+  /* How lit a vertical face is, from the compass direction its outward normal
+     points in tile space. Never reaches zero: vacuum has no air to scatter
+     light, but the regolith itself bounces plenty, so shadowed faces read as
+     dim rather than black. */
+  const EAST = 0, SOUTH = Math.PI / 2;
+  const faceLight = n => 0.32 + 0.48 * Math.max(0, Math.cos(n - FR.az));
+
+  /* Which way a contact shadow falls, in screen pixels — directly away from
+     the sun. Small, because the light is low and the shadows are long but
+     the contact patch is what sells the object as standing ON something. */
+  function shadowOff() {
+    const a = FR.az + Math.PI;
+    const tx = Math.cos(a), ty = Math.sin(a);
+    return { x: (tx - ty) * (TW / 2) * 0.06, y: (tx + ty) * (TH / 2) * 0.06 };
+  }
+
   /* ---------- primitives ---------- */
 
   function diamond(ctx, tx, ty, w, h, dz) {
@@ -81,10 +137,14 @@
     const z = lift(t);
     const a = iso(t.x, t.y), b = iso(t.x + 1, t.y), c = iso(t.x + 1, t.y + 1), d = iso(t.x, t.y + 1);
 
+    /* Both walls take their brightness from where the sun currently is, so
+       over a month the lit side of every terrace swings round the compass.
+       Previously east was always the bright wall and south always the dark
+       one, which made the relief read as a fixed engraving. */
     const east = T.tileAt(s, t.x + 1, t.y);
     const eDrop = (east ? t.h - east.h : t.h) * K.LEVEL_PX;
     if (eDrop > 0) {
-      ctx.fillStyle = regolith(150, l);
+      ctx.fillStyle = regolith(230 * faceLight(EAST), l);
       ctx.beginPath();
       ctx.moveTo(b.x, b.y - z); ctx.lineTo(c.x, c.y - z);
       ctx.lineTo(c.x, c.y - z + eDrop); ctx.lineTo(b.x, b.y - z + eDrop);
@@ -94,7 +154,7 @@
     const south = T.tileAt(s, t.x, t.y + 1);
     const sDrop = (south ? t.h - south.h : t.h) * K.LEVEL_PX;
     if (sDrop > 0) {
-      ctx.fillStyle = regolith(104, l);          // the shaded wall
+      ctx.fillStyle = regolith(230 * faceLight(SOUTH), l);
       ctx.beginPath();
       ctx.moveTo(d.x, d.y - z); ctx.lineTo(c.x, c.y - z);
       ctx.lineTo(c.x, c.y - z + sDrop); ctx.lineTo(d.x, d.y - z + sDrop);
@@ -129,6 +189,11 @@
     const base = t.t === 'rough' ? 208 : t.t === 'boulder' ? 214 : 226;
     fillDiamond(ctx, t.x, t.y, 1, 1, regolith(base, l), null, z);
 
+    /* Everything below here is surface texture. At the far tier it lands on
+       fractions of a pixel across sixteen thousand tiles, so it is simply not
+       drawn — this is most of what makes the zoomed-out view expensive. */
+    if (FR.lod === LOD_FAR) return;
+
     /* one stable mottled patch per tile, so ground reads as undulating
        rather than as a flat painted plane */
     {
@@ -138,7 +203,9 @@
       ctx.beginPath(); ctx.ellipse(q.x, q.y - z, TW * 0.22, TH * 0.22, 0, 0, 7); ctx.fill();
     }
 
-    const n = t.t === 'rough' ? 8 : 5;
+    /* Grit density follows the tier: a handful mid-range, a real scatter when
+       you are close enough to see individual stones. */
+    const n = (t.t === 'rough' ? 8 : 5) * (FR.lod === LOD_NEAR ? 3 : 1);
     for (let i = 0; i < n; i++) {
       const u = ((t.v * 977 + i * 131) % 100) / 100;
       const w = ((t.v * 613 + i * 271) % 100) / 100;
@@ -194,12 +261,25 @@
     const o = opts || {};
     const b = iso(tx + w, ty), c = iso(tx + w, ty + h), d = iso(tx, ty + h);
     const z0 = baseZ, z1 = baseZ + hz;
-    ctx.fillStyle = o.right || tone(col, l, 0.62);
+
+    /* Contact shadow: what stops a tower looking pasted onto the ground.
+       Skipped at the far tier, where it lands on a couple of pixels. */
+    if (!o.noShadow && FR.lod > LOD_FAR && hz > 4) {
+      const so = shadowOff();
+      const mid = iso(tx + w / 2, ty + h / 2);
+      ctx.fillStyle = 'rgba(0,0,0,0.30)';
+      ctx.beginPath();
+      ctx.ellipse(mid.x + so.x * hz * 0.06, mid.y - z0 + so.y * hz * 0.06,
+                  w * TW * 0.36, h * TH * 0.36, 0, 0, 7);
+      ctx.fill();
+    }
+
+    ctx.fillStyle = o.right || tone(col, l, faceLight(EAST));
     ctx.beginPath();
     ctx.moveTo(b.x, b.y - z0); ctx.lineTo(c.x, c.y - z0);
     ctx.lineTo(c.x, c.y - z1); ctx.lineTo(b.x, b.y - z1);
     ctx.closePath(); ctx.fill();
-    ctx.fillStyle = o.left || tone(col, l, 0.42);
+    ctx.fillStyle = o.left || tone(col, l, faceLight(SOUTH));
     ctx.beginPath();
     ctx.moveTo(d.x, d.y - z0); ctx.lineTo(c.x, c.y - z0);
     ctx.lineTo(c.x, c.y - z1); ctx.lineTo(d.x, d.y - z1);
@@ -417,15 +497,24 @@
 
     if (era >= 3) {
       /* Metropolis: a real window grid up the shaft rather than a few bands,
-         plus a setback crown and a beacon — this is the skyline. */
-      const rows = 2 + stage * 2;
-      for (let r = 1; r <= rows; r++) {
+         plus a setback crown and a beacon — this is the skyline.
+
+         Window rows double at the near tier, and the lit fraction varies per
+         building and per row, so a downtown stops reading as one facade
+         stamped out fifty times. */
+      const dense = FR.lod === LOD_NEAR;
+      const rows = (2 + stage * 2) * (dense ? 2 : 1);
+      if (FR.lod > LOD_FAR) for (let r = 1; r <= rows; r++) {
         const wy = z0 + hz * (r / (rows + 1));
         for (let c = 0; c < 3; c++) {
+          /* deterministic per building, row and column — a given window is
+             either lit or dark and stays that way, rather than flickering */
+          const on = ((t.v * 7919 + r * 131 + c * 17) % 100) / 100 > 0.28;
           const u = 0.28 + c * 0.22;
           const q = iso(t.x + u, t.y + 0.8);
-          ctx.fillStyle = `rgba(255,214,140,${0.30 + l * 0.4})`;
-          ctx.fillRect(q.x - 1.6, q.y - wy - 2.4, 3.2, 3.4);
+          ctx.fillStyle = on ? `rgba(255,214,140,${0.30 + l * 0.4})`
+                             : `rgba(40,52,74,${0.35 + l * 0.25})`;
+          ctx.fillRect(q.x - 1.6, q.y - wy - 2.4, 3.2, dense ? 2.2 : 3.4);
         }
       }
       box(ctx, t.x + 0.3, t.y + 0.3, 0.4, 0.4, 14, '#d5dbe6', l, z0 + hz,
@@ -656,6 +745,16 @@
     const z = t ? lift(t) : 0;
     const p = iso(a.x + 0.5, a.y + 0.5);
 
+    /* Zoomed right out a vehicle is a couple of pixels, so it becomes one —
+       a moving speck still reads as a city that is alive, and it costs one
+       fill instead of eleven. */
+    if (FR.lod === LOD_FAR) {
+      if (a.kind === 'ped') return;               // too small to register at all
+      ctx.fillStyle = 'rgba(255,226,150,0.85)';
+      ctx.beginPath(); ctx.arc(p.x, p.y - z - 4, a.kind === 'car' ? 1.6 : 2.4, 0, 7); ctx.fill();
+      return;
+    }
+
     if (a.kind === 'ped') {
       /* a suited figure: legs, torso, helmet, and a bob so a crowd does not
          read as a row of identical posts */
@@ -816,6 +915,8 @@
     /* the architectural language for this frame — every zone building reads
        it, so the whole city changes character together as the era turns */
     const era = window.LM_ERAS ? window.LM_ERAS.index(s) : 3;
+    /* frame context for the whole pass — detail tier and where the sun is */
+    if (!FR.pinned) { FR.lod = lodFor(ui.cam.z); FR.az = sunAzimuth(s); }
     const traffic = bucketAgents(s, era);
 
     /* One back-to-front pass covering ground AND everything standing on it.
@@ -888,5 +989,14 @@
     return T.tileAt(s, tx, ty);
   }
 
-  window.LM_RENDER = { draw, iso, pickTile, TW, TH };
+  window.LM_RENDER = {
+    draw, iso, pickTile, TW, TH,
+    /* Detail tier and sun angle, exposed so they can be pinned during
+       verification — measuring what LOD is worth means drawing the far view
+       at near detail, and screenshotting a given sun angle means holding the
+       month still. Nothing in the game reads these. */
+    LOD_FAR, LOD_MID, LOD_NEAR,
+    debugPin(o) { Object.assign(FR, o); FR.pinned = true; },
+    debugUnpin() { FR.pinned = false; }
+  };
 })();
