@@ -56,11 +56,12 @@ td.mark{width:34px;text-align:center}
 <script src="js/disasters.js"></script>
 <script src="js/sim.js"></script>
 <script src="js/autopilot.js"></script>
+<script src="js/agents.js"></script>
 <script>
 (function () {
   const T = window.LM_TERRAIN, G = window.LM_GRID, Z = window.LM_ZONES, S = window.LM_SIM;
   const B = window.LM_BUDGET, SV = window.LM_SERVICES, E = window.LM_ERAS;
-  const AI = window.LM_AUTO, DIS = window.LM_DISASTERS;
+  const AI = window.LM_AUTO, DIS = window.LM_DISASTERS, AG = window.LM_AGENTS;
   const K = window.LM_DATA.K;
 
   /* A fixed-sequence stand-in for Math.random, so every scenario that rolls
@@ -1337,6 +1338,169 @@ td.mark{width:34px;text-align:center}
           ['and it keeps growing through it', s.pop > popBefore, true],
           ['the director rebuilds past where it was', peak >= devBefore, true],
           ['while staying solvent', s.credits, '>=0']
+        ];
+      } },
+
+    /* ---------- v2 phase 1: the human layer ---------- */
+
+    { name: 'Traffic finds the streets, and the streets only',
+      why: 'the whole point of a cosmetic layer is that it reads as the city working — a bus cutting across open regolith would read as a bug, not as life',
+      run() {
+        const s = S.newGame(555);
+        s.autoPlay = true;
+        for (let i = 0; i < 260; i++) S.tick(s);
+        AG.reset(); AG.invalidate();
+        s.pop = Math.max(s.pop, 4000);          // enough to want every kind
+        for (let i = 0; i < 60; i++) AG.update(s, 1 / 30);
+
+        const list = AG.all();
+        const kinds = new Set(list.map(a => a.kind));
+        const onTube = a => {
+          const t = T.tileAt(s, Math.round(a.x), Math.round(a.y));
+          return AG.isTube(t);
+        };
+        const walkers = list.filter(a => a.kind === 'ped');
+        const road = list.filter(a => a.kind === 'car' || a.kind === 'bus');
+        /* Trains are held to the looser rule on purpose: they run avenues,
+           and an avenue spans the conduit pylons standing in it. */
+        const trains = list.filter(a => a.kind === 'train');
+        const onCorridor = a =>
+          AG.isCorridorCell(T.tileAt(s, Math.round(a.x), Math.round(a.y)));
+        return [
+          ['it spawns something', list.length, '>0'],
+          ['pedestrians and vehicles both', kinds.has('ped') && kinds.has('car'), true],
+          ['every car and bus is on a transit tube', road.every(onTube), true],
+          ['every train is on a street of some kind', trains.every(onCorridor), true],
+          ['every pedestrian is somewhere a person could be',
+            walkers.every(a => AG.isWalkable(T.tileAt(s, Math.round(a.x), Math.round(a.y)))), true],
+          ['and nothing has wandered off the map',
+            list.every(a => a.x >= 0 && a.y >= 0 && a.x < K.COLS && a.y < K.ROWS), true]
+        ];
+      } },
+
+    { name: 'Traffic actually moves, and keeps moving',
+      why: 'an agent that stops on a dead-end node or pins itself at p=1 is invisible as a bug — it just looks like a parked car forever',
+      run() {
+        const s = S.newGame(555);
+        s.autoPlay = true;
+        for (let i = 0; i < 260; i++) S.tick(s);
+        AG.reset(); AG.invalidate();
+        s.pop = Math.max(s.pop, 4000);
+        for (let i = 0; i < 30; i++) AG.update(s, 1 / 30);
+
+        const before = AG.all().map(a => ({ id: a, x: a.x, y: a.y }));
+        for (let i = 0; i < 90; i++) AG.update(s, 1 / 30);   // three more seconds
+        const movedFrac = before.filter(b => b.id.x !== b.x || b.id.y !== b.y).length /
+                          Math.max(1, before.length);
+        return [
+          ['there were agents to watch', before.length, '>=10'],
+          ['essentially all of them moved over three seconds', movedFrac, '>=0.95'],
+          ['no agent ended up at a broken position',
+            AG.all().every(a => Number.isFinite(a.x) && Number.isFinite(a.y)), true]
+        ];
+      } },
+
+    { name: 'The crowd scales with the city, both ways',
+      why: 'spawn counts that only ever grow would leave a bombed-out district as busy as it was before, and an uncapped crowd would follow a metropolis to ten thousand sprites',
+      run() {
+        const s = S.newGame(555);
+        s.autoPlay = true;
+        for (let i = 0; i < 300; i++) S.tick(s);
+        AG.reset(); AG.invalidate();
+
+        const at = pop => {
+          s.pop = pop;
+          for (let i = 0; i < 40; i++) AG.update(s, 1 / 30);
+          return AG.all().length;
+        };
+        const small = at(200);
+        const big = at(9000);
+        const shrunk = at(200);
+        const huge = at(500000);
+        return [
+          ['a small city has a small crowd', small, '>0'],
+          ['a big one has a bigger crowd', big > small, true],
+          ['the crowd shrinks again when the city does', shrunk < big, true],
+          ['and it is capped rather than unbounded', huge, '<=160']
+        ];
+      } },
+
+    { name: 'Trains only run corridors long enough to be worth one',
+      why: 'a train retargeting at every junction like a car would just read as a very long car — it needs a straight run, and there should be none to find on an empty map',
+      run() {
+        const bare = S.newGame(555);
+        const none = AG.corridors(bare).length;
+
+        const s = city();
+        for (let x = 50; x < 50 + AG.MIN_CORRIDOR; x++) S.place(s, T.tileAt(s, x, 70), 'tube');
+        const justShort = AG.corridors(s).filter(c => c.ay === 70).length;
+        S.place(s, T.tileAt(s, 50 + AG.MIN_CORRIDOR, 70), 'tube');
+        const runs = AG.corridors(s).filter(c => c.ay === 70);
+
+        const stub = city();
+        for (let x = 55; x < 55 + AG.MIN_CORRIDOR - 3; x++) S.place(stub, T.tileAt(stub, x, 60), 'tube');
+        return [
+          ['an unbuilt map has no corridors', none, 0],
+          ['a run of exactly the minimum length counts', justShort, 1],
+          ['extending it keeps it as one corridor, not two', runs.length, 1],
+          ['and the corridor spans the whole run', runs[0].len, AG.MIN_CORRIDOR],
+          ['a run too short for a train is not offered',
+            AG.corridors(stub).filter(c => c.ay === 60).length, 0]
+        ];
+      } },
+
+    { name: 'An avenue crossed by power conduits is still one avenue',
+      why: 'the director gives the conduit column the tile at every street crossing, which it must — so counting only tubes found a longest run of three tiles in a fully built city and no train could ever exist',
+      run() {
+        const s = city();
+        /* a long street with a conduit pylon standing in it every fourth tile,
+           exactly the lattice the AI director builds */
+        for (let x = 40; x < 60; x++) {
+          const t = T.tileAt(s, x, 66);
+          S.place(s, t, x % 4 === 0 ? 'conduit' : 'tube');
+        }
+        const runs = AG.corridors(s).filter(c => c.ay === 66);
+
+        /* but a bare line of pylons across open ground is not an avenue */
+        const pylons = city();
+        for (let x = 40; x < 60; x++) S.place(pylons, T.tileAt(pylons, x, 70), 'conduit');
+
+        /* and a full AI city must actually produce some */
+        const built = S.newGame(555);
+        built.autoPlay = true;
+        for (let i = 0; i < 300; i++) S.tick(built);
+
+        return [
+          ['the crossed street is one corridor', runs.length, 1],
+          ['spanning its whole length', runs[0].len, 19],
+          ['a line of bare conduits is not a corridor',
+            AG.corridors(pylons).filter(c => c.ay === 70).length, 0],
+          ['and a city the director built has avenues to run trains on',
+            AG.corridors(built).length, '>0']
+        ];
+      } },
+
+    { name: 'The traffic layer never touches the simulation',
+      why: 'this is the one-way dependency the whole testing discipline rests on — the day a cosmetic layer writes to the city is the day the harness stops proving anything',
+      run() {
+        const s = S.newGame(555);
+        s.autoPlay = true;
+        for (let i = 0; i < 220; i++) S.tick(s);
+        AG.reset(); AG.invalidate();
+        s.pop = 4000;
+
+        const snapshot = () => JSON.stringify({
+          day: s.day, credits: s.credits, pop: s.pop, research: s.research,
+          zoned: S.zonedCount(s), developed: S.developedCount(s),
+          built: s.map.filter(t => t.b).length,
+          stages: s.map.reduce((a, t) => a + (t.zone ? t.zone.stage : 0), 0)
+        });
+        const before = snapshot();
+        for (let i = 0; i < 200; i++) AG.update(s, 1 / 30);
+        return [
+          ['running the traffic layer changes nothing in the city', snapshot(), before],
+          ['and no agent state leaked onto a tile',
+            s.map.every(t => t.agent === undefined && t.kind === undefined), true]
         ];
       } }
   ];

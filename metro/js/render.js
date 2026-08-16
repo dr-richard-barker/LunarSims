@@ -523,6 +523,167 @@
     }
   }
 
+  /* ---------- traffic and pedestrians (cosmetic, from agents.js) ----------
+
+     Drawn INSIDE the back-to-front tile walk, bucketed by the tile they are
+     standing on, so the painter's algorithm occludes them against elevation
+     and towers for free. city/ has to fake this with ghost silhouettes
+     because it has no heights; here the honest version is also the cheaper
+     one. Agents outside the viewport are never drawn because walkVisible
+     never visits their tile. */
+
+  /* Roughly how tall whatever stands on this tile is, in world units. Only
+     used to decide whether it would hide a person standing behind it, so it
+     mirrors the heights drawZoneBuilding actually uses without needing to be
+     exact. */
+  function roughHeight(t, era) {
+    if (t.b) {
+      const ty = t.b.type;
+      if (ty === 'tube' || ty === 'conduit') return 0;
+      if (ty === 'megadome' || ty === 'massdriver') return 70;
+      return 22;
+    }
+    if (!t.zone || t.zone.stage === 0) return 0;
+    const st = t.zone.stage;
+    if (t.zone.density === 'low' || era === 0) return 12 + st * 8;
+    return era >= 3 ? 20 + st * 24 : 14 + st * 13;
+  }
+
+  /* Painter's order gives honest occlusion for free, and in a downtown of
+     stage-4 towers that means almost every vehicle is behind something — the
+     city looks dead precisely where it is busiest. So occluded agents get a
+     second pass as translucent silhouettes over the top, the same trick
+     city/js/render.js uses. Traffic you can see is worth more here than
+     traffic that is strictly hidden. */
+  function agentOccluded(s, a, era) {
+    const tx = Math.round(a.x), ty = Math.round(a.y);
+    const t0 = T.tileAt(s, tx, ty);
+    if (!t0) return false;
+    const eye = lift(t0) + 10;                 // about head height
+    for (const [dx, dy] of [[1, 0], [0, 1], [1, 1], [2, 0], [0, 2], [2, 1], [1, 2]]) {
+      const n = T.tileAt(s, tx + dx, ty + dy);
+      if (!n) continue;
+      if (lift(n) + roughHeight(n, era) > eye + (dx + dy) * (K.LEVEL_PX * 0.5)) return true;
+    }
+    return false;
+  }
+
+  function bucketAgents(s, era) {
+    const A = window.LM_AGENTS;
+    const map = new Map(), hidden = [];
+    if (!A) return { map, hidden };
+    for (const a of A.all()) {
+      const tx = Math.round(a.x), ty = Math.round(a.y);
+      if (tx < 0 || ty < 0 || tx >= K.COLS || ty >= K.ROWS) continue;
+      if (agentOccluded(s, a, era)) { hidden.push(a); continue; }
+      const k = T.idx(tx, ty);
+      const list = map.get(k);
+      if (list) list.push(a); else map.set(k, [a]);
+    }
+    return { map, hidden };
+  }
+
+  /* A downtown of stage-4 towers hides essentially all of its own traffic
+     from this camera angle, so the busiest part of the city was also the
+     deadest-looking. Hidden agents are therefore drawn bright rather than
+     faint — they read as headlights and helmet lamps moving between the
+     towers, which is what you actually want to see at night on the Moon.
+     Deliberately not subtle: an invisible ghost is the same as no ghost. */
+  function drawGhost(ctx, s, a) {
+    const t = T.tileAt(s, Math.round(a.x), Math.round(a.y));
+    const z = t ? lift(t) : 0;
+    const p = iso(a.x + 0.5, a.y + 0.5);
+
+    if (a.kind === 'ped') {
+      ctx.fillStyle = 'rgba(170,220,255,0.55)';
+      ctx.beginPath(); ctx.arc(p.x, p.y - z - 8, 1.9, 0, 7); ctx.fill();
+      return;
+    }
+    const w = a.kind === 'bus' ? 12 : a.kind === 'train' ? 11 : 8;
+    const warm = a.kind === 'ped' ? '255,235,190' : '255,226,150';
+    /* a soft halo, then a hot core — cheap, and it survives being drawn over
+       a bright tower face as well as a dark one */
+    const g = ctx.createRadialGradient(p.x, p.y - z - 7, 0, p.x, p.y - z - 7, w * 1.5);
+    g.addColorStop(0, `rgba(${warm},0.85)`);
+    g.addColorStop(0.45, `rgba(${warm},0.30)`);
+    g.addColorStop(1, `rgba(${warm},0)`);
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.ellipse(p.x, p.y - z - 7, w * 1.5, w * 0.8, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = `rgba(${warm},0.95)`;
+    ctx.beginPath(); ctx.ellipse(p.x, p.y - z - 7, w * 0.42, w * 0.22, 0, 0, 7); ctx.fill();
+  }
+
+  /* A vehicle body drawn as a squat isometric box. Kept separate from box()
+     because these are sub-tile and want their own proportions and a windscreen
+     rather than a full six-face extrusion. */
+  function vehicle(ctx, p, z, len, wid, hz, col, l, lit) {
+    const hx = len * 0.5, hy = wid * 0.5;
+    const top = [[-hx, 0], [0, -hy], [hx, 0], [0, hy]];
+    const at = (i, dz) => ({ x: p.x + top[i][0], y: p.y - z - dz + top[i][1] * 0.5 });
+
+    /* contact shadow first, on the ground */
+    ctx.fillStyle = 'rgba(0,0,0,0.32)';
+    ctx.beginPath(); ctx.ellipse(p.x, p.y - z + 1, hx * 0.9, hy * 0.45, 0, 0, 7); ctx.fill();
+
+    ctx.fillStyle = tone(col, l, 0.62);
+    ctx.beginPath();
+    ctx.moveTo(at(3, 0).x, at(3, 0).y); ctx.lineTo(at(2, 0).x, at(2, 0).y);
+    ctx.lineTo(at(2, hz).x, at(2, hz).y); ctx.lineTo(at(3, hz).x, at(3, hz).y);
+    ctx.closePath(); ctx.fill();
+
+    ctx.fillStyle = tone(col, l, 0.44);
+    ctx.beginPath();
+    ctx.moveTo(at(0, 0).x, at(0, 0).y); ctx.lineTo(at(3, 0).x, at(3, 0).y);
+    ctx.lineTo(at(3, hz).x, at(3, hz).y); ctx.lineTo(at(0, hz).x, at(0, hz).y);
+    ctx.closePath(); ctx.fill();
+
+    ctx.fillStyle = tone(col, l, 1);
+    ctx.beginPath();
+    for (let i = 0; i < 4; i++) {
+      const q = at(i, hz);
+      i ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y);
+    }
+    ctx.closePath(); ctx.fill();
+
+    if (lit) {
+      ctx.fillStyle = `rgba(255,238,190,${0.55 + 0.35 * (1 - l)})`;
+      ctx.fillRect(p.x - hx * 0.55, p.y - z - hz * 0.55, hx * 1.1, Math.max(1, hz * 0.28));
+    }
+  }
+
+  function drawAgent(ctx, s, a, l) {
+    const t = T.tileAt(s, Math.round(a.x), Math.round(a.y));
+    const z = t ? lift(t) : 0;
+    const p = iso(a.x + 0.5, a.y + 0.5);
+
+    if (a.kind === 'ped') {
+      /* a suited figure: legs, torso, helmet, and a bob so a crowd does not
+         read as a row of identical posts */
+      const bob = Math.sin(a.bob) * 1.1;
+      ctx.fillStyle = 'rgba(0,0,0,0.3)';
+      ctx.beginPath(); ctx.ellipse(p.x, p.y - z + 1, 3, 1.5, 0, 0, 7); ctx.fill();
+      ctx.fillStyle = tone(a.tint, l, 0.85);
+      ctx.fillRect(p.x - 1.6, p.y - z - 9 + bob, 3.2, 6.5);
+      ctx.fillStyle = tone('#9fb4d4', l, 1);
+      ctx.beginPath(); ctx.arc(p.x, p.y - z - 11 + bob, 2.1, 0, 7); ctx.fill();
+      ctx.fillStyle = `rgba(180,230,255,${0.35 + 0.4 * (1 - l)})`;
+      ctx.beginPath(); ctx.arc(p.x + 0.6, p.y - z - 11.4 + bob, 1, 0, 7); ctx.fill();
+      return;
+    }
+    if (a.kind === 'car')  return vehicle(ctx, p, z, 17, 9, 6, a.livery, l, false);
+    if (a.kind === 'bus')  return vehicle(ctx, p, z, 26, 11, 9, a.livery, l, true);
+    if (a.kind === 'train') {
+      /* three articulated cars strung back along the corridor */
+      const c = a.corridor;
+      const ux = c.bx === c.ax ? 0 : 1, uy = c.by === c.ay ? 0 : 1;
+      for (let i = 0; i < 3; i++) {
+        const off = i * 0.62 * (a.dir > 0 ? -1 : 1);
+        const q = iso(a.x + 0.5 + ux * off, a.y + 0.5 + uy * off);
+        vehicle(ctx, q, z, 24, 10, 11, i === 0 ? a.livery : '#b8c2d4', l, true);
+      }
+    }
+  }
+
   /* ---------- viewport culling ---------- */
 
   /* Padded generously on the far side: a tall tile is drawn well above its
@@ -655,6 +816,7 @@
     /* the architectural language for this frame — every zone building reads
        it, so the whole city changes character together as the era turns */
     const era = window.LM_ERAS ? window.LM_ERAS.index(s) : 3;
+    const traffic = bucketAgents(s, era);
 
     /* One back-to-front pass covering ground AND everything standing on it.
        Splitting structures into a later pass would let a tall tower behind a
@@ -680,7 +842,15 @@
       } else if (t.zone) {
         drawZoneBuilding(ctx, s, t, litness(t), era);
       }
+
+      if (traffic.map.size) {
+        const here = traffic.map.get(T.idx(tx, ty));
+        if (here) for (const a of here) drawAgent(ctx, s, a, litness(t));
+      }
     });
+
+    /* the ones a tower is standing in front of, as silhouettes over the top */
+    for (const a of traffic.hidden) drawGhost(ctx, s, a);
 
     if (ui.view && ui.view !== 'terrain') drawOverlay(ctx, s, ui, range);
     if (ui.preview) drawPreview(ctx, s, ui.preview);

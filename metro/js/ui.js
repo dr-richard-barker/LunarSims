@@ -33,6 +33,10 @@
   function refreshNets() {
     ui.nets = G.services(s);
     ui.cov = window.LM_SERVICES ? window.LM_SERVICES.coverage(s, B.effects(s)) : null;
+    /* This is the one place that already knows the map changed, so it is
+       where the traffic layer is told its cached street graph is stale —
+       cheaper than having agents.js hash 16,384 tiles to work it out. */
+    if (window.LM_AGENTS) window.LM_AGENTS.invalidate();
   }
 
   /* ---------- canvas ---------- */
@@ -588,6 +592,7 @@
     const modes = { sandbox: s.sandbox, disastersOn: s.disastersOn, autoPlay: s.autoPlay };
     s = Object.assign(S.newGame(), modes);
     ui.selected = null; ui.levelTarget = null;
+    if (window.LM_AGENTS) window.LM_AGENTS.reset();
     centreOn(K.COLS / 2, K.ROWS / 2);
     refreshNets(); buildPalette(); renderTile(); renderHUD(); renderLog(); markModes();
     setHint(); save();
@@ -638,7 +643,7 @@
   const DAY_MS = 1100;
   const SAVE_EVERY_MS = 4000;
   let last = performance.now(), acc = 0, lastSave = 0, drawFailed = false;
-  let lastLogLen = -1, lastEra = -1;
+  let lastLogLen = -1, lastEra = -1, agentsFailed = false;
 
   function frame(now) {
     const dt = Math.min(0.25, (now - last) / 1000); last = now;
@@ -668,6 +673,14 @@
         if (trends && trends.classList.contains('on')) buildTrends();
       }
     }
+    /* Traffic moves only while the clock does — a paused city should be a
+       still photograph, not a diorama with the cars still running. Scaled by
+       game speed so 12x reads as rush hour. Guarded like everything else in
+       this loop so a cosmetic layer can never take the frame down. */
+    if (ui.speed > 0 && window.LM_AGENTS) {
+      try { window.LM_AGENTS.update(s, dt * Math.min(ui.speed, 4)); }
+      catch (e) { if (!agentsFailed) { agentsFailed = true; console.error('agents', e); } }
+    }
     /* Guarded for the same reason the tick is: an exception thrown out of a
        single frame would otherwise stop requestAnimationFrame for good and
        leave a black canvas with no way back short of a reload. */
@@ -682,6 +695,17 @@
     }
     requestAnimationFrame(frame);
   }
+
+  /* Debug handle, matching farm/'s window.__lf. requestAnimationFrame is
+     throttled hard in some embedded browsers, so the only reliable way to
+     verify the renderer or the traffic layer is to drive them directly and
+     put the camera exactly where the thing under test is. Read-only as far
+     as the game is concerned — nothing in here is wired to gameplay. */
+  window.__lm = {
+    get s() { return s; }, ui, ctx, R, S, T, G, Z, E,
+    centreOn, redraw: () => R.draw(ctx, s, ui),
+    look(tx, ty, z) { if (z) ui.cam.z = z; centreOn(tx, ty); R.draw(ctx, s, ui); }
+  };
 
   refreshNets();
   buildPalette(); setHint(); renderTile(); renderHUD(); renderLog(); markModes();
