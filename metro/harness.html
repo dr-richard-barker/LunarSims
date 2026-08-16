@@ -150,6 +150,30 @@ td.mark{width:34px;text-align:center}
     return s;
   }
 
+  /* One fully serviced tile at (x,y) with all three networks reaching it and
+     room around it, for tests about a single district rather than about a
+     whole city. mixedDistrict() has every serviced tile already spoken for,
+     which is fine for growth tests and useless for these. */
+  function servicedRow(x0, y, n) {
+    const s = city();
+    for (let i = 0; i < n; i++) {
+      S.place(s, T.tileAt(s, x0 + i, y - 1), 'tube');      // transit above
+      S.place(s, T.tileAt(s, x0 + i, y + 1), 'conduit');   // power below
+      S.place(s, T.tileAt(s, x0 + i, y), 'main');          // atmosphere underneath
+    }
+    S.place(s, T.tileAt(s, x0 - 1, y), 'o2');              // plant on the main
+    S.place(s, T.tileAt(s, x0 + n, y), 'o2');
+    /* Always at least four arrays: two oxygen plants alone draw 10 kW and a
+       single array makes 7, so a one-tile bed would sit in permanent brownout
+       and nothing would ever develop on it. */
+    for (let i = 0; i < Math.max(n, 4); i++) {
+      const g = T.tileAt(s, x0 + i, y + 2);
+      g.sun = 1; S.place(s, g, 'solar');                   // feeding the conduits
+    }
+    return s;
+  }
+  const servicedSpot = (x, y) => servicedRow(x, y, 1);
+
   /* The tallest stage anywhere in a district — the era ceiling is a cap on
      the whole city, so read the city's best rather than one arbitrary tile. */
   function peakStage(s) {
@@ -1501,6 +1525,165 @@ td.mark{width:34px;text-align:center}
           ['running the traffic layer changes nothing in the city', snapshot(), before],
           ['and no agent state leaked onto a tile',
             s.map.every(t => t.agent === undefined && t.kind === undefined), true]
+        ];
+      } },
+
+    /* ---------- v2 phase 3: the special districts ---------- */
+
+    { name: 'The General calls once, at the threshold, and never again',
+      why: 'an offer that re-fired every day would be nagging, and one that fired before the city could use it would be noise',
+      run() {
+        const s = S.newGame(555);
+        s.pop = K.MILITARY_OFFER_POP - 1;
+        const early = S.offerMilitary(s);
+        s.pop = K.MILITARY_OFFER_POP;
+        const fired = S.offerMilitary(s);
+        const again = S.offerMilitary(s);
+        S.declineMilitary(s);
+        const afterDecline = S.offerMilitary(s);
+        return [
+          ['nothing is offered below the threshold', early, false],
+          ['the offer fires on reaching it', fired, true],
+          ['it names a base kind', !!S.BASE_KINDS[s.military.kind], true],
+          ['it does not fire twice', again, false],
+          ['and a declined offer does not come back', afterDecline, false],
+          ['declining is remembered', s.military.state, 'declined']
+        ];
+      } },
+
+    { name: 'The terrain decides which kind of base the General offers',
+      why: 'this is the part of SimCity 2000 worth keeping — the original picked Army, Air Force, Navy or silos from the ground, and picking at random would throw that away',
+      run() {
+        const mk = shape => {
+          const s = S.newGame(555);
+          /* a small city so cityBounds has something to read */
+          for (let y = 60; y <= 66; y++) for (let x = 60; x <= 66; x++) {
+            const t = T.tileAt(s, x, y);
+            t.zone = { kind: 'hab', density: 'low', stage: 1, growth: 0, unserved: 0, decay: 0, served: true, value: 0.5 };
+          }
+          for (let y = 54; y <= 72; y++) for (let x = 54; x <= 72; x++) {
+            const t = T.tileAt(s, x, y);
+            if (!t) continue;
+            shape(t);
+          }
+          return S.baseKindFor(s);
+        };
+        const flat = mk(t => { t.t = 'flat'; t.sun = 0.9; });
+        const broken = mk(t => { t.t = 'rough'; t.sun = 0.9; });
+        const shadowed = mk(t => { t.t = 'flat'; t.sun = 0.05; });
+        return [
+          ['flat open ground gets a landing field', flat, 'landing'],
+          ['broken ground gets a garrison', broken, 'garrison'],
+          ['deep shadowed craters get silos', shadowed, 'silos'],
+          ['every answer is a real base kind',
+            [flat, broken, shadowed].every(k => !!S.BASE_KINDS[k]), true]
+        ];
+      } },
+
+    { name: 'The military brush is refused until the offer is accepted',
+      why: 'a lock that only greys out a palette button but still lets the paint through would be no lock at all — the same rule the era gates already follow',
+      run() {
+        const s = city();
+        const before = S.paintZone(s, 60, 60, 2, 2, 'military', 'low');
+        const reason = S.canZoneKind(s, 'military');
+        S.offerMilitary({ ...s, pop: 99999 });          // does not touch s
+        s.pop = 99999; S.offerMilitary(s); S.acceptMilitary(s);
+        const after = S.paintZone(s, 60, 60, 2, 2, 'military', 'low');
+
+        const sand = city(); sand.sandbox = true;
+        const inSandbox = S.paintZone(sand, 60, 60, 1, 1, 'military', 'low');
+        return [
+          ['painting is refused before the offer', before, 0],
+          ['and the refusal says why', /authorised/i.test(reason || ''), true],
+          ['accepting unlocks the brush', after, 4],
+          ['and sandbox lifts the gate outright', inSandbox, 1]
+        ];
+      } },
+
+    { name: 'A special district builds out on service alone, with no demand index',
+      why: 'a garrison does not appear because consumers wanted one, and it must not close down because the shops are overbuilt either — that is the whole reason these are demand-free',
+      run() {
+        const s = servicedSpot(62, 62);
+        grantEra(s);
+        s.pop = 99999; S.offerMilitary(s); S.acceptMilitary(s);
+        const painted = S.paintZone(s, 62, 62, 1, 1, 'military', 'low');
+        for (let i = 0; i < 500; i++) S.tick(s);
+        const base = T.tileAt(s, 62, 62).zone;
+
+        /* now crush every demand index and confirm it holds */
+        const held = base.stage;
+        s.taxRate = K.MAX_TAX;
+        for (let i = 0; i < 300; i++) S.tick(s);
+        return [
+          ['the base was actually painted', painted, 1],
+          ['it developed without any demand to answer', base.stage, '>=1'],
+          ['reaching its own ceiling', base.stage, Z.zoneById('military').low.maxStage],
+          ['and it does not decay when demand collapses',
+            T.tileAt(s, 62, 62).zone.stage >= held, true]
+        ];
+      } },
+
+    { name: 'The districts pay their way in the right currencies',
+      why: 'a garrison should employ people and pay no tax, a launch complex should export — if both just made money they would be one district with two skins',
+      run() {
+        const s = city();
+        grantEra(s);
+        const base = Z.tally(s);
+        for (let i = 0; i < 3; i++) develop(s, 60 + i, 60, 'military', 'low', 3);
+        const withMil = Z.tally(s);
+        for (let i = 0; i < 3; i++) develop(s, 60 + i, 64, 'launch', 'low', 3);
+        const withBoth = Z.tally(s);
+        return [
+          ['a garrison employs people', withMil.jobs > base.jobs, true],
+          ['but earns the treasury nothing directly', withMil.income, base.income],
+          ['a launch complex earns real export income', withBoth.income > withMil.income, true],
+          ['neither counts as trade or industry for demand',
+            withBoth.tradeJobs === base.tradeJobs && withBoth.industryJobs === base.industryJobs, true],
+          ['both show up as special employment', withBoth.specialJobs, '>0']
+        ];
+      } },
+
+    { name: 'Both districts drag the land value around them, and launches throw dust',
+      why: 'if siting one cost nothing they would be free money stamped on the cheapest ground — the whole point is that where you put them is a decision',
+      run() {
+        /* Housing at 60..62 either way; in one city the rest of the same
+           serviced row is a launch complex, in the other it is more housing.
+           Same servicing, same ground — the only difference is the pad. */
+        const build = withPad => {
+          const s = servicedRow(60, 62, 8);
+          grantEra(s);
+          S.paintZone(s, 60, 62, 3, 1, 'hab', 'low');
+          if (withPad) S.paintZone(s, 64, 62, 3, 1, 'launch', 'low');
+          for (let i = 0; i < 260; i++) S.tick(s);
+          return s;
+        };
+        const clean = build(false), nasty = build(true);
+
+        const val = (s, x) => (T.tileAt(s, x, 62).zone || {}).value || 0;
+        return [
+          ['the quiet city holds its land value', val(clean, 62), '>0'],
+          ['siting a launch complex two tiles away drags it down',
+            val(nasty, 62) < val(clean, 62), true],
+          ['the pad fouls its own ground with regolith',
+            T.tileAt(nasty, 65, 62).dust || 0, '>0.1'],
+          ['and the dust spreads to its neighbours rather than staying put',
+            T.tileAt(nasty, 65, 61).dust || 0, '>0']
+        ];
+      } },
+
+    { name: 'The director accepts the offer and builds both districts',
+      why: 'auto-play has to keep working across every feature added to the game, and a director that ignored half the roster would be advertising a smaller game than the one that shipped',
+      run() {
+        const s = S.newGame(555);
+        s.autoPlay = true;
+        for (let i = 0; i < 700; i++) S.tick(s);
+        const count = kind => s.map.filter(t => t.zone && t.zone.kind === kind).length;
+        return [
+          ['it took the General up on the offer', s.military && s.military.state, 'accepted'],
+          ['it sited a base', count('military'), '>0'],
+          ['it built a launch complex', count('launch'), '>0'],
+          ['and the city still works', s.pop, '>=500'],
+          ['and is still solvent', s.credits, '>=0']
         ];
       } }
   ];

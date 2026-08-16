@@ -127,6 +127,14 @@ const K = {
      up and held back the ground in between. */
   AI_CONDUIT_EVERY: 4,
   AI_RESERVE_FLOOR: 2500,  // never spend the treasury below this
+
+  /* ---- the General's offer ----
+     SimCity 2000 offered a military base at 60,000 people and sited it for
+     you. This city curve is nowhere near that scale — a large run here is a
+     few thousand — so the threshold is scaled to the game rather than copied
+     from it. Terrain still decides which KIND of base you get, as it did in
+     the original. */
+  MILITARY_OFFER_POP: 900,
   AI_POWER_MARGIN: 1.3,    // build generation until it clears load by this factor
   AI_AIR_MARGIN: 1.25      // and pressurisation until it clears population by this
 };
@@ -190,7 +198,33 @@ const ZONES = [
     high: { cost: 180, maxStage: 4, stages: [
       { jobs: 0, income: 0, upkeep: 0 }, { jobs: 13, income: 34, upkeep: 5 },
       { jobs: 28, income: 78, upkeep: 11 }, { jobs: 48, income: 138, upkeep: 19 },
-      { jobs: 74, income: 220, upkeep: 30 }] } }
+      { jobs: 74, income: 220, upkeep: 30 }] } },
+
+  /* ---- the two special districts ----
+
+     Both are DEMAND-FREE: they carry no RCI index and build out whenever
+     they are serviced. That is not a shortcut, it is the point. A military
+     base does not appear because consumers wanted one, and neither did
+     SimCity 2000's — the General offers it, you accept, and it gets built.
+     The Launch Complex is the same shape of thing: a strategic decision by
+     the city, not a market response.
+
+     They still use the density bands so the zoning UI, the growth model and
+     the era ceiling all apply unchanged; each simply offers one band. */
+
+  { id: 'military', name: 'Military', colour: '#8fa87c',
+    desc: 'A garrison the General asked for. Employs a standing complement and pays no local tax, and nobody wants to live next to it.',
+    demandFree: true, offered: true, dragsValue: 0.10,
+    low:  { cost: 240, maxStage: 3, stages: [
+      { jobs: 0, income: 0, upkeep: 0 }, { jobs: 22, income: 0, upkeep: 6 },
+      { jobs: 48, income: 0, upkeep: 14 }, { jobs: 85, income: 0, upkeep: 26 }] } },
+
+  { id: 'launch', name: 'Launch Complex', colour: '#ff9f6e',
+    desc: 'Pads, gantries and fuel farms. Pays a standing export income, and throws regolith every time something lifts off.',
+    demandFree: true, dragsValue: 0.06, dustPerStage: 0.05,
+    low:  { cost: 300, maxStage: 3, stages: [
+      { jobs: 0, income: 0, upkeep: 0 }, { jobs: 18, income: 95, upkeep: 9 },
+      { jobs: 40, income: 235, upkeep: 20 }, { jobs: 70, income: 430, upkeep: 34 }] } }
 ];
 
 /* Placed structures.
@@ -377,6 +411,9 @@ const TOOLS = [
   { id: 'trade_high',name: 'Trade · High',      glyph: '▧', key: 'R', group: 'zone', zone: 'trade',    density: 'high', drag: 'rect' },
   { id: 'ind_low',   name: 'Industry · Low',    glyph: '▨', key: 'D', group: 'zone', zone: 'industry', density: 'low',  drag: 'rect' },
   { id: 'ind_high',  name: 'Industry · High',   glyph: '▧', key: 'G', group: 'zone', zone: 'industry', density: 'high', drag: 'rect' },
+
+  { id: 'military', name: 'Military Base',   glyph: '★', key: 'Y', group: 'district', zone: 'military', density: 'low', drag: 'rect' },
+  { id: 'launch',   name: 'Launch Complex', glyph: '▲', key: 'U', group: 'district', zone: 'launch',   density: 'low', drag: 'rect' },
 
   { id: 'bulldoze', name: 'Bulldoze', glyph: '💥', key: 'X', group: 'terrain',
     hint: 'Remove whatever is on a tile — zoning, network or structure.' }

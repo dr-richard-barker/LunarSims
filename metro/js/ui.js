@@ -72,7 +72,8 @@
     { id: 'plant', label: 'Power & Life Support' },
     { id: 'service', label: 'Civic Services' },
     { id: 'wonder', label: 'Wonders' },
-    { id: 'zone', label: 'Zoning' }
+    { id: 'zone', label: 'Zoning' },
+    { id: 'district', label: 'Special Districts' }
   ];
 
   function buildPalette() {
@@ -87,8 +88,11 @@
       D.TOOLS.filter(t => t.group === g.id).forEach(t => {
         const b = document.createElement('button');
         /* Sandbox lifts the era locks as well as the prices, so the palette
-           has to agree with what canPlace will actually allow. */
-        const locked = !s.sandbox && t.build && E && !E.unlocked(s, t.build);
+           has to agree with what canPlace will actually allow. The military
+           brush is gated on the General's offer rather than on an era. */
+        const zoneGate = t.zone ? S.canZoneKind(s, t.zone) : null;
+        const locked = !!zoneGate ||
+          (!s.sandbox && t.build && E && !E.unlocked(s, t.build));
         b.className = 'tool' + (ui.tool === t.id ? ' on' : '');
         if (locked) { b.disabled = true; b.style.opacity = 0.42; }
         const listed = t.build ? S.buildById(t.build).cost
@@ -96,7 +100,8 @@
         const cost = listed === null ? null : (s.sandbox ? 0 : listed);
         b.innerHTML = `<span class="g">${locked ? '🔒' : t.glyph}</span><span class="n">${t.name}</span>` +
           (cost !== null ? `<span class="c">${cost.toLocaleString()}</span>` : `<span class="k">${t.key}</span>`);
-        b.title = locked ? E.lockReason(s, t.build)
+        b.title = zoneGate ? zoneGate
+          : locked ? E.lockReason(s, t.build)
           : (t.hint || (t.build ? S.buildById(t.build).desc : '') ||
              (t.zone ? Z.zoneById(t.zone).desc : ''));
         b.onclick = () => { ui.tool = t.id; ui.levelTarget = null; buildPalette(); setHint(); };
@@ -572,6 +577,40 @@
     save();
   };
 
+  /* ---------- the General's offer ----------
+
+     A card in the City panel rather than a modal. SimCity 2000 stopped the
+     world to ask; this game deliberately never blocks the clock — there is no
+     fail state to protect you from, so an unanswered offer just sits there
+     until you feel like answering it. */
+  function renderOffer() {
+    const box = document.getElementById('offer');
+    if (!box) return;
+    const m = s.military;
+    if (!m || m.state !== 'pending') { box.innerHTML = ''; return; }
+    const kind = S.BASE_KINDS[m.kind];
+    box.innerHTML = `
+      <h3 class="sec">A call from the General</h3>
+      <p class="note" style="border-left-color:var(--accent-2)">
+        The colony is large enough to warrant a military presence, and
+        ${kind.why} — so they are offering a <b>${kind.name}</b>.
+        Accepting unlocks the military brush; you site it yourself.
+        It employs a standing complement, pays no tax, and nobody wants to
+        live next door to it.</p>
+      <div class="modes" style="justify-content:flex-start;gap:6px;margin:6px 0 10px">
+        <button id="offerYes" class="mode">Accept the ${kind.name}</button>
+        <button id="offerNo" class="mode">Decline</button>
+      </div>`;
+    box.querySelector('#offerYes').onclick = () => {
+      S.acceptMilitary(s); buildPalette(); renderOffer(); renderLog(); save();
+      toast('The military brush is now in Special Districts.');
+    };
+    box.querySelector('#offerNo').onclick = () => {
+      S.declineMilitary(s); renderOffer(); renderLog(); save();
+      toast('The General has been turned down.');
+    };
+  }
+
   /* ---------- log ---------- */
 
   function renderLog() {
@@ -597,8 +636,8 @@
     ui.selected = null; ui.levelTarget = null;
     if (window.LM_AGENTS) window.LM_AGENTS.reset();
     centreOn(K.COLS / 2, K.ROWS / 2);
-    refreshNets(); buildPalette(); renderTile(); renderHUD(); renderLog(); markModes();
-    setHint(); save();
+    refreshNets(); buildPalette(); renderTile(); renderHUD(); renderLog();
+    renderOffer(); markModes(); setHint(); save();
   };
   /* Centres on the city rather than on the map. The two are only the same
      thing on day one — a player settles wherever the terrain suited them, and
@@ -667,7 +706,7 @@
            the palette only rebuilds when the era moved — both are full DOM
            rewrites and neither belongs on every tick. */
         const n = s.log ? s.log.length : 0;
-        if (n !== lastLogLen) { lastLogLen = n; renderLog(); }
+        if (n !== lastLogLen) { lastLogLen = n; renderLog(); renderOffer(); }
         const era = E ? E.index(s) : 0;
         if (era !== lastEra) { lastEra = era; buildPalette(); }
         /* Trends is a full rebuild, so it only redraws while it is the pane
@@ -711,6 +750,6 @@
   };
 
   refreshNets();
-  buildPalette(); setHint(); renderTile(); renderHUD(); renderLog(); markModes();
+  buildPalette(); setHint(); renderTile(); renderHUD(); renderLog(); renderOffer(); markModes();
   requestAnimationFrame(t => { last = t; requestAnimationFrame(frame); });
 })();

@@ -462,6 +462,11 @@
       return;
     }
 
+    /* The two special districts get their own architecture — neither should
+       read as "housing painted a different colour". */
+    if (zn.kind === 'military') return drawMilitary(ctx, s, t, l, z0, stage, v);
+    if (zn.kind === 'launch') return drawLaunch(ctx, s, t, l, z0, stage, v);
+
     if (zn.density === 'low' || era === 0) {
       /* Outpost cans and low-density domes. At the earliest era even a
          high-density plot is only a hut — the city has not learned to
@@ -557,6 +562,88 @@
       ctx.beginPath();
       ctx.moveTo(f1.x, f1.y - z0 - hz * 0.6); ctx.lineTo(f2.x, f2.y - z0 - hz * 0.6);
       ctx.stroke();
+    }
+  }
+
+  /* ---- the special districts ---- */
+
+  /* Low, hard, buried. A garrison on the Moon is not a parade ground — it is
+     revetments and hardened sheds under a regolith blanket, which is also the
+     only shielding anyone gets out here. */
+  function drawMilitary(ctx, s, t, l, z0, stage, v) {
+    const p = iso(t.x + 0.5, t.y + 0.5);
+    /* graded apron */
+    fillDiamond(ctx, t.x + 0.04, t.y + 0.04, 0.92, 0.92, regolith(196, l), null, z0);
+    /* blast revetment walls along two sides */
+    ctx.fillStyle = regolith(150 * (0.6 + faceLight(EAST) * 0.5), l);
+    box(ctx, t.x + 0.06, t.y + 0.06, 0.88, 0.14, 7, '#8a8f78', l, z0, { noShadow: true });
+    box(ctx, t.x + 0.06, t.y + 0.06, 0.14, 0.88, 7, '#8a8f78', l, z0, { noShadow: true });
+
+    /* hardened sheds, more of them as the base grows in */
+    for (let i = 0; i < stage; i++) {
+      const u = 0.30 + (i % 2) * 0.30, w = 0.32 + Math.floor(i / 2) * 0.28;
+      box(ctx, t.x + u, t.y + w, 0.22, 0.22, 9 + (i === 0 ? 4 : 0), '#7d846e', l, z0,
+        { stroke: grey(110, l), lw: 1 });
+    }
+    if (FR.lod === LOD_FAR) return;
+
+    /* a mast with a slow red navigation light, and the star that marks it */
+    ctx.strokeStyle = grey(150, Math.max(l, 0.45)); ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(p.x + 16, p.y - z0 - 4); ctx.lineTo(p.x + 16, p.y - z0 - 26);
+    ctx.stroke();
+    ctx.fillStyle = `rgba(255,90,70,${0.35 + beatPulse() * 0.55})`;
+    ctx.beginPath(); ctx.arc(p.x + 16, p.y - z0 - 28, 2, 0, 7); ctx.fill();
+
+    if (FR.lod === LOD_NEAR && stage >= 2) {
+      ctx.fillStyle = `rgba(220,235,200,${0.35 + l * 0.4})`;
+      ctx.font = 'bold 9px monospace'; ctx.textAlign = 'center';
+      ctx.fillText('★', p.x - 14, p.y - z0 - 10);
+      ctx.textAlign = 'start';
+    }
+  }
+
+  /* A pad, a gantry, and the scorch ring around it. */
+  function drawLaunch(ctx, s, t, l, z0, stage, v) {
+    const p = iso(t.x + 0.5, t.y + 0.5);
+    /* blast-scarred apron — the dust this thing throws is a real mechanic */
+    fillDiamond(ctx, t.x + 0.02, t.y + 0.02, 0.96, 0.96, regolith(178, l), null, z0);
+    ctx.fillStyle = `rgba(30,22,18,${0.30 + 0.10 * stage})`;
+    ctx.beginPath(); ctx.ellipse(p.x, p.y - z0, TW * 0.34, TH * 0.34, 0, 0, 7); ctx.fill();
+
+    /* the pad itself, raised on a plinth */
+    box(ctx, t.x + 0.3, t.y + 0.3, 0.4, 0.4, 5, '#9aa1b0', l, z0, { stroke: grey(140, l), lw: 1 });
+
+    /* gantry: taller with each stage, with a vehicle standing on the pad
+       once the complex is properly built out */
+    const gh = 14 + stage * 11;
+    box(ctx, t.x + 0.32, t.y + 0.62, 0.1, 0.1, gh, '#b0b7c4', l, z0 + 5, { noShadow: true });
+    ctx.strokeStyle = grey(160, Math.max(l, 0.4)); ctx.lineWidth = 1;
+    for (let i = 1; i <= 3; i++) {
+      const q = iso(t.x + 0.37, t.y + 0.67);
+      ctx.beginPath();
+      ctx.moveTo(q.x - 5, q.y - z0 - 5 - gh * i / 4);
+      ctx.lineTo(q.x + 7, q.y - z0 - 5 - gh * i / 4);
+      ctx.stroke();
+    }
+    if (stage >= 2) {
+      /* a launcher on the pad: tapered body and a flare of light beneath */
+      const c = iso(t.x + 0.5, t.y + 0.45);
+      ctx.fillStyle = tone('#e8edf7', l, 0.95);
+      ctx.beginPath();
+      ctx.moveTo(c.x, c.y - z0 - 5 - gh * 1.15);
+      ctx.lineTo(c.x + 5, c.y - z0 - 5 - gh * 0.35);
+      ctx.lineTo(c.x - 5, c.y - z0 - 5 - gh * 0.35);
+      ctx.closePath(); ctx.fill();
+      ctx.fillStyle = tone('#ff9f6e', l, 1);
+      ctx.fillRect(c.x - 5, c.y - z0 - 5 - gh * 0.5, 10, 2.4);
+    }
+    if (FR.lod === LOD_FAR) return;
+    /* fuel farm: a couple of spheres off to one side */
+    for (let i = 0; i < 2; i++) {
+      const q = iso(t.x + 0.72, t.y + 0.24 + i * 0.22);
+      ctx.fillStyle = tone('#cfd6e2', l, 0.85 - i * 0.1);
+      ctx.beginPath(); ctx.arc(q.x, q.y - z0 - 6, 4.2, 0, 7); ctx.fill();
     }
   }
 

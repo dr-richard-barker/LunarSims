@@ -45,14 +45,19 @@
   /* What the city currently provides, at the stages actually reached — not
      what it could reach if everything grew. */
   function tally(s) {
-    let pop = 0, tradeJobs = 0, industryJobs = 0, income = 0, upkeep = 0, draw = 0;
+    let pop = 0, tradeJobs = 0, industryJobs = 0, specialJobs = 0, income = 0, upkeep = 0, draw = 0;
     for (const t of s.map) {
       const z = t.zone;
       if (!z || z.stage === 0) continue;
       const st = stageOf(z);
       if (z.kind === 'hab') pop += st.pop || 0;
       else if (z.kind === 'trade') tradeJobs += st.jobs || 0;
-      else industryJobs += st.jobs || 0;
+      else if (z.kind === 'industry') industryJobs += st.jobs || 0;
+      /* The special districts employ people but answer no demand index, so
+         their jobs must not feed back into trade or industry demand — a
+         garrison does not make the city want more shops. They count toward
+         employment (which habitation demand reads) and nothing else. */
+      else specialJobs += st.jobs || 0;
       income += st.income || 0;
       upkeep += st.upkeep || 0;
       draw += K.KW_PER_STAGE * z.stage;
@@ -67,7 +72,8 @@
       else if (t.b.type === 'massdriver') income += 640;
     }
 
-    return { housingCap: pop, tradeJobs, industryJobs, jobs: tradeJobs + industryJobs,
+    return { housingCap: pop, tradeJobs, industryJobs, specialJobs,
+             jobs: tradeJobs + industryJobs + specialJobs,
              income, upkeep, draw };
   }
 
@@ -124,6 +130,14 @@
     v -= clamp(tile.dust || 0, 0, 1) * K.DUST_VALUE_BITE;
     const dInd = ctx.indDist[k];
     if (dInd <= 4) v -= (5 - dInd) * 0.045;             // nobody wants to live by the refinery
+    /* Nor next to a garrison or a launch pad. Same mechanic as industry, and
+       the same reason it exists: it makes where you put the thing a real
+       decision rather than a free stamp on the cheapest ground. */
+    /* Optional: ctx is a caller-supplied bag and the harness builds partial
+       ones on purpose, so a newly-added field must not turn into a crash for
+       every existing caller. */
+    const dSpec = ctx.specialDist ? ctx.specialDist[k] : 99;
+    if (dSpec <= 4) v -= (5 - dSpec) * 0.05;
     return clamp(v, 0, 1);
   }
 
@@ -138,6 +152,11 @@
     const d = demand(s, t, eff.taxBite);
     const pw = power(s);
     const indDist = distanceField(s, x => x.zone && x.zone.kind === 'industry' && x.zone.stage > 0, 5);
+    const specialDist = distanceField(s, x => {
+      if (!x.zone || x.zone.stage === 0) return false;
+      const sp = zoneById(x.zone.kind);
+      return !!(sp && sp.dragsValue);
+    }, 5);
 
     const SV = window.LM_SERVICES;
     const cov = SV ? SV.coverage(s, eff) : null;
@@ -145,7 +164,7 @@
 
     const ctx = {
       transit: (x, y) => G.hasTransit(s, x, y),
-      indDist,
+      indDist, specialDist,
       transitMul: eff.transitMul,
       cov
     };
@@ -185,9 +204,22 @@
          waits for the city to earn its skyline. */
       const band = bandOf(z);
       const cap = Math.min(band.maxStage, eraCap);
-      const dk = d[z.kind];
+      const spec = zoneById(z.kind);
+      /* A demand-free district has no RCI index to read. It builds out on a
+         steady positive so long as it is serviced, and — crucially — it never
+         decays for want of demand either. A garrison does not close down
+         because the shops are overbuilt. */
+      const dk = spec.demandFree ? 0.5 : d[z.kind];
       const lv = landValue(s, ctx, tile);
       z.value = lv;
+
+      /* Every launch throws regolith. Plume-surface interaction is a real and
+         well-documented lunar problem — an unshielded pad accelerates grit to
+         orbital velocity — so a launch complex fouls the arrays around it
+         exactly the way a refinery does, and for a better reason. */
+      if (spec.dustPerStage && z.stage > 0) {
+        tile.dust = clamp((tile.dust || 0) + spec.dustPerStage * z.stage, 0, 1);
+      }
 
       if (z.stage < cap && dk > -0.08) {
         /* High density is far more sensitive to land value than low — a

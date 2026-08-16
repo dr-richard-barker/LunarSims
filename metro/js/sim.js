@@ -39,6 +39,7 @@
          rather than opt out. */
       sandbox: false, disastersOn: false, autoPlay: false,
       flareDays: 0, lastDisaster: -999,
+      military: null,          // null until the General calls; see offerMilitary
 
       log: [], history: []
     };
@@ -124,6 +125,83 @@
 
   /* ---------- zoning ---------- */
 
+  /* ---------- the General's offer ----------
+
+     SimCity 2000 offered a military base once the city was big enough and
+     then sited it for you, choosing Army, Air Force, Navy or Missile Silos
+     from the terrain. Here you site it yourself — but the terrain still
+     decides which kind of base you are getting, which is the part of the
+     original worth keeping. */
+
+  const BASE_KINDS = {
+    landing: { name: 'Landing Field', why: 'the ground around the city is flat enough to set heavy lifters down on' },
+    garrison: { name: 'Garrison', why: 'the broken ground around the city suits a dug-in garrison' },
+    silos: { name: 'Silo Field', why: 'the deep shadowed craters around the city will take hardened silos' }
+  };
+
+  /* Reads the ground the city actually occupies, not the whole map. */
+  function baseKindFor(s) {
+    let n = 0, flat = 0, rough = 0, deep = 0, sumH = 0;
+    const built = [];
+    for (const t of s.map) if (t.b || t.zone) built.push(t);
+    if (!built.length) return 'garrison';
+    let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+    for (const t of built) {
+      if (t.x < x0) x0 = t.x; if (t.x > x1) x1 = t.x;
+      if (t.y < y0) y0 = t.y; if (t.y > y1) y1 = t.y;
+    }
+    for (let y = y0 - 4; y <= y1 + 4; y++) {
+      for (let x = x0 - 4; x <= x1 + 4; x++) {
+        const t = T.tileAt(s, x, y);
+        if (!t) continue;
+        n++; sumH += t.h;
+        if (t.t === 'flat') flat++;
+        if (t.t === 'rough' || t.t === 'boulder') rough++;
+        if (t.sun <= K.SUN_SHADOW) deep++;
+      }
+    }
+    if (!n) return 'garrison';
+    if (deep / n > 0.18) return 'silos';
+    if (rough / n > 0.30) return 'garrison';
+    return flat / n > 0.55 ? 'landing' : 'garrison';
+  }
+
+  function offerMilitary(s) {
+    if (s.military !== undefined && s.military !== null) return false;
+    if (s.pop < K.MILITARY_OFFER_POP) return false;
+    s.military = { state: 'pending', kind: baseKindFor(s), day: s.day };
+    pushLog(s, `★ A General is on the line. The colony is large enough to ` +
+      `warrant a military presence, and ${BASE_KINDS[s.military.kind].why} — ` +
+      `they are offering a ${BASE_KINDS[s.military.kind].name}.`);
+    return true;
+  }
+
+  function acceptMilitary(s) {
+    if (!s.military || s.military.state !== 'pending') return 'There is no offer on the table.';
+    s.military.state = 'accepted';
+    pushLog(s, `★ ${BASE_KINDS[s.military.kind].name} approved. The military brush is now available — site it yourself.`);
+    return null;
+  }
+  function declineMilitary(s) {
+    if (!s.military || s.military.state !== 'pending') return 'There is no offer on the table.';
+    s.military.state = 'declined';
+    pushLog(s, '★ The General has been turned down. The offer will not come again.');
+    return null;
+  }
+  const militaryUnlocked = s => !!s.sandbox || !!(s.military && s.military.state === 'accepted');
+
+  /* Zoning gates that depend on the KIND being painted rather than on the
+     ground. canZone answers "can anything be zoned here"; this answers "is
+     this brush available to you at all". */
+  function canZoneKind(s, kind) {
+    if (kind === 'military' && !militaryUnlocked(s)) {
+      return s.military && s.military.state === 'declined'
+        ? 'You turned the General down.'
+        : 'No military presence has been authorised here yet.';
+    }
+    return null;
+  }
+
   function canZone(s, t) {
     if (!t) return 'That is off the map.';
     if (!T.buildable(t)) return t.t === 'boulder'
@@ -142,6 +220,7 @@
      refusing the whole drag — dragging across a boulder field should still
      zone everything either side of it. Returns how many tiles were set. */
   function paintZone(s, x, y, w, h, kind, density) {
+    if (canZoneKind(s, kind)) return 0;
     const each = cost(s, zoneCost(kind, density));
     let painted = 0;
     for (let yy = y; yy < y + h; yy++) {
@@ -239,6 +318,9 @@
        so a temporary slump never retroactively demolishes a skyline the
        city genuinely earned. */
     if (s.pop > s.peakPop) s.peakPop = s.pop;
+    /* Checked after migration, so the offer arrives on the day the colony
+       actually reaches the threshold rather than the day after. */
+    offerMilitary(s);
 
     s.day++;
     s.history.push({
@@ -262,7 +344,9 @@
 
   window.LM_SIM = {
     newGame, STATE_VERSION, tick,
-    canPlace, place, canZone, paintZone, zoneCost, bulldoze,
-    buildById, count, zonedCount, developedCount, pushLog
+    canPlace, place, canZone, canZoneKind, paintZone, zoneCost, bulldoze,
+    buildById, count, zonedCount, developedCount, pushLog,
+    offerMilitary, acceptMilitary, declineMilitary, militaryUnlocked,
+    baseKindFor, BASE_KINDS
   };
 })();
