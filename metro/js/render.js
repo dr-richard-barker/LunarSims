@@ -1457,6 +1457,9 @@
 
   window.LM_RENDER = {
     draw, iso, pickTile, TW, TH,
+    /* the minimap draws its viewport box from this, so it can never drift
+       out of step with what the renderer actually shows */
+    visibleRange,
     /* Detail tier and sun angle, exposed so they can be pinned during
        verification — measuring what LOD is worth means drawing the far view
        at near detail, and screenshotting a given sun angle means holding the

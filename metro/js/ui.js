@@ -37,6 +37,7 @@
        where the traffic layer is told its cached street graph is stale —
        cheaper than having agents.js hash 16,384 tiles to work it out. */
     if (window.LM_AGENTS) window.LM_AGENTS.invalidate();
+    if (window.LM_MINIMAP) window.LM_MINIMAP.invalidate();
   }
 
   /* ---------- canvas ---------- */
@@ -283,6 +284,10 @@
   }, { passive: false });
 
   window.addEventListener('keydown', e => {
+    /* Handled before the tool lookup so M can never also select a tool. M is
+       free: every TOOLS key is checked for collisions at startup below. */
+    if (e.key === 'Escape') { openMap(false); return; }
+    if (e.key === 'm' || e.key === 'M') { openMap(mapModal.hidden); return; }
     const t = D.TOOLS.find(x => x.key.toLowerCase() === e.key.toLowerCase());
     if (t) { ui.tool = t.id; ui.levelTarget = null; buildPalette(); setHint(); }
   });
@@ -538,6 +543,64 @@
     document.querySelectorAll('.sp').forEach(x => x.classList.toggle('on', x === b));
   });
 
+  /* ---------- minimap ----------
+
+     Two canvases, one renderer. The corner map is always up; the pop-up is
+     the same picture at three times the size, which is the one you actually
+     navigate a 128-tile map with. Both accept a click or a drag and put the
+     camera where you pointed. */
+
+  const mini = document.getElementById('mini');
+  const miniBig = document.getElementById('miniBig');
+  const mapModal = document.getElementById('mapModal');
+
+  function drawMinimaps() {
+    const M = window.LM_MINIMAP;
+    if (!M) return;
+    M.draw(mini, s, ui, R, cssW, cssH);
+    if (!mapModal.hidden) M.draw(miniBig, s, ui, R, cssW, cssH);
+  }
+
+  /* Jumping the camera has to account for elevation the same way __lm.look
+     does — centreOn works on a tile's flat footprint, and on high ground that
+     puts the thing you aimed at well above the middle of the screen. */
+  function jumpTo(tx, ty) {
+    centreOn(tx, ty);
+    const t = T.tileAt(s, Math.round(tx), Math.round(ty));
+    if (t) ui.cam.y += t.h * K.LEVEL_PX * ui.cam.z;
+  }
+
+  function wireMinimap(cv2) {
+    let down = false;
+    const go = e => {
+      const p = window.LM_MINIMAP.tileAtPoint(cv2, e.clientX, e.clientY);
+      jumpTo(p.x + 0.5, p.y + 0.5);
+      drawMinimaps();
+    };
+    cv2.addEventListener('pointerdown', e => {
+      down = true;
+      try { cv2.setPointerCapture(e.pointerId); } catch (err) {}
+      go(e);
+      e.stopPropagation();
+    });
+    cv2.addEventListener('pointermove', e => { if (down) go(e); });
+    cv2.addEventListener('pointerup', () => { down = false; });
+    cv2.addEventListener('pointerleave', () => { down = false; });
+    /* the corner map sits over the main canvas — without this, scrolling on
+       it would zoom the city underneath */
+    cv2.addEventListener('wheel', e => e.stopPropagation());
+  }
+  wireMinimap(mini);
+  wireMinimap(miniBig);
+
+  function openMap(open) {
+    mapModal.hidden = !open;
+    if (open) drawMinimaps();
+  }
+  document.getElementById('mapClose').onclick = () => openMap(false);
+  document.getElementById('mapDone').onclick = () => openMap(false);
+  mapModal.addEventListener('click', e => { if (e.target === mapModal) openMap(false); });
+
   /* ---------- modes ---------- */
 
   /* Three independent switches, all persisted with the save. Auto-play and
@@ -762,7 +825,7 @@
     /* Guarded for the same reason the tick is: an exception thrown out of a
        single frame would otherwise stop requestAnimationFrame for good and
        leave a black canvas with no way back short of a reload. */
-    try { R.draw(ctx, s, ui); }
+    try { R.draw(ctx, s, ui); drawMinimaps(); }
     catch (e) { if (!drawFailed) { drawFailed = true; console.error('draw failed', e); } }
     /* A full save is well over a megabyte of JSON on a 128x128 map, so it is
        throttled and only written when something actually changed. Saving on

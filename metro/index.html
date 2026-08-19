@@ -59,6 +59,8 @@
       <button data-view="deposits">Deposits</button>
     </div>
     <canvas id="cv"></canvas>
+    <canvas id="mini" class="minimap" width="176" height="176"
+            title="Minimap — click or drag to jump the camera. Press M for a bigger one."></canvas>
     <div class="statusbar"><span id="hint"></span></div>
   </section>
 
@@ -85,6 +87,17 @@
   </aside>
 </main>
 
+<div class="modal" id="mapModal" hidden>
+  <div class="sheet wide">
+    <button class="xclose" id="mapClose" title="Close">✕</button>
+    <h2>Colony map</h2>
+    <p class="lede">Click or drag anywhere to move the camera there. The white box is what you
+      are looking at now.</p>
+    <canvas id="miniBig" width="560" height="560" class="minimap big"></canvas>
+    <div class="sheetfoot"><button class="mode" id="mapDone">Close</button></div>
+  </div>
+</div>
+
 <div class="toast" id="toast" hidden></div>
 
 <script src="js/data.js"></script>
@@ -100,6 +113,7 @@
 <script src="js/autopilot.js"></script>
 <script src="js/agents.js"></script>
 <script src="js/fx.js"></script>
+<script src="js/minimap.js"></script>
 <script src="js/render.js"></script>
 <script src="js/ui.js"></script>
 </body>

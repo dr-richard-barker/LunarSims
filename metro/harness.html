@@ -59,12 +59,13 @@ td.mark{width:34px;text-align:center}
 <script src="js/autopilot.js"></script>
 <script src="js/agents.js"></script>
 <script src="js/fx.js"></script>
+<script src="js/minimap.js"></script>
 <script>
 (function () {
   const T = window.LM_TERRAIN, G = window.LM_GRID, Z = window.LM_ZONES, S = window.LM_SIM;
   const B = window.LM_BUDGET, SV = window.LM_SERVICES, E = window.LM_ERAS;
   const AI = window.LM_AUTO, DIS = window.LM_DISASTERS, AG = window.LM_AGENTS;
-  const INV = window.LM_INVASION, FX = window.LM_FX;
+  const INV = window.LM_INVASION, FX = window.LM_FX, MM = window.LM_MINIMAP;
   const K = window.LM_DATA.K, LM_DATA = window.LM_DATA;
 
   /* A fixed-sequence stand-in for Math.random, so every scenario that rolls
@@ -2048,6 +2049,72 @@ td.mark{width:34px;text-align:center}
           ['a city under both decks for 900 days still stands', long.pop, '>0'],
           ['and is still solvent', long.credits, '>=0'],
           ['and something actually happened to it', long.log.length, '>0']
+        ];
+      } },
+
+    /* ---------- v3 phase 1: the minimap ---------- */
+
+    { name: 'The minimap tells the same story as the main view',
+      why: 'a minimap that did not distinguish a crater floor from a rim, or a tower from open ground, would be a decorative rectangle — the point is to find things on it at a glance',
+      run() {
+        const mk = o => Object.assign({ x: 0, y: 0, h: 5, t: 'flat', sun: 0.8, v: 0.5 }, o);
+        const lum = c => c[0] * 0.30 + c[1] * 0.59 + c[2] * 0.11;
+
+        const shadowed = MM.colourFor(mk({ sun: 0.02 }));
+        const sunlit   = MM.colourFor(mk({ sun: 1 }));
+        const low      = MM.colourFor(mk({ h: 0 }));
+        const high     = MM.colourFor(mk({ h: K.MAX_H }));
+        const skylight = MM.colourFor(mk({ t: 'skylight' }));
+
+        const zoned = MM.colourFor(mk({ zone: { kind: 'hab', density: 'high', stage: 0 } }));
+        const built1 = MM.colourFor(mk({ zone: { kind: 'hab', density: 'high', stage: 1 } }));
+        const built4 = MM.colourFor(mk({ zone: { kind: 'hab', density: 'high', stage: 4 } }));
+        const trade4 = MM.colourFor(mk({ zone: { kind: 'trade', density: 'high', stage: 4 } }));
+        const wonder = MM.colourFor(mk({ b: { type: 'elevator' } }));
+        const bare   = MM.colourFor(mk({}));
+
+        return [
+          ['a permanently shadowed floor reads darker than a lit rim',
+            lum(shadowed) < lum(sunlit) * 0.55, true],
+          ['high ground reads brighter than low', lum(high) > lum(low), true],
+          ['a skylight is the darkest thing on the map', lum(skylight) < 20, true],
+          ['zoned but unbuilt ground is dimmer than a built block',
+            lum(zoned) < lum(built1), true],
+          ['and density brightens it further', lum(built4) > lum(built1), true],
+          ['habitation and trade are told apart by hue',
+            Math.abs(built4[2] - trade4[2]) > 40, true],
+          ['a wonder is the brightest mark there is',
+            lum(wonder) > lum(built4) && lum(wonder) > lum(bare), true],
+          ['every channel stays in range',
+            [shadowed, sunlit, low, high, skylight, zoned, built4, wonder, bare]
+              .every(c => c.every(v => v >= 0 && v <= 255)), true]
+        ];
+      } },
+
+    { name: 'Clicking the minimap picks the tile you pointed at',
+      why: 'the whole feature is "click there, go there" — an off-by-one in the mapping would send the camera somewhere plausible but wrong, which is worse than it not working at all',
+      run() {
+        /* a real element, because the mapping is defined against the box the
+           browser lays out rather than against the canvas attribute size */
+        const cv2 = document.createElement('canvas');
+        cv2.width = cv2.height = 200;
+        cv2.style.cssText = 'position:absolute;left:0;top:0;width:200px;height:200px';
+        document.body.appendChild(cv2);
+        const r = cv2.getBoundingClientRect();
+        const at = (fx, fy) => MM.tileAtPoint(cv2, r.left + fx * r.width, r.top + fy * r.height);
+
+        const tl = at(0.001, 0.001), br = at(0.999, 0.999), mid = at(0.5, 0.5);
+        const outLo = at(-2, -2), outHi = at(3, 3);
+        document.body.removeChild(cv2);
+        return [
+          ['the top-left corner is tile 0,0', [tl.x, tl.y].join(','), '0,0'],
+          ['the bottom-right is the last tile',
+            [br.x, br.y].join(','), [K.COLS - 1, K.ROWS - 1].join(',')],
+          ['the middle is the middle', [mid.x, mid.y].join(','), [K.COLS / 2, K.ROWS / 2].join(',')],
+          ['a point off the left is clamped, not negative',
+            outLo.x >= 0 && outLo.y >= 0, true],
+          ['and a point off the right is clamped to the map',
+            outHi.x <= K.COLS - 1 && outHi.y <= K.ROWS - 1, true]
         ];
       } }
   ];
