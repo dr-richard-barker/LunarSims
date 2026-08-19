@@ -29,9 +29,50 @@
   /* Bumped only when makeMap's algorithm changes in a way that would
      regenerate different terrain from the same seed. A site records which
      generator built it, so an already-founded site keeps reproducing
-     exactly even after the generator moves on to a newer version — see
-     terrain.js. There is only one generator today, so every site is gen 1. */
-  const GEN_VERSION = 1;
+     exactly even after the generator moves on to a newer version.
+
+     gen 1 is every site founded before terrain classes existed — makeMap's
+     original, unparameterised, polar-only algorithm. gen 2 is the
+     class-aware generator: mare, highland and polar sites sited anywhere on
+     the Moon, each with a sunSlope drawn from its own latitude rather than
+     the one fixed global constant gen 1 always used. baseFor() below is the
+     one place that reads this field and decides which of the two to call —
+     a gen 1 site is never handed to the parameterised path, so it can never
+     regenerate even slightly different ground. */
+  const GEN_VERSION = 2;
+
+  /* Near a pole the sun barely clears the horizon, so a low ridge throws a
+     shadow for a long way — SUN_SLOPE is that threshold, and until this
+     phase it was the one fixed number every site in the game used, because
+     there was only ever one site. Interpolated by latitude: unchanged at
+     the pole (so gen 1 sites and a freshly founded polar gen 2 site read
+     identically), and much higher at the equator.
+
+     Measured on real generated terrain rather than assumed: at the pole
+     (0.16) 8.9% of tiles are permanently shadowed and 660 hold ice; at 0.9,
+     that is 0.5% shadowed and 31 ice deposits — better than an order of
+     magnitude down, which is what "almost no ice at the equator" actually
+     means in this engine (seedDeposits in terrain.js keys ice off exactly
+     this derived field, unchanged).
+
+     What does NOT hold at the equator is the polar game's other half —
+     scarce peaks of eternal light. Permanent light gets MORE common as
+     shadow gets rarer (68% of tiles read as a "peak" at 0.9, against 26% at
+     the pole), not rarer: there is no equatorial equivalent of hunting for
+     the one well-lit rim. What replaces it is a different siting puzzle,
+     for the two wonders that read sun directly — a heliostat crown (needs
+     peak sun AND height 8+) is easy to justify almost anywhere sun-wise on
+     a highland site, and nearly impossible on a mare one no matter how
+     bright, because mare's own relief rarely reaches height 8 at all; a
+     radio telescope (needs a genuinely shadowed crater floor) goes from a
+     five-minute search at a pole to a real hunt once shadow itself is this
+     rare. The trade the player is solving changes shape by latitude rather
+     than staying the same trade at a smaller scale. */
+  const SLOPE_POLE = 0.16, SLOPE_EQUATOR = 0.9;
+  function slopeFor(lat) {
+    const frac = 1 - Math.min(1, Math.abs(lat) / 90);   // 0 at the pole, 1 at the equator
+    return SLOPE_POLE + (SLOPE_EQUATOR - SLOPE_POLE) * frac;
+  }
 
   /* The UI only ever displays dust to the nearest percent (see ui.js's tile
      panel), so storing more precision than the player can see buys nothing
@@ -57,9 +98,15 @@
   /* The pristine terrain a site would generate today, before any player
      edit. Regenerated on every encode AND decode rather than cached, so the
      base a diff is measured against can never drift from what makeMap would
-     actually produce right now. */
+     actually produce right now.
+
+     Dispatches on the site's OWN generator version, not the current
+     GEN_VERSION — a gen 1 site calls makeMap with no options at all, the
+     exact call every site in the game made before terrain classes existed,
+     so it can never regenerate as anything but what it always has been. */
   function baseFor(site) {
-    return T.makeMap(site.seed);
+    if (!site.gen || site.gen <= 1) return T.makeMap(site.seed);
+    return T.makeMap(site.seed, { class: site.class, sunSlope: slopeFor(site.lat) });
   }
 
   /* ---------- sparse encode / decode ---------- */
@@ -140,12 +187,17 @@
         !o.map || o.map.length !== K.COLS * K.ROWS) return null;
 
     /* The game's terrain has always been tuned for a polar site — SUN_SLOPE
-       is low enough that permanently shadowed floors and peaks of eternal
+       was low enough that permanently shadowed floors and peaks of eternal
        light both exist, which only happens near a pole. Migrating it in as
-       one confirms that rather than guessing at a plausible site. */
+       one confirms that rather than guessing at a plausible site.
+
+       gen is hardcoded to 1 here, deliberately never GEN_VERSION: this save
+       was built by makeMap's original, unparameterised call, and baseFor()
+       has to keep calling it exactly that way forever, however many
+       generator versions come after it. */
     const site = {
       id: uid(), name: 'Colony One', lat: -85, lon: 0, class: 'polar',
-      seed: o.seed, gen: GEN_VERSION, founded: Date.now()
+      seed: o.seed, gen: 1, founded: Date.now()
     };
     return { site, snapshot: encode(o, site) };
   }
@@ -205,7 +257,7 @@
       seed: seed === undefined ? Math.floor(Math.random() * 999999) : seed,
       gen: GEN_VERSION, founded: Date.now()
     };
-    const s = window.LM_SIM.newGame(site.seed);
+    const s = window.LM_SIM.newGame(site.seed, { class: site.class, sunSlope: slopeFor(site.lat) });
     store.sites[id] = Object.assign({}, site, { snapshot: encode(s, site) });
     writeStore(store);
     return id;
@@ -231,7 +283,7 @@
   };
 
   window.LM_SITES = {
-    encode, decode, classify, baseFor,
+    encode, decode, classify, slopeFor, baseFor,
     list, load, save, found, setActive, activeId, siteOf, sizeOf,
     /* exposed for the harness, and for the migration path in ui.js */
     migrateLegacy, ensureStore, GEN_VERSION, SITES_KEY, LEGACY_KEY

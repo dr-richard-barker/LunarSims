@@ -2125,7 +2125,7 @@ td.mark{width:34px;text-align:center}
       why: 'this is the whole feature — a lossy round trip would not shrink saves, it would corrupt them the first time anyone sculpted terrain, built something, or got hit by a disaster',
       run() {
         const s = S.newGame(4242);
-        const site = { id: 't1', name: 'Test', lat: -85, lon: 0, class: 'polar', seed: s.seed, gen: ST.GEN_VERSION };
+        const site = { id: 't1', name: 'Test', lat: -85, lon: 0, class: 'polar', seed: s.seed, gen: 1 };
 
         /* sculpt terrain, clear a boulder, build, zone, pipe */
         for (let i = 0; i < 3; i++) T.raise(s, 64, 64);
@@ -2188,13 +2188,13 @@ td.mark{width:34px;text-align:center}
       why: 'if a freshly founded site produced edits against its own base, the base itself would be wrong — and if encoding a decoded snapshot produced a DIFFERENT snapshot, the format would drift a little more every time a city was saved and reloaded',
       run() {
         const s = S.newGame(909);
-        const site = { id: 't2', name: 'Fresh', lat: -85, lon: 0, class: 'polar', seed: s.seed, gen: ST.GEN_VERSION };
+        const site = { id: 't2', name: 'Fresh', lat: -85, lon: 0, class: 'polar', seed: s.seed, gen: 1 };
         const snap0 = ST.encode(s, site);
 
         const s2 = S.newGame(4242);
         for (let i = 0; i < 3; i++) T.raise(s2, 64, 64);
         S.place(s2, T.tileAt(s2, 60, 60), 'solar');
-        const site2 = { id: 't3', name: 'Built', lat: -85, lon: 0, class: 'polar', seed: s2.seed, gen: ST.GEN_VERSION };
+        const site2 = { id: 't3', name: 'Built', lat: -85, lon: 0, class: 'polar', seed: s2.seed, gen: 1 };
         const snapA = ST.encode(s2, site2);
         const roundTripped = ST.decode(site2, snapA);
         const snapB = ST.encode(roundTripped, site2);
@@ -2213,7 +2213,7 @@ td.mark{width:34px;text-align:center}
         const s = S.newGame(777);
         s.autoPlay = true;
         for (let i = 0; i < 220; i++) S.tick(s);
-        const site = { id: 't4', name: 'Big', lat: -85, lon: 0, class: 'polar', seed: s.seed, gen: ST.GEN_VERSION };
+        const site = { id: 't4', name: 'Big', lat: -85, lon: 0, class: 'polar', seed: s.seed, gen: 1 };
 
         const fullBytes = JSON.stringify(s).length;
         const snap = ST.encode(s, site);
@@ -2361,6 +2361,176 @@ td.mark{width:34px;text-align:center}
           ];
         } finally {
           if (savedSites === null) localStorage.removeItem(ST.SITES_KEY); else localStorage.setItem(ST.SITES_KEY, savedSites);
+        }
+      } },
+
+    /* ---------- v3 phase 3: site-driven terrain generation ---------- */
+
+    { name: 'Omitting generation options reproduces exactly what makeMap always has',
+      why: 'every world this game has ever generated is a polar world at the one fixed slope it always used — CLASS_PARAMS.polar has to be that same set of numbers given names, not a fresh guess at them, or every existing and migrated site would quietly regenerate as slightly different ground',
+      run() {
+        const seeds = [1, 4242, 90210, 555555];
+        const same = seeds.every(sd => {
+          const legacy = T.makeMap(sd);
+          const explicit = T.makeMap(sd, { class: 'polar', sunSlope: K.SUN_SLOPE });
+          return JSON.stringify(legacy.map) === JSON.stringify(explicit.map) &&
+                 legacy.sunSlope === explicit.sunSlope;
+        });
+        const defaultSlope = T.makeMap(1).sunSlope;
+        return [
+          ['four different seeds all round-trip identically', same, true],
+          ['the default (no opts) world carries the pole sunSlope', defaultSlope, K.SUN_SLOPE],
+          ['CLASS_PARAMS exposes exactly the three site classes',
+            Object.keys(T.CLASS_PARAMS).sort().join(','), 'highland,mare,polar']
+        ];
+      } },
+
+    { name: 'The three site classes actually generate different ground',
+      why: 'a class that was just a label on otherwise-identical terrain would make the whole "where you land matters" feature cosmetic — mare has to read flatter and less cratered, highland rougher and busier, on the same seed',
+      run() {
+        const seed = 8080;
+        const relief = cls => {
+          const w = T.makeMap(seed, { class: cls, sunSlope: 0.16 });
+          let sum = 0, sumSq = 0, boulders = 0, rough = 0;
+          for (const t of w.map) {
+            sum += t.h; sumSq += t.h * t.h;
+            if (t.t === 'boulder') boulders++;
+            if (t.t === 'rough') rough++;
+          }
+          const n = w.map.length, mean = sum / n;
+          return { variance: sumSq / n - mean * mean, boulders, rough, mean };
+        };
+        const polar = relief('polar'), mare = relief('mare'), highland = relief('highland');
+        return [
+          ['mare is flatter than polar (lower height variance)', mare.variance < polar.variance, true],
+          ['highland is rougher than polar (higher height variance)', highland.variance > polar.variance, true],
+          ['mare has fewer boulders than polar', mare.boulders < polar.boulders, true],
+          ['highland has more broken ground than polar', highland.rough > polar.rough, true],
+          ['and mare has the least broken ground of the three',
+            mare.rough < polar.rough && mare.rough < highland.rough, true]
+        ];
+      } },
+
+    { name: 'Every class still guarantees a buildable skylight',
+      why: 'the megadome wonder needs one, and mare/highland have no rille to hang it on the way polar does — losing it silently on two of the three classes would make one wonder pole-only without ever saying so',
+      run() {
+        for (const cls of ['polar', 'mare', 'highland']) {
+          const w = T.makeMap(3030, { class: cls, sunSlope: 0.5 });
+          const sk = w.map.find(t => t.t === 'skylight');
+          if (!sk) return [['a skylight exists on ' + cls, false, true]];
+        }
+        return [['every class generated exactly one skylight', true, true]];
+      } },
+
+    { name: 'slopeFor() runs from the measured pole value to the measured equator value',
+      why: 'this single number is the entire mechanism behind "where you land changes what you get" — get the endpoints or the monotonicity wrong and every other site-driven effect inherits the mistake',
+      run() {
+        return [
+          ['the pole matches the legacy constant exactly', ST.slopeFor(-90), K.SUN_SLOPE],
+          ['and so does the other pole', ST.slopeFor(90), K.SUN_SLOPE],
+          ['the equator is the measured, retuned value', ST.slopeFor(0), 0.9],
+          ['it rises monotonically from either pole toward the equator',
+            ST.slopeFor(-90) <= ST.slopeFor(-45) && ST.slopeFor(-45) <= ST.slopeFor(0), true],
+          ['and is symmetric across hemispheres', ST.slopeFor(-37), ST.slopeFor(37)]
+        ];
+      } },
+
+    { name: 'Latitude moves permanent shadow and ice in the right direction — measured, not assumed',
+      why: 'these are the numbers the whole "ice follows for free" claim rests on: seedDeposits was never touched for this phase, so if the relationship holds it is entirely because computeSun is reading a different slope, not because anything about deposits changed',
+      run() {
+        const seed = 4242;
+        const stats = slope => {
+          const w = T.makeMap(seed, { class: 'polar', sunSlope: slope });
+          let shadow = 0, ice = 0;
+          for (const t of w.map) {
+            if (t.sun <= K.SUN_SHADOW) shadow++;
+            if (t.deposit && t.deposit.kind === 'ice') ice++;
+          }
+          return { shadow, ice, relief: w.map.map(t => t.h + ':' + t.t).join('') };
+        };
+        const pole = stats(ST.slopeFor(-90)), eq = stats(ST.slopeFor(0));
+        return [
+          ['the relief is identical either way — only the slope changed', eq.relief, pole.relief],
+          ['the pole has real permanent shadow to lose', pole.shadow, '>500'],
+          ['the equator has far less of it', eq.shadow < pole.shadow / 5, true],
+          ['the pole has real ice to lose', pole.ice, '>200'],
+          ['the equator has far less of that too', eq.ice < pole.ice / 5, true]
+        ];
+      } },
+
+    { name: 'baseFor() dispatches on the SITE\'s generator version, not the current one',
+      why: 'this is the guarantee the whole versioning scheme exists for — bumping GEN_VERSION for new sites must never change what an already-founded gen 1 site regenerates into, however many generators come after it',
+      run() {
+        const gen1 = { seed: 606, gen: 1, class: 'highland', lat: 0 };  // class/lat should be IGNORED for gen 1
+        const gen1Implicit = { seed: 606, class: 'highland', lat: 0 };  // no gen field at all — same as gen 1
+        const gen2Mare = { seed: 606, gen: 2, class: 'mare', lat: 0 };
+        /* lat -90, the TRUE pole, not merely a "polar-classed" latitude —
+           slopeFor is continuous and only returns exactly K.SUN_SLOPE at
+           -90 itself (see the slopeFor scenario), so a polar gen 2 site
+           there is the one case where it SHOULD reproduce gen 1 exactly —
+           a useful check in its own right, just not of "does gen 2 use its
+           class and latitude at all", which needs a site where they
+           actually make a difference. */
+        const gen2Pole = { seed: 606, gen: 2, class: 'polar', lat: -90 };
+
+        const plain = T.makeMap(606);
+        const b1 = ST.baseFor(gen1), b1i = ST.baseFor(gen1Implicit);
+        const bMare = ST.baseFor(gen2Mare), bPole = ST.baseFor(gen2Pole);
+
+        return [
+          ['a gen 1 site ignores its own class/lat fields entirely',
+            JSON.stringify(b1.map), JSON.stringify(plain.map)],
+          ['a site with no gen field at all is treated the same as gen 1',
+            JSON.stringify(b1i.map), JSON.stringify(plain.map)],
+          ['a gen 2 site actually uses class and latitude',
+            JSON.stringify(bMare.map) === JSON.stringify(plain.map), false],
+          ['a gen 2 polar site at the TRUE pole reproduces gen 1 exactly',
+            JSON.stringify(bPole.map), JSON.stringify(plain.map)],
+          ['which is exactly because its sunSlope matches gen 1\'s constant',
+            bPole.sunSlope, K.SUN_SLOPE]
+        ];
+      } },
+
+    { name: 'newGame threads generation options through without disturbing any existing caller',
+      why: 'hundreds of scenarios in this very harness call S.newGame(seed) with one argument and rely on getting a polar world back — this is the one test that would catch a change to that default breaking all of them at once',
+      run() {
+        const plain = S.newGame(707);
+        const explicit = S.newGame(707, { class: 'polar', sunSlope: K.SUN_SLOPE });
+        const mare = S.newGame(707, { class: 'mare', sunSlope: 0.9 });
+        return [
+          ['no-argument newGame still carries the pole slope', plain.sunSlope, K.SUN_SLOPE],
+          ['matches an explicit polar call tile for tile', JSON.stringify(plain.map), JSON.stringify(explicit.map)],
+          ['a mare call actually produces different, flatter ground',
+            JSON.stringify(mare.map) === JSON.stringify(plain.map), false],
+          ['and carries the slope it was given', mare.sunSlope, 0.9]
+        ];
+      } },
+
+    { name: 'found() and migrateLegacy() write the generator version they are supposed to',
+      why: 'a founded site that was accidentally stamped gen 1 would silently ignore its own class and latitude forever; a migrated legacy site stamped anything OTHER than gen 1 would risk regenerating as different ground the moment GEN_VERSION next moves',
+      run() {
+        const savedSites = localStorage.getItem(ST.SITES_KEY);
+        const savedLegacy = localStorage.getItem(ST.LEGACY_KEY);
+        try {
+          localStorage.removeItem(ST.SITES_KEY);
+          const id = ST.found('Equatorial', 3, 12, 999);
+          const founded = ST.siteOf(id);
+
+          localStorage.removeItem(ST.SITES_KEY);
+          const legacy = S.newGame(31416);
+          localStorage.setItem(ST.LEGACY_KEY, JSON.stringify(legacy));
+          const migrated = ST.ensureStore();
+          const migRec = migrated.sites[migrated.activeId];
+
+          return [
+            ['a freshly founded site gets the current generator', founded.gen, ST.GEN_VERSION],
+            ['and the current generator is 2', ST.GEN_VERSION, 2],
+            ['founding at a near-equatorial latitude classes it mare', founded.class, 'mare'],
+            ['a migrated legacy site is always stamped gen 1, regardless of GEN_VERSION', migRec.gen, 1]
+          ];
+        } finally {
+          if (savedSites === null) localStorage.removeItem(ST.SITES_KEY); else localStorage.setItem(ST.SITES_KEY, savedSites);
+          if (savedLegacy === null) localStorage.removeItem(ST.LEGACY_KEY); else localStorage.setItem(ST.LEGACY_KEY, savedLegacy);
         }
       } }
   ];

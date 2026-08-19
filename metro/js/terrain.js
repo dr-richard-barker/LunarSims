@@ -101,11 +101,29 @@
   /* ---------- sun exposure ---------- */
 
   /* Fraction of the horizon a tile can see, cast against the surrounding
-     relief. Near the pole the sun barely clears the horizon (SUN_SLOPE), so
-     a ridge only a couple of levels up throws shadow for a long way — which
-     is precisely why crater floors here stay permanently dark and crater
-     rims stay permanently lit. Recomputed after terrain edits. */
+     relief. The threshold a blocker has to clear — how much higher a tile
+     must be, per step of distance, to throw shadow — is SUN_SLOPE, and it is
+     read off the world being computed rather than fixed globally: a site's
+     own sunSlope (set once at generation, from its latitude — see sites.js's
+     slopeFor()) is what actually distinguishes a pole from the equator. Near
+     a pole that threshold is low, so a ridge only a couple of levels up
+     throws shadow a long way — precisely why crater floors there stay
+     permanently dark and crater rims stay permanently lit. Near the equator
+     it is high, so almost nothing casts a usable shadow at all — measured,
+     not assumed: permanent shadow (and the ice seedDeposits keys off it)
+     drops by more than an order of magnitude. What that does NOT do is make
+     permanent light scarce too — the opposite; open sky gets far more
+     common, not rarer, so an equatorial site trades the pole's power-vs-ice
+     siting puzzle for a different one: solar siting stops mattering much,
+     and finding a floor still dark enough for a telescope becomes the hard
+     search instead. Falls back to the global default when a world has no
+     sunSlope of its own — every save from before this existed, and every
+     call in this file's own generation step before the site's slope has
+     been attached. Recomputed after terrain edits. */
+  const slopeOf = s => s.sunSlope !== undefined ? s.sunSlope : K.SUN_SLOPE;
+
   function computeSun(s) {
+    const slope = slopeOf(s);
     const dirs = [];
     for (let i = 0; i < K.RAY_DIRS; i++) {
       const a = (i / K.RAY_DIRS) * Math.PI * 2;
@@ -118,7 +136,7 @@
         for (let d = 1; d <= K.RAY_LEN; d++) {
           const n = tileAt(s, Math.round(t.x + dx * d), Math.round(t.y + dy * d));
           if (!n) break;                       // off the map is open sky
-          if (n.h > t.h + d * K.SUN_SLOPE) { blocked = true; break; }
+          if (n.h > t.h + d * slope) { blocked = true; break; }
         }
         if (!blocked) open++;
       }
@@ -130,6 +148,7 @@
      tiles within RAY_LEN of it, so a full-map pass after every click would
      be wasted work on a 128x128 map. */
   function computeSunNear(s, cx, cy, pad) {
+    const slope = slopeOf(s);
     const r = K.RAY_LEN + (pad || 1);
     const dirs = [];
     for (let i = 0; i < K.RAY_DIRS; i++) {
@@ -146,7 +165,7 @@
           for (let d = 1; d <= K.RAY_LEN; d++) {
             const n = tileAt(s, Math.round(t.x + dx * d), Math.round(t.y + dy * d));
             if (!n) break;
-            if (n.h > t.h + d * K.SUN_SLOPE) { blocked = true; break; }
+            if (n.h > t.h + d * slope) { blocked = true; break; }
           }
           if (!blocked) open++;
         }
@@ -195,16 +214,68 @@
     }
   }
 
-  function makeMap(seed) {
-    const s = { map: [], seed };
+  /* One entry per site class, read by makeMap. 'polar' is, deliberately,
+     nothing more than today's numbers given names — every world this game
+     has ever generated is a polar world, so the default path (opts omitted
+     entirely) must keep producing exactly what it always has, and the
+     cleanest way to guarantee that is for there to be only one code path,
+     not a legacy branch frozen alongside a new one. A harness scenario
+     checks makeMap(seed) and makeMap(seed, CLASS_PARAMS.polar's own values)
+     produce byte-identical worlds for exactly this reason.
 
-    /* base relief: two octaves of gentle roll over the mare */
+     mare is flat, dark, lightly cratered, with no massif — real maria are
+     the smooth basaltic plains, and a guaranteed peak would be redundant
+     there anyway: a mare site's high sunSlope already makes open sky the
+     default state of nearly every tile (see computeSun's own note), so
+     there is no scarce well-lit spot worth manufacturing one for. mare's
+     low relief cuts the other way, though — height rarely reaches the 8
+     levels a heliostat crown needs, so the wonder that wants peak sun most
+     is often the one a mare site cannot actually host.
+
+     highland is rough and heavily cratered with the highest relief — the
+     ancient, saturated terrain real lunar highlands are, and tall enough
+     that a heliostat crown finds a home there almost anywhere. */
+  const CLASS_PARAMS = {
+    polar: {
+      noiseA: 26, noiseB: 11, reliefBase: 3, reliefAmp: 5,
+      bigCount: 5, bigRBase: 9, bigRSpread: 7, bigDepth: 4,
+      smallCount: 22, smallRBase: 2, smallRSpread: 3, smallDepth: 2,
+      rille: true, massif: true, boulders: 260
+    },
+    mare: {
+      noiseA: 34, noiseB: 14, reliefBase: 1, reliefAmp: 2,
+      bigCount: 2, bigRBase: 6, bigRSpread: 5, bigDepth: 3,
+      smallCount: 8, smallRBase: 1, smallRSpread: 3, smallDepth: 1,
+      rille: false, massif: false, boulders: 90
+    },
+    highland: {
+      noiseA: 18, noiseB: 8, reliefBase: 5, reliefAmp: 8,
+      bigCount: 9, bigRBase: 7, bigRSpread: 9, bigDepth: 6,
+      smallCount: 40, smallRBase: 2, smallRSpread: 5, smallDepth: 3,
+      rille: false, massif: false, boulders: 340
+    }
+  };
+
+  /* `opts` is entirely optional. Omitting it — as every call site in this
+     codebase does today — reproduces exactly what makeMap has always
+     produced: a polar world at the default sunSlope. Only sites founded
+     through the globe (Phase 4) or found() with an explicit class ever pass
+     one, and every one of THOSE also carries a gen number recording that it
+     was built by this parameterised generator rather than the frozen
+     original — see sites.js. */
+  function makeMap(seed, opts) {
+    const cls = (opts && opts.class) || 'polar';
+    const P = CLASS_PARAMS[cls] || CLASS_PARAMS.polar;
+    const slope = (opts && opts.sunSlope !== undefined) ? opts.sunSlope : K.SUN_SLOPE;
+    const s = { map: [], seed, sunSlope: slope };
+
+    /* base relief: two octaves of noise, scaled and offset per class */
     for (let y = 0; y < K.ROWS; y++) {
       for (let x = 0; x < K.COLS; x++) {
-        const n = valueNoise(seed, x, y, 26) * 0.7 + valueNoise(seed + 91, x, y, 11) * 0.3;
+        const n = valueNoise(seed, x, y, P.noiseA) * 0.7 + valueNoise(seed + 91, x, y, P.noiseB) * 0.3;
         s.map.push({
           x, y,
-          h: clamp(Math.round(3 + n * 5), 0, K.MAX_H),
+          h: clamp(Math.round(P.reliefBase + n * P.reliefAmp), 0, K.MAX_H),
           t: 'flat',
           sun: 1,
           dust: 0,
@@ -215,41 +286,47 @@
     }
 
     /* craters: a few large basins and a scatter of small ones */
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < P.bigCount; i++) {
       const cx = Math.floor(rnd(seed + i * 3.3) * K.COLS);
       const cy = Math.floor(rnd(seed + i * 5.9) * K.ROWS);
-      stampCrater(s, cx, cy, 9 + Math.floor(rnd(seed + i * 8.2) * 7), 4);
+      stampCrater(s, cx, cy, P.bigRBase + Math.floor(rnd(seed + i * 8.2) * P.bigRSpread), P.bigDepth);
     }
-    for (let i = 0; i < 22; i++) {
+    for (let i = 0; i < P.smallCount; i++) {
       const cx = Math.floor(rnd(seed + 400 + i * 4.1) * K.COLS);
       const cy = Math.floor(rnd(seed + 400 + i * 6.3) * K.ROWS);
-      stampCrater(s, cx, cy, 2 + Math.floor(rnd(seed + 400 + i * 2.7) * 3), 2);
+      stampCrater(s, cx, cy, P.smallRBase + Math.floor(rnd(seed + 400 + i * 2.7) * P.smallRSpread), P.smallDepth);
     }
 
-    /* one rille and one massif — the massif gives the map a guaranteed peak
-       of eternal light to build a solar farm on, which the player should
-       always have somewhere to find */
-    stampRille(s, seed + 77, K.COLS * 0.2, K.ROWS * 0.7, 90);
-    const px = Math.floor(K.COLS * 0.68), py = Math.floor(K.ROWS * 0.28);
-    for (let y = py - 7; y <= py + 7; y++) {
-      for (let x = px - 7; x <= px + 7; x++) {
-        const t = tileAt(s, x, y);
-        if (!t) continue;
-        const d = Math.hypot(x - px, y - py);
-        if (d > 7) continue;
-        t.h += Math.round((7 - d) * 0.9);
+    /* the rille, and the massif that gives a polar map a guaranteed peak of
+       eternal light — see the CLASS_PARAMS comment for why only polar gets
+       one */
+    if (P.rille) stampRille(s, seed + 77, K.COLS * 0.2, K.ROWS * 0.7, 90);
+    if (P.massif) {
+      const px = Math.floor(K.COLS * 0.68), py = Math.floor(K.ROWS * 0.28);
+      for (let y = py - 7; y <= py + 7; y++) {
+        for (let x = px - 7; x <= px + 7; x++) {
+          const t = tileAt(s, x, y);
+          if (!t) continue;
+          const d = Math.hypot(x - px, y - py);
+          if (d > 7) continue;
+          t.h += Math.round((7 - d) * 0.9);
+        }
       }
     }
 
     for (const t of s.map) t.h = clamp(t.h, 0, K.MAX_H);
     relax(s, s.map.map(t => [t.x, t.y]));
 
-    /* one lava-tube skylight, sited on the rille */
-    const sk = tileAt(s, Math.floor(K.COLS * 0.26), Math.floor(K.ROWS * 0.74));
+    /* one lava-tube skylight — sited on the rille where there is one, and
+       on a fixed interior spot where there is not, so the megadome wonder
+       stays buildable on every class of site */
+    const skx = P.rille ? Math.floor(K.COLS * 0.26) : Math.floor(K.COLS * 0.32);
+    const sky = P.rille ? Math.floor(K.ROWS * 0.74) : Math.floor(K.ROWS * 0.36);
+    const sk = tileAt(s, skx, sky);
     if (sk) { sk.t = 'skylight'; for (const [dx, dy] of DIRS) { const n = tileAt(s, sk.x + dx, sk.y + dy); if (n) n.t = 'rough'; } }
 
     /* boulders, avoiding anything already special */
-    for (let i = 0; i < 260; i++) {
+    for (let i = 0; i < P.boulders; i++) {
       const t = tileAt(s, Math.floor(rnd(seed + 900 + i * 17.3) * K.COLS),
                           Math.floor(rnd(seed + 900 + i * 11.9) * K.ROWS));
       if (t && t.t === 'flat') t.t = 'boulder';
@@ -286,6 +363,11 @@
   window.LM_TERRAIN = {
     makeMap, raise, lower, levelTo, clearBoulders,
     computeSun, computeSunNear, relax, stepRuleHolds,
-    idx, inBounds, tileAt, terrainById, depositById, buildable, clamp
+    idx, inBounds, tileAt, terrainById, depositById, buildable, clamp,
+    /* exposed for the harness (checking each class actually differs, and
+       that omitting opts matches passing polar's own values explicitly)
+       and for sites.js, which needs the same slope-per-latitude concept
+       to live somewhere other than here (see classify()/slopeFor()) */
+    CLASS_PARAMS
   };
 })();
