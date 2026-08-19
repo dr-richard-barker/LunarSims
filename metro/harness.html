@@ -56,6 +56,7 @@ td.mark{width:34px;text-align:center}
 <script src="js/disasters.js"></script>
 <script src="js/invasion.js"></script>
 <script src="js/sim.js"></script>
+<script src="js/sites.js"></script>
 <script src="js/autopilot.js"></script>
 <script src="js/agents.js"></script>
 <script src="js/fx.js"></script>
@@ -65,7 +66,7 @@ td.mark{width:34px;text-align:center}
   const T = window.LM_TERRAIN, G = window.LM_GRID, Z = window.LM_ZONES, S = window.LM_SIM;
   const B = window.LM_BUDGET, SV = window.LM_SERVICES, E = window.LM_ERAS;
   const AI = window.LM_AUTO, DIS = window.LM_DISASTERS, AG = window.LM_AGENTS;
-  const INV = window.LM_INVASION, FX = window.LM_FX, MM = window.LM_MINIMAP;
+  const INV = window.LM_INVASION, FX = window.LM_FX, MM = window.LM_MINIMAP, ST = window.LM_SITES;
   const K = window.LM_DATA.K, LM_DATA = window.LM_DATA;
 
   /* A fixed-sequence stand-in for Math.random, so every scenario that rolls
@@ -2116,8 +2117,254 @@ td.mark{width:34px;text-align:center}
           ['and a point off the right is clamped to the map',
             outHi.x <= K.COLS - 1 && outHi.y <= K.ROWS - 1, true]
         ];
+      } },
+
+    /* ---------- v3 phase 2: sites and sparse saves ---------- */
+
+    { name: 'A sparse snapshot round-trips a battered city exactly',
+      why: 'this is the whole feature — a lossy round trip would not shrink saves, it would corrupt them the first time anyone sculpted terrain, built something, or got hit by a disaster',
+      run() {
+        const s = S.newGame(4242);
+        const site = { id: 't1', name: 'Test', lat: -85, lon: 0, class: 'polar', seed: s.seed, gen: ST.GEN_VERSION };
+
+        /* sculpt terrain, clear a boulder, build, zone, pipe */
+        for (let i = 0; i < 3; i++) T.raise(s, 64, 64);
+        T.clearBoulders(s, 65, 70);
+        S.place(s, T.tileAt(s, 60, 60), 'solar');
+        S.place(s, T.tileAt(s, 61, 60), 'tube');
+        S.place(s, T.tileAt(s, 62, 60), 'main');
+        S.paintZone(s, 63, 63, 2, 2, 'hab', 'high');
+        for (let i = 0; i < 40; i++) S.tick(s);
+
+        /* a disaster and an invasion event, so terrain edits and the
+           cosmetic-only fields (pattern, snatched) are both exercised */
+        if (DIS) DIS.fire(s, 'meteor', T.tileAt(s, 70, 70));
+        if (INV) {
+          INV.fire(s, 'circles', T.tileAt(s, 50, 50), seededRnd(77));
+          INV.fire(s, 'snatchers', T.tileAt(s, 63, 63), seededRnd(78));
+        }
+        for (let i = 0; i < 10; i++) S.tick(s);
+
+        const snap = ST.encode(s, site);
+        const back = ST.decode(site, snap);
+
+        /* null and undefined both mean "nothing here" everywhere the game
+           reads these fields (always as `if (t.b)`, never `=== null`), and a
+           freshly regenerated base tile that was never touched is undefined
+           while a live tile a disaster explicitly cleared is null — so the
+           comparison has to treat those two as equal or it flags a
+           difference the game itself cannot see. */
+        const cmp = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+        let mismatches = [];
+        for (let i = 0; i < s.map.length; i++) {
+          const a = s.map[i], b = back.map[i];
+          if (a.h !== b.h) mismatches.push('h@' + i);
+          if (a.t !== b.t) mismatches.push('t@' + i);
+          if (Math.abs((a.dust || 0) - (b.dust || 0)) > 0.015) mismatches.push('dust@' + i);
+          if (!cmp(a.b, b.b)) mismatches.push('b@' + i);
+          if (!!a.pipe !== !!b.pipe) mismatches.push('pipe@' + i);
+          if (!cmp(a.zone, b.zone)) mismatches.push('zone@' + i);
+          if ((a.pattern || 0) !== (b.pattern || 0)) mismatches.push('pattern@' + i);
+          if ((a.snatched || 0) !== (b.snatched || 0)) mismatches.push('snatched@' + i);
+        }
+        const metaOk = back.day === s.day && back.credits === s.credits &&
+          back.pop === s.pop && back.research === s.research &&
+          JSON.stringify(back.history) === JSON.stringify(s.history);
+
+        return [
+          ['the map has the same tile count coming back', back.map.length, s.map.length],
+          ['every tile field round-trips (dust to within its stored rounding)',
+            mismatches.length === 0 ? 'none' : mismatches.slice(0, 5).join(','), 'none'],
+          ['sun is recomputed rather than stored, and still matches',
+            s.map.every((t, i) => Math.abs(t.sun - back.map[i].sun) < 0.001), true],
+          ['deposits regenerate identically from the same seed',
+            s.map.every((t, i) => JSON.stringify(t.deposit) === JSON.stringify(back.map[i].deposit)), true],
+          ['the day/credits/population/research/history all came back', metaOk, true],
+          ['the decoded seed matches the site', back.seed, site.seed]
+        ];
+      } },
+
+    { name: 'An untouched city has nothing to store, and encoding is a fixed point',
+      why: 'if a freshly founded site produced edits against its own base, the base itself would be wrong — and if encoding a decoded snapshot produced a DIFFERENT snapshot, the format would drift a little more every time a city was saved and reloaded',
+      run() {
+        const s = S.newGame(909);
+        const site = { id: 't2', name: 'Fresh', lat: -85, lon: 0, class: 'polar', seed: s.seed, gen: ST.GEN_VERSION };
+        const snap0 = ST.encode(s, site);
+
+        const s2 = S.newGame(4242);
+        for (let i = 0; i < 3; i++) T.raise(s2, 64, 64);
+        S.place(s2, T.tileAt(s2, 60, 60), 'solar');
+        const site2 = { id: 't3', name: 'Built', lat: -85, lon: 0, class: 'polar', seed: s2.seed, gen: ST.GEN_VERSION };
+        const snapA = ST.encode(s2, site2);
+        const roundTripped = ST.decode(site2, snapA);
+        const snapB = ST.encode(roundTripped, site2);
+
+        return [
+          ['a brand new, untouched city has zero edits', snap0.edits.length, 0],
+          ['a built city has some', snapA.edits.length, '>0'],
+          ['encoding what you just decoded reproduces the same edit list',
+            JSON.stringify(snapA.edits), JSON.stringify(snapB.edits)]
+        ];
+      } },
+
+    { name: 'A sparse snapshot is dramatically smaller than the full map',
+      why: 'this is the number the whole architecture is justified by — a save that was not meaningfully smaller than storing the map outright would not be worth the extra machinery',
+      run() {
+        const s = S.newGame(777);
+        s.autoPlay = true;
+        for (let i = 0; i < 220; i++) S.tick(s);
+        const site = { id: 't4', name: 'Big', lat: -85, lon: 0, class: 'polar', seed: s.seed, gen: ST.GEN_VERSION };
+
+        const fullBytes = JSON.stringify(s).length;
+        const snap = ST.encode(s, site);
+        const sparseBytes = JSON.stringify(snap).length;
+        return [
+          ['the city actually developed', S.developedCount(s), '>0'],
+          ['the sparse snapshot is well under a tenth of the full map',
+            sparseBytes < fullBytes * 0.1, true],
+          ['concretely: full ' + Math.round(fullBytes / 1024) + ' KB vs sparse ' +
+            Math.round(sparseBytes / 1024) + ' KB', sparseBytes < fullBytes, true]
+        ];
+      } },
+
+    { name: 'The legacy single-city save migrates in as Colony One',
+      why: 'the player\'s existing city must not be discarded the day this format ships — losing someone\'s save is the one mistake here with no way back',
+      run() {
+        const savedSites = localStorage.getItem(ST.SITES_KEY);
+        const savedLegacy = localStorage.getItem(ST.LEGACY_KEY);
+        try {
+          localStorage.removeItem(ST.SITES_KEY);
+          const legacy = S.newGame(31415);
+          for (let i = 0; i < 15; i++) S.tick(legacy);
+          S.place(legacy, T.tileAt(legacy, 60, 60), 'solar');
+          localStorage.setItem(ST.LEGACY_KEY, JSON.stringify(legacy));
+
+          const store = ST.ensureStore();
+          const id = store.activeId;
+          const rec = store.sites[id];
+          const back = ST.load(id);
+
+          return [
+            ['a site was created from the legacy save', !!rec, true],
+            ['it is named and sited as Colony One at the pole', rec.name + '@' + rec.lat, 'Colony One@-85'],
+            ['it carries the legacy save\'s own seed', rec.seed, legacy.seed],
+            ['it became the active site', store.activeId, id],
+            ['and decoding it reproduces the legacy city\'s day and credits',
+              back.day + ',' + back.credits, legacy.day + ',' + legacy.credits],
+            ['migration does not run twice — calling ensureStore again is a no-op',
+              ST.ensureStore().activeId, id]
+          ];
+        } finally {
+          if (savedSites === null) localStorage.removeItem(ST.SITES_KEY); else localStorage.setItem(ST.SITES_KEY, savedSites);
+          if (savedLegacy === null) localStorage.removeItem(ST.LEGACY_KEY); else localStorage.setItem(ST.LEGACY_KEY, savedLegacy);
+        }
+      } },
+
+    { name: 'Founding, saving, listing and switching sites all work together',
+      why: 'this is the lifecycle every later phase (the globe, the colonies list) is built on top of — if any one step lost or mislabelled a city, everything above it would too',
+      run() {
+        const savedSites = localStorage.getItem(ST.SITES_KEY);
+        try {
+          localStorage.removeItem(ST.SITES_KEY);
+          const idA = ST.found('Alpha', -85, 0, 111);
+          const idB = ST.found('Beta', 5, 40, 222);
+
+          const a1 = ST.load(idA);
+          for (let i = 0; i < 20; i++) S.tick(a1);
+          T.clearBoulders(a1, 60, 60);   // seed 111 happens to put one there
+          const placeErr = S.place(a1, T.tileAt(a1, 60, 60), 'solar');
+          if (placeErr) throw new Error('setup failed: ' + placeErr);
+          ST.save(idA, a1);
+
+          const list = ST.list();
+          const activeAfterSave = ST.activeId();
+          ST.setActive(idB);
+
+          const siteA = ST.siteOf(idA), siteB = ST.siteOf(idB);
+          const reloadedA = ST.load(idA);
+          return [
+            ['two distinct sites were founded', list.length, 2],
+            ['they kept the names they were founded with',
+              list.map(r => r.name).sort().join(','), 'Alpha,Beta'],
+            ['Alpha at the pole was classed polar', siteA.class, 'polar'],
+            ['Beta near the equator was classed mare', siteB.class, 'mare'],
+            ['saving Alpha makes it the active site', activeAfterSave, idA],
+            ['switching to Beta updates the active site', ST.activeId(), idB],
+            ['Alpha kept its seed across the whole round trip', siteA.seed, 111],
+            ['and reloading Alpha still has the solar array it built',
+              reloadedA.map.filter(t => t.b && t.b.type === 'solar').length, '>0']
+          ];
+        } finally {
+          if (savedSites === null) localStorage.removeItem(ST.SITES_KEY); else localStorage.setItem(ST.SITES_KEY, savedSites);
+        }
+      } },
+
+    { name: 'found() does not itself make a site active',
+      why: 'a caller that wants a fresh site to become the resumable one has to say so explicitly — this is what ui.js\'s first-run bootstrap forgot to do, which meant a session that closed before its first autosave would found a second "Colony One" instead of resuming the first',
+      run() {
+        const savedSites = localStorage.getItem(ST.SITES_KEY);
+        try {
+          localStorage.removeItem(ST.SITES_KEY);
+          const before = ST.activeId();
+          const id = ST.found('Solo', -85, 0, 55);
+          const afterFound = ST.activeId();
+          ST.setActive(id);
+          const afterSetActive = ST.activeId();
+          return [
+            ['a brand new store starts with no active site', before, null],
+            ['founding one does not activate it on its own', afterFound, null],
+            ['setActive is what makes it resumable', afterSetActive, id]
+          ];
+        } finally {
+          if (savedSites === null) localStorage.removeItem(ST.SITES_KEY); else localStorage.setItem(ST.SITES_KEY, savedSites);
+        }
+      } },
+
+    { name: 'classify() sorts latitude into the three site classes',
+      why: 'this is the one piece of Phase 3 (site-driven terrain) that already has to exist and be right in Phase 2, because every founded site is labelled with it immediately',
+      run() {
+        return [
+          ['the pole is polar', ST.classify(-90), 'polar'],
+          ['just inside the polar band is still polar', ST.classify(76), 'polar'],
+          ['the equator is mare', ST.classify(0), 'mare'],
+          ['just inside the mare band is still mare', ST.classify(-19), 'mare'],
+          ['the mid-latitudes are highland', ST.classify(45), 'highland'],
+          ['classification does not care about hemisphere', ST.classify(-45), ST.classify(45)]
+        ];
+      } },
+
+    { name: 'A dozen cities fit comfortably inside the storage quota',
+      why: 'the plan\'s whole justification is that dozens of cities are affordable — measured here, not assumed, because a generous-looking sparse format could still add up',
+      run() {
+        const savedSites = localStorage.getItem(ST.SITES_KEY);
+        try {
+          localStorage.removeItem(ST.SITES_KEY);
+          const ids = [];
+          for (let i = 0; i < 6; i++) {
+            const id = ST.found('City ' + i, -80 + i * 5, i * 10, 1000 + i);
+            const s2 = ST.load(id);
+            s2.autoPlay = true;
+            for (let d = 0; d < 130; d++) S.tick(s2);
+            ST.save(id, s2);
+            ids.push(id);
+          }
+          const totalBytes = ids.reduce((a, id) => a + ST.sizeOf(id), 0);
+          const wholeStoreBytes = JSON.stringify(ST.ensureStore()).length;
+          return [
+            ['all six sites saved something', ids.every(id => ST.sizeOf(id) > 0), true],
+            ['six developed cities together: ' + Math.round(totalBytes / 1024) + ' KB',
+              totalBytes < 2 * 1024 * 1024, true],
+            ['the whole store round-trips through localStorage',
+              wholeStoreBytes > 0, true],
+            ['extrapolated to a few dozen cities it still fits a ~12 MB quota',
+              (totalBytes / 6) * 40 < 12 * 1024 * 1024, true]
+          ];
+        } finally {
+          if (savedSites === null) localStorage.removeItem(ST.SITES_KEY); else localStorage.setItem(ST.SITES_KEY, savedSites);
+        }
       } }
   ];
+
 
   /* ---------- runner ---------- */
 

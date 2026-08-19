@@ -11,8 +11,11 @@
   const Z = window.LM_ZONES, S = window.LM_SIM, R = window.LM_RENDER, B = window.LM_BUDGET;
   const E = window.LM_ERAS;
   const K = D.K;
-  const SAVE_KEY = 'lunar-metropolis.save.v2';
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  /* Which site the running city belongs to. Set by load() at startup and
+     kept current by every save() — see sites.js for the format a city is
+     actually stored in. */
+  let activeSiteId = null;
 
   let s = load() || S.newGame();
   const ui = {
@@ -719,12 +722,19 @@
   }
 
   document.getElementById('btnNew').onclick = () => {
-    if (!confirm('Start a new colony on fresh terrain? This clears the current city.')) return;
+    if (!confirm('Found a new colony on fresh terrain? This one stays exactly as you leave it — nothing is lost.')) return;
+    /* The old city is not cleared, only left. It stays frozen at whatever
+       day you leave it on, retrievable once a way to switch back exists
+       (the Colonies list, later in this v3 arc) — the same "away cities are
+       frozen" rule the globe will apply to every site. */
+    save();
     /* The three mode switches are a statement about how the player wants to
-       play, not part of the city — carry them across a new map rather than
-       making them set them again. */
+       play, not part of any one city — carry them into the new one rather
+       than making them set them again. */
     const modes = { sandbox: s.sandbox, disastersOn: s.disastersOn, autoPlay: s.autoPlay };
-    s = Object.assign(S.newGame(), modes);
+    const n = window.LM_SITES.list().length + 1;
+    activeSiteId = window.LM_SITES.found(`Colony ${n}`, -85, 0);
+    s = Object.assign(window.LM_SITES.load(activeSiteId), modes);
     ui.selected = null; ui.levelTarget = null;
     if (window.LM_AGENTS) window.LM_AGENTS.reset();
     centreOn(K.COLS / 2, K.ROWS / 2);
@@ -761,15 +771,33 @@
 
   /* ---------- save ---------- */
 
-  function save() { try { localStorage.setItem(SAVE_KEY, JSON.stringify(s)); } catch (e) {} }
+  function save() {
+    if (!activeSiteId || !window.LM_SITES) return;
+    window.LM_SITES.save(activeSiteId, s);
+  }
+
+  /* Resumes whichever site was last active — including a legacy single-city
+     save, which LM_SITES migrates in as "Colony One" the first time its
+     store is touched, before this ever runs. If there is truly nothing to
+     resume (a fresh browser), founds a first colony rather than leaving the
+     game with nowhere to save to. */
   function load() {
-    try {
-      const raw = localStorage.getItem(SAVE_KEY);
-      if (!raw) return null;
-      const o = JSON.parse(raw);
-      if (o.version !== S.STATE_VERSION || !o.map || o.map.length !== K.COLS * K.ROWS) return null;
-      return o;
-    } catch (e) { return null; }
+    const SITES = window.LM_SITES;
+    if (!SITES) return null;
+    activeSiteId = SITES.activeId();
+    let loaded = activeSiteId ? SITES.load(activeSiteId) : null;
+    if (!loaded) {
+      /* found() does not itself make a site active — a later multi-city UI
+         may found one without switching to it. Here it is the only site
+         there is, so mark it active immediately: otherwise a session that
+         closes before the first autosave would leave the store's activeId
+         still null, and the very next load would found a second "Colony
+         One" rather than resuming this one. */
+      activeSiteId = SITES.found('Colony One', -85, 0);
+      SITES.setActive(activeSiteId);
+      loaded = SITES.load(activeSiteId);
+    }
+    return loaded;
   }
 
   /* ---------- loop ---------- */
