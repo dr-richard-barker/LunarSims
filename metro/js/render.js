@@ -1466,6 +1466,9 @@
        month still. Nothing in the game reads these. */
     LOD_FAR, LOD_MID, LOD_NEAR,
     debugPin(o) { Object.assign(FR, o); FR.pinned = true; },
-    debugUnpin() { FR.pinned = false; }
+    debugUnpin() { FR.pinned = false; },
+    /* exposed for the globe, which needs the same lunar-cycle phase to
+       place its own terminator — one clock, read by both views */
+    sunAzimuth
   };
 })();

@@ -61,12 +61,14 @@ td.mark{width:34px;text-align:center}
 <script src="js/agents.js"></script>
 <script src="js/fx.js"></script>
 <script src="js/minimap.js"></script>
+<script src="js/globe.js"></script>
 <script>
 (function () {
   const T = window.LM_TERRAIN, G = window.LM_GRID, Z = window.LM_ZONES, S = window.LM_SIM;
   const B = window.LM_BUDGET, SV = window.LM_SERVICES, E = window.LM_ERAS;
   const AI = window.LM_AUTO, DIS = window.LM_DISASTERS, AG = window.LM_AGENTS;
   const INV = window.LM_INVASION, FX = window.LM_FX, MM = window.LM_MINIMAP, ST = window.LM_SITES;
+  const GL = window.LM_GLOBE;
   const K = window.LM_DATA.K, LM_DATA = window.LM_DATA;
 
   /* A fixed-sequence stand-in for Math.random, so every scenario that rolls
@@ -2532,6 +2534,146 @@ td.mark{width:34px;text-align:center}
           if (savedSites === null) localStorage.removeItem(ST.SITES_KEY); else localStorage.setItem(ST.SITES_KEY, savedSites);
           if (savedLegacy === null) localStorage.removeItem(ST.LEGACY_KEY); else localStorage.setItem(ST.LEGACY_KEY, savedLegacy);
         }
+      } },
+
+    /* ---------- v3 phase 4: the globe ---------- */
+
+    { name: 'The orthographic projection puts known points in known places',
+      why: 'this is the entire geometric contract the globe is built on — get the sub-observer point, the limb or the far-side cull wrong and every feature, city marker and click ever drawn on it is wrong in the same way',
+      run() {
+        const view = { lon: 20, lat: 10 };
+        const centre = GL.project(view.lat, view.lon, view);
+        const flat = { lon: 20, lat: 0 };
+        const limb = GL.project(0, flat.lon + 90, flat);
+        const beyond = GL.project(0, flat.lon + 91, flat);
+        const before = GL.project(0, flat.lon + 89, flat);
+        const antipode = GL.project(view.lat, view.lon + 180, view);
+        return [
+          ['the sub-observer point projects to the exact centre',
+            Math.hypot(centre.x, centre.y) < 1e-9, true],
+          ['and reads fully facing the camera (z = 1)', Math.abs(centre.z - 1) < 1e-9, true],
+          ['90 degrees away (equatorial) lands exactly on the limb', Math.abs(limb.z) < 1e-9, true],
+          ['at exactly unit radius', Math.abs(Math.hypot(limb.x, limb.y) - 1) < 1e-9, true],
+          ['91 degrees away is just past the limb and culled', beyond.visible, false],
+          ['89 degrees away is just short of it and visible', before.visible, true],
+          ['the antipode is on the far side and culled', antipode.visible, false]
+        ];
+      } },
+
+    { name: 'Rotating the camera moves what faces it, correctly on both axes',
+      why: 'yaw and pitch are two separate rotations composed together — a sign error on either one still produces something that LOOKS like a working globe (everything still projects somewhere on the disc), which is exactly why this needs a check against a known reference point rather than just eyeballing a render',
+      run() {
+        const pitched = GL.project(30, 0, { lon: 0, lat: 30 });
+        const yawed = GL.project(0, 45, { lon: 45, lat: 0 });
+        const north = GL.project(80, 0, { lon: 0, lat: 0 });
+        const south = GL.project(-80, 0, { lon: 0, lat: 0 });
+        return [
+          ['pitching the view up 30 brings that latitude to the centre',
+            Math.hypot(pitched.x, pitched.y) < 1e-9, true],
+          ['yawing to a longitude brings it to the centre the same way',
+            Math.hypot(yawed.x, yawed.y) < 1e-9, true],
+          ['from an equatorial view, high northern latitude sits above centre (screen y < 0)',
+            north.visible && north.y < 0, true],
+          ['and high southern latitude sits below it', south.visible && south.y > 0, true]
+        ];
+      } },
+
+    { name: 'project and unproject are exact inverses across the whole visible hemisphere',
+      why: 'unproject is what turns a click into a landing site — if it did not exactly invert project, a click could found a colony somewhere other than where the player actually pointed',
+      run() {
+        let mismatches = 0, checked = 0, nullMisses = 0;
+        for (const v of [{ lon: 0, lat: 0 }, { lon: 45, lat: 20 }, { lon: -70, lat: -40 }, { lon: 200, lat: 60 }, { lon: 10, lat: -85 }]) {
+          for (let lat = -80; lat <= 80; lat += 20) {
+            for (let lon = -170; lon <= 170; lon += 20) {
+              const p = GL.project(lat, lon, v);
+              if (!p.visible) continue;
+              checked++;
+              const back = GL.unproject(p.x, p.y, v);
+              if (!back) { nullMisses++; continue; }
+              const dlat = Math.abs(back.lat - lat);
+              const dlon = Math.abs(((back.lon - lon + 540) % 360) - 180);
+              if (dlat > 1e-6 || dlon > 1e-6) mismatches++;
+            }
+          }
+        }
+        return [
+          ['a real number of points were actually checked', checked, '>200'],
+          ['none of them failed to unproject', nullMisses, 0],
+          ['and none of them came back at the wrong coordinate', mismatches, 0],
+          ['a click outside the unit disc misses entirely', GL.unproject(1.01, 0, { lon: 0, lat: 0 }), null],
+          ['a click just inside it hits', GL.unproject(0.99, 0, { lon: 0, lat: 0 }) !== null, true]
+        ];
+      } },
+
+    { name: 'The terminator is a real place on the Moon, not a screen-space lighting trick',
+      why: 'if litness read the view instead of the sun, the day/night line would spin along with whatever way the player last dragged the camera — the whole point of tying it to sunAzimuth is that it does not',
+      run() {
+        const sunLon = 45;
+        const litSameSpot1 = GL.litness(10, 60, sunLon);
+        const litSameSpot2 = GL.litness(10, 60, sunLon);
+        return [
+          ['the sub-solar point itself reads fully lit', GL.litness(0, sunLon, sunLon), 1],
+          ['the antipodal point reads at the ambient floor', GL.litness(0, sunLon + 180, sunLon), 0.12],
+          ['90 degrees round is also at the floor — the terminator is a sharp-ish line',
+            GL.litness(0, sunLon + 90, sunLon), 0.12],
+          ['a point halfway between is meaningfully brighter than the floor and dimmer than full',
+            GL.litness(0, sunLon + 45, sunLon), '>0.5'],
+          ['lighting a given point does not depend on the camera at all — same result called twice',
+            litSameSpot1, litSameSpot2]
+        ];
+      } },
+
+    { name: 'The near side is patched with maria and the far side almost is not',
+      why: 'this is the single most recognisable fact about the real Moon, and it only comes out of the feature list for free if the coordinates are genuinely real ones rather than scattered evenly for visual balance',
+      run() {
+        const nearLon = f => Math.abs(((f.lon + 180) % 360 + 360) % 360 - 180) <= 90;
+        const maria = GL.FEATURES.filter(f => f.kind === 'mare' || f.kind === 'mareThin');
+        const nearSideMaria = maria.filter(f => nearLon(f)).length;
+        const farSideMaria = maria.length - nearSideMaria;
+        return [
+          ['the feature list actually has maria to place', maria.length, '>=10'],
+          ['most of them are on the traditional Earth-facing near side',
+            nearSideMaria > farSideMaria * 2, true],
+          ['but a couple of real far-side maria are still there',
+            GL.FEATURES.some(f => f.id === 'moscoviense') && GL.FEATURES.some(f => f.id === 'ingenii'), true],
+          ['and both poles carry their real named craters',
+            GL.FEATURES.some(f => f.id === 'shackleton') && GL.FEATURES.some(f => f.id === 'peary'), true],
+          ['Shackleton sits at the south pole, not just "polar-classed"',
+            GL.FEATURES.find(f => f.id === 'shackleton').lat < -85, true]
+        ];
+      } },
+
+    { name: 'Feature outlines are stable and stay roughly round near the poles',
+      why: 'the wobble is generated once from a hash of the feature, not reshuffled every call — and longitude lines bunch together near the poles on any sphere, which the outline generator has to compensate for or a high-latitude feature like Frigoris would render as a thin sliver instead of a rounded shape',
+      run() {
+        const f = GL.FEATURES.find(x => x.id === 'imbrium');
+        const a = GL.outlineOf(f), b = GL.outlineOf(f);
+        const polar = GL.FEATURES.find(x => x.id === 'frigoris');
+        const outline = GL.outlineOf(polar);
+        const lonSpread = Math.max(...outline.map(p => p[1])) - Math.min(...outline.map(p => p[1]));
+        const latSpread = Math.max(...outline.map(p => p[0])) - Math.min(...outline.map(p => p[0]));
+        return [
+          ['an outline is a real closed ring of points', a.length, '>=15'],
+          ['calling it again returns the identical outline (cached, not reshuffled)',
+            JSON.stringify(a), JSON.stringify(b)],
+          ['every point stays within a sane distance of the centre',
+            a.every(([lat, lon]) => Math.hypot(lat - f.lat, lon - f.lon) < f.r * 2.5), true],
+          ['a high-latitude feature\'s outline is not absurdly stretched in longitude',
+            lonSpread < latSpread * 6, true]
+        ];
+      } },
+
+    { name: 'toScreen scales and offsets consistently with project',
+      why: 'this is the last link in the chain from a (lat, lon) to an actual canvas pixel — get the axis order or the radius wrong here and every feature and marker is drawn in the wrong place even though project() itself is correct',
+      run() {
+        const view = { lon: 0, lat: 0 };
+        const centre = GL.toScreen(GL.project(0, 0, view), 100, 100, 50);
+        const limb = GL.toScreen(GL.project(0, 90, view), 100, 100, 50);
+        return [
+          ['the sub-observer point lands exactly on the given centre', [centre.x, centre.y].join(','), '100,100'],
+          ['a limb point lands exactly one radius away from centre',
+            Math.abs(Math.hypot(limb.x - 100, limb.y - 100) - 50) < 1e-6, true]
+        ];
       } }
   ];
 
