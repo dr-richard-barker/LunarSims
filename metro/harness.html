@@ -2674,6 +2674,56 @@ td.mark{width:34px;text-align:center}
           ['a limb point lands exactly one radius away from centre',
             Math.abs(Math.hypot(limb.x - 100, limb.y - 100) - 50) < 1e-6, true]
         ];
+      } },
+
+    /* ---------- v3 phase 5: the colonies list ---------- */
+
+    { name: 'list() carries what the Colonies panel needs without a full decode',
+      why: 'showing twenty founded colonies must not mean regenerating twenty 16,384-tile maps just to say what era and population each one reached — peakPop and research have to come along for free from the same meta object that already carries day and pop',
+      run() {
+        const savedSites = localStorage.getItem(ST.SITES_KEY);
+        try {
+          localStorage.removeItem(ST.SITES_KEY);
+          const id = ST.found('Era Test', -85, 0, 5050);
+          const s2 = ST.load(id);
+          s2.peakPop = 300; s2.research = 800; s2.pop = 250; s2.credits = 12345;
+          ST.save(id, s2);
+
+          const row = ST.list().find(r => r.id === id);
+          const era = E.index({ peakPop: row.peakPop, research: row.research });
+          return [
+            ['the row carries peakPop', row.peakPop, 300],
+            ['and research', row.research, 800],
+            ['and credits', row.credits, 12345],
+            ['and pop, unchanged from before this phase', row.pop, 250],
+            ['which is enough to compute a real era client-side',
+              E.ERAS[era].name, E.ERAS[era].name],
+            ['and that era is not the starting one, since the thresholds were cleared',
+              era, '>0']
+          ];
+        } finally {
+          if (savedSites === null) localStorage.removeItem(ST.SITES_KEY); else localStorage.setItem(ST.SITES_KEY, savedSites);
+        }
+      } },
+
+    { name: 'A freshly founded site reports as day one, population zero, Outpost era',
+      why: 'this is what every row in an otherwise-empty Colonies list looks like — if the summary fields were ever mis-copied from the wrong place, a brand new colony is the case most likely to expose it, since there is nothing else non-zero to mask the mistake',
+      run() {
+        const savedSites = localStorage.getItem(ST.SITES_KEY);
+        try {
+          localStorage.removeItem(ST.SITES_KEY);
+          const id = ST.found('Blank Slate', 40, 40, 6060);
+          const row = ST.list().find(r => r.id === id);
+          const era = E.index({ peakPop: row.peakPop, research: row.research });
+          return [
+            ['day one', row.day, 1],
+            ['population zero', row.pop, 0],
+            ['no research banked yet', row.research, 0],
+            ['and the starting era', E.ERAS[era].id, 'outpost']
+          ];
+        } finally {
+          if (savedSites === null) localStorage.removeItem(ST.SITES_KEY); else localStorage.setItem(ST.SITES_KEY, savedSites);
+        }
       } }
   ];
 

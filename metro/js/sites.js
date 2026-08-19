@@ -217,12 +217,19 @@
 
   /* ---------- public surface ---------- */
 
+  /* peakPop and research are included alongside pop specifically so a
+     caller can compute a site's ERA (LM_ERAS.index only ever reads those
+     two fields) without decoding its full map — a Colonies list showing
+     twenty cities should not have to regenerate twenty maps just to say
+     what era each one has reached. */
   function list() {
     const store = ensureStore();
     return Object.values(store.sites)
       .map(r => ({
         id: r.id, name: r.name, lat: r.lat, lon: r.lon, class: r.class,
-        founded: r.founded, day: r.snapshot.meta.day, pop: r.snapshot.meta.pop
+        founded: r.founded, day: r.snapshot.meta.day, pop: r.snapshot.meta.pop,
+        peakPop: r.snapshot.meta.peakPop || 0, research: r.snapshot.meta.research || 0,
+        credits: r.snapshot.meta.credits || 0
       }))
       .sort((a, b) => a.founded - b.founded);
   }

@@ -536,11 +536,74 @@
       </div>`;
   }
 
+  /* ---------- colonies ----------
+
+     Every founded site, however many days old its own city is — and every
+     one of those days is genuinely different, because away colonies are
+     frozen exactly where they were left rather than simulated in the
+     background. The "total population" figure below is therefore a sum of
+     snapshots taken at different moments, not a single lunar-wide instant —
+     said plainly in the panel itself rather than implied by a number that
+     looks more authoritative than it is. */
+  function buildColonies() {
+    const el = document.getElementById('pane-colonies');
+    const SITES = window.LM_SITES;
+    if (!SITES) { el.innerHTML = '<p class="note">Colonies are not available.</p>'; return; }
+    const list = SITES.list();
+    const eraName = r => E ? E.current({ peakPop: r.peakPop, research: r.research }).name : '—';
+    const classLabel = { polar: 'Polar', mare: 'Mare', highland: 'Highland' };
+
+    const totalPop = list.reduce((a, r) => a + r.pop, 0);
+    const totalResearch = Math.round(list.reduce((a, r) => a + r.research, 0));
+
+    const rows = list.map(r => `
+      <tr class="${r.id === activeSiteId ? 'lmine' : ''}" data-id="${r.id}" style="cursor:pointer">
+        <td>${r.name}${r.id === activeSiteId ? ' <span class="lscore">●</span>' : ''}</td>
+        <td class="ldim">${classLabel[r.class] || r.class}</td>
+        <td class="ldim">${r.lat >= 0 ? r.lat.toFixed(1) + 'N' : (-r.lat).toFixed(1) + 'S'},
+          ${r.lon >= 0 ? r.lon.toFixed(1) + 'E' : (-r.lon).toFixed(1) + 'W'}</td>
+        <td>${eraName(r)}</td>
+        <td>${r.pop.toLocaleString()}</td>
+        <td class="ldim">day ${r.day.toLocaleString()}</td>
+      </tr>`).join('');
+
+    el.innerHTML = `
+      <h3 class="sec">Every colony you have founded</h3>
+      <p class="note">Click a row to switch to that colony — whatever you are running now saves
+        first and stays exactly as you left it. ${list.length} founded so far.</p>
+      <div class="ltablewrap">
+        <table class="ltable">
+          <thead><tr><th>Colony</th><th>Terrain</th><th>Site</th><th>Era</th><th>Pop</th><th>Age</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      <p class="lfoot">
+        ${list.length} ${list.length === 1 ? 'colony' : 'colonies'} · ${totalPop.toLocaleString()} people across all of them ·
+        ${totalResearch.toLocaleString()} research banked between them.<br>
+        Every figure above is a snapshot from whatever day that colony was last left on, not one
+        shared instant — away colonies are frozen, not simulated in the background, so "total
+        population" is a sum of moments rather than a census.
+      </p>
+      <div class="modes" style="justify-content:flex-start;margin-top:10px">
+        <button class="mode" id="coloniesToGlobe">🌐 Open the globe</button>
+      </div>`;
+
+    el.querySelectorAll('tr[data-id]').forEach(tr => tr.onclick = () => {
+      const id = tr.dataset.id;
+      if (id === activeSiteId) { toast('That is the colony you are already in.'); return; }
+      switchTo(id);
+      document.querySelector('.tab[data-tab="colonies"]').click();
+    });
+    const toGlobe = document.getElementById('coloniesToGlobe');
+    if (toGlobe) toGlobe.onclick = () => openGlobe(true);
+  }
+
   document.querySelectorAll('.tab').forEach(t => t.onclick = () => {
     document.querySelectorAll('.tab').forEach(x => x.classList.toggle('on', x === t));
     document.querySelectorAll('.tabpane').forEach(p => p.classList.toggle('on', p.id === 'pane-' + t.dataset.tab));
     if (t.dataset.tab === 'budget') buildBudget();
     if (t.dataset.tab === 'trends') buildTrends();
+    if (t.dataset.tab === 'colonies') buildColonies();
   });
 
   document.querySelectorAll('#viewBar button').forEach(b => b.onclick = () => {
@@ -1026,10 +1089,12 @@
         if (n !== lastLogLen) { lastLogLen = n; renderLog(); renderOffer(); }
         const era = E ? E.index(s) : 0;
         if (era !== lastEra) { lastEra = era; buildPalette(); }
-        /* Trends is a full rebuild, so it only redraws while it is the pane
-           actually on screen. */
+        /* Trends and Colonies are both full rebuilds, so each only redraws
+           while it is the pane actually on screen. */
         const trends = document.getElementById('pane-trends');
         if (trends && trends.classList.contains('on')) buildTrends();
+        const colonies = document.getElementById('pane-colonies');
+        if (colonies && colonies.classList.contains('on')) buildColonies();
       }
     }
     /* Set pieces retire themselves on their own clock, which keeps running
