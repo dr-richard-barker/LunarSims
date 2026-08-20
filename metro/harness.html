@@ -57,6 +57,7 @@ td.mark{width:34px;text-align:center}
 <script src="js/invasion.js"></script>
 <script src="js/sim.js"></script>
 <script src="js/sites.js"></script>
+<script src="js/empire.js"></script>
 <script src="js/autopilot.js"></script>
 <script src="js/agents.js"></script>
 <script src="js/fx.js"></script>
@@ -68,7 +69,7 @@ td.mark{width:34px;text-align:center}
   const B = window.LM_BUDGET, SV = window.LM_SERVICES, E = window.LM_ERAS;
   const AI = window.LM_AUTO, DIS = window.LM_DISASTERS, AG = window.LM_AGENTS;
   const INV = window.LM_INVASION, FX = window.LM_FX, MM = window.LM_MINIMAP, ST = window.LM_SITES;
-  const GL = window.LM_GLOBE;
+  const GL = window.LM_GLOBE, EMP = window.LM_EMPIRE;
   const K = window.LM_DATA.K, LM_DATA = window.LM_DATA;
 
   /* A fixed-sequence stand-in for Math.random, so every scenario that rolls
@@ -2819,6 +2820,95 @@ td.mark{width:34px;text-align:center}
             ['the untouched-elsewhere colony is completely unaffected',
               JSON.stringify(before), JSON.stringify(after)]
           ];
+        } finally {
+          if (savedSites === null) localStorage.removeItem(ST.SITES_KEY); else localStorage.setItem(ST.SITES_KEY, savedSites);
+        }
+      } },
+
+    /* ---------- v4 phase 2: the background scheduler ---------- */
+
+    { name: 'daysOwed() clamps the catch-up burst between one day and the cap',
+      why: 'this is the number that decides how expensive a single background turn is — get the clamp wrong and either a neglected colony never catches up at all, or a very neglected one produces the half-second freeze the plan explicitly measured and rejected at N=30',
+      run() {
+        const now = 1000000, perDay = 1100;
+        return [
+          ['nothing owed yet still returns at least one day', EMP.daysOwed(now - 500, now, perDay), 1],
+          ['a few elapsed days are counted exactly', EMP.daysOwed(now - perDay * 3.5, now, perDay), 3],
+          ['a colony neglected for a very long time is capped, not left to fully catch up',
+            EMP.daysOwed(now - perDay * 1000, now, perDay), EMP.MAX_CATCHUP_DAYS],
+          ['a custom cap is honoured', EMP.daysOwed(now - perDay * 1000, now, perDay, 20), 20],
+          ['a site with lastRealTick 0 — never stamped — is treated as maximally overdue',
+            EMP.daysOwed(0, now, perDay), EMP.MAX_CATCHUP_DAYS]
+        ];
+      } },
+
+    { name: 'pickNext() always picks the least-recently-ticked site, never the active one',
+      why: 'this is the whole round-robin — wrong here means either the active city gets double-ticked, or one unlucky colony never gets a turn while others hog the schedule',
+      run() {
+        const sites = [
+          { id: 'a', lastRealTick: 100 },
+          { id: 'b', lastRealTick: 50 },
+          { id: 'c', lastRealTick: 200 }
+        ];
+        return [
+          ['the oldest turn wins', EMP.pickNext(sites, null), 'b'],
+          ['the active site is never a candidate, even when it is the oldest',
+            EMP.pickNext(sites, 'b'), 'a'],
+          ['nothing to pick from an empty list', EMP.pickNext([], 'x'), null],
+          ['nothing to pick when the only site is the active one',
+            EMP.pickNext([{ id: 'only', lastRealTick: 1 }], 'only'), null],
+          ['a site that has never been stamped is the most overdue there is',
+            EMP.pickNext([{ id: 'z' }, { id: 'a', lastRealTick: 9999 }], null), 'z']
+        ];
+      } },
+
+    { name: 'a background scheduler step really simulates the away colony, not an approximation of one',
+      why: 'the entire feature is that this is the real simulation, not a cosmetic trick — this proves tickOne() produces exactly what calling S.tick() the same number of times on the same decoded state would, and that the write path never reassigns which site is active',
+      run() {
+        const savedSites = localStorage.getItem(ST.SITES_KEY);
+        try {
+          localStorage.removeItem(ST.SITES_KEY);
+          const active = ST.found('Active', -85, 0, 1);
+          ST.setActive(active);
+          const away = ST.found('Away', 0, 0, 2);
+          const storeActiveBefore = ST.ensureStore().activeId;
+
+          /* Far enough in the future that Away's catch-up burst is certainly
+             clamped to the cap, so the expected day count is known ahead of
+             time rather than depending on how fast this scenario happens to
+             run. Away has autoPlay/disasters/invasion all off (found()'s
+             default), so S.tick() on it makes no Math.random() calls at all
+             — see disasters.js/invasion.js, the only two callers — which is
+             what makes ticking it twice, independently, safe to compare
+             byte-for-byte below. */
+          const far = Date.now() + EMP.REAL_MS_PER_SIM_DAY * 1000;
+          const expected = ST.load(away);
+          const r = EMP.step(active, far);
+          for (let i = 0; i < r.days; i++) S.tick(expected);
+          const got = ST.load(away);
+
+          return [
+            ['the away colony was picked, not the active one', r.id, away],
+            ['it was advanced by the full, capped catch-up burst', r.days, EMP.MAX_CATCHUP_DAYS],
+            ['ticking it directly that many times produces an identical city',
+              JSON.stringify(got), JSON.stringify(expected)],
+            ['the store\'s activeId is completely untouched by a background tick',
+              ST.ensureStore().activeId, storeActiveBefore]
+          ];
+        } finally {
+          if (savedSites === null) localStorage.removeItem(ST.SITES_KEY); else localStorage.setItem(ST.SITES_KEY, savedSites);
+        }
+      } },
+
+    { name: 'step() finds nothing to do once every founded site is the active one',
+      why: 'a solo player with one colony should never pay for a scheduler tick that has nothing to advance',
+      run() {
+        const savedSites = localStorage.getItem(ST.SITES_KEY);
+        try {
+          localStorage.removeItem(ST.SITES_KEY);
+          const id = ST.found('Solo', -85, 0, 7);
+          ST.setActive(id);
+          return [['step() returns null with nothing eligible', EMP.step(id, Date.now()), null]];
         } finally {
           if (savedSites === null) localStorage.removeItem(ST.SITES_KEY); else localStorage.setItem(ST.SITES_KEY, savedSites);
         }

@@ -22,6 +22,18 @@
      the globe ever opens — see load() and the globe's found-panel confirm
      handler, which is the only other place that reads or clears it. */
   let firstLanding = false;
+  /* Whether away colonies keep simulating in the background — a player
+     preference, not part of any one city's save, so it lives in its own
+     localStorage key and survives switching or founding colonies rather
+     than being reset by either. Defaults on: that is the feature, not a
+     buried option. */
+  const BGSIM_KEY = 'lunar-metropolis.bgsim.v1';
+  let bgSimOn = (function () {
+    try {
+      const v = localStorage.getItem(BGSIM_KEY);
+      return v === null ? true : v === '1';
+    } catch (e) { return true; }
+  })();
 
   let s = load() || S.newGame();
   const ui = {
@@ -544,13 +556,14 @@
 
   /* ---------- colonies ----------
 
-     Every founded site, however many days old its own city is — and every
-     one of those days is genuinely different, because away colonies are
-     frozen exactly where they were left rather than simulated in the
-     background. The "total population" figure below is therefore a sum of
-     snapshots taken at different moments, not a single lunar-wide instant —
-     said plainly in the panel itself rather than implied by a number that
-     looks more authoritative than it is. */
+     Every founded site, however many days old its own city is. With
+     background simulation on (see empire.js), away colonies keep advancing
+     on their own slow round robin rather than sitting frozen — but each
+     still only gets a turn every so often, so the "total population" figure
+     below is still a sum of snapshots from whatever moment each colony was
+     last ticked, not a single lunar-wide instant. Said plainly in the panel
+     itself rather than implied by a number that looks more authoritative
+     than it is. */
   function buildColonies() {
     const el = document.getElementById('pane-colonies');
     const SITES = window.LM_SITES;
@@ -586,9 +599,11 @@
       <p class="lfoot">
         ${list.length} ${list.length === 1 ? 'colony' : 'colonies'} · ${totalPop.toLocaleString()} people across all of them ·
         ${totalResearch.toLocaleString()} research banked between them.<br>
-        Every figure above is a snapshot from whatever day that colony was last left on, not one
-        shared instant — away colonies are frozen, not simulated in the background, so "total
-        population" is a sum of moments rather than a census.
+        Every figure above is a snapshot from whatever day that colony was last given a turn, not
+        one shared instant — ${bgSimOn
+          ? 'background simulation is on, so away colonies keep advancing on their own a few days at a time, but each only gets a turn every so often'
+          : 'background simulation is off, so away colonies are frozen exactly as you left them'} —
+        "total population" is a sum of moments rather than a census.
       </p>
       <div class="modes" style="justify-content:flex-start;margin-top:10px">
         <button class="mode" id="coloniesToGlobe">🌐 Open the globe</button>
@@ -918,6 +933,23 @@
     save();
   };
 
+  /* Independent of markModes() deliberately — this is a browser-level
+     preference, not part of `s`, so it is never touched by enterCity()
+     switching cities and never written into any city's own save. */
+  function markBgSim() {
+    document.getElementById('btnBackground').classList.toggle('on', bgSimOn);
+  }
+  document.getElementById('btnBackground').onclick = () => {
+    bgSimOn = !bgSimOn;
+    try { localStorage.setItem(BGSIM_KEY, bgSimOn ? '1' : '0'); } catch (e) {}
+    markBgSim();
+    const colonies = document.getElementById('pane-colonies');
+    if (colonies && colonies.classList.contains('on')) buildColonies();
+    toast(bgSimOn
+      ? 'Background simulation on. Colonies you are not looking at will keep running.'
+      : 'Background simulation off. Away colonies are frozen exactly as you left them.');
+  };
+
   /* Stages the animation for whatever the invasion deck just did. The
      simulation returns a descriptor — the path a saucer flew, the tile a beam
      came down on — and this is the only place that turns one into a picture,
@@ -1095,6 +1127,27 @@
     return loaded;
   }
 
+  /* ---------- background empire ----------
+
+     A plain setInterval, deliberately separate from the render loop below —
+     it has to keep giving away colonies turns whether the tab is paused
+     (ui.speed === 0) or busy running the active city's own tick loop, and a
+     fixed real-world cadence is what LM_EMPIRE's days-owed math is built
+     against. See empire.js for why this is a slow, one-colony-per-turn
+     round robin rather than ticking every founded site every interval. */
+  const BG_INTERVAL_MS = 5000;
+  setInterval(() => {
+    if (!bgSimOn || !window.LM_EMPIRE) return;
+    const r = window.LM_EMPIRE.step(activeSiteId);
+    if (!r) return;
+    /* The globe already redraws from LM_SITES.list() live every frame, so a
+       ticked colony's marker just grows on its own. Only the Colonies tab
+       needs an explicit nudge, and only while it is actually the pane on
+       screen. */
+    const colonies = document.getElementById('pane-colonies');
+    if (colonies && colonies.classList.contains('on')) buildColonies();
+  }, BG_INTERVAL_MS);
+
   /* ---------- loop ---------- */
 
   const DAY_MS = 1100;
@@ -1184,7 +1237,7 @@
   };
 
   refreshNets();
-  buildPalette(); setHint(); renderTile(); renderHUD(); renderLog(); renderOffer(); markModes();
+  buildPalette(); setHint(); renderTile(); renderHUD(); renderLog(); renderOffer(); markModes(); markBgSim();
   /* The one thing a brand-new player sees before anything else: the globe,
      asking where they want to land. Deferred to here rather than fired from
      inside load() because nothing above this line — the canvas, the

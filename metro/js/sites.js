@@ -197,7 +197,7 @@
        generator versions come after it. */
     const site = {
       id: uid(), name: 'Colony One', lat: -85, lon: 0, class: 'polar',
-      seed: o.seed, gen: 1, founded: Date.now()
+      seed: o.seed, gen: 1, founded: Date.now(), lastRealTick: Date.now()
     };
     return { site, snapshot: encode(o, site) };
   }
@@ -229,7 +229,12 @@
         id: r.id, name: r.name, lat: r.lat, lon: r.lon, class: r.class,
         founded: r.founded, day: r.snapshot.meta.day, pop: r.snapshot.meta.pop,
         peakPop: r.snapshot.meta.peakPop || 0, research: r.snapshot.meta.research || 0,
-        credits: r.snapshot.meta.credits || 0
+        credits: r.snapshot.meta.credits || 0,
+        /* 0 rather than undefined for a site that predates this field — the
+           background scheduler reads it as "hasn't been touched in living
+           memory" and picks it first, which is the right call for an old
+           colony the scheduler has simply never seen before, not a crash. */
+        lastRealTick: r.lastRealTick || 0
       }))
       .sort((a, b) => a.founded - b.founded);
   }
@@ -254,6 +259,20 @@
     return writeStore(store);
   }
 
+  /* The background scheduler's write path, and never the player's own —
+     everything save() does EXCEPT touching activeId. Ticking a colony
+     nobody is looking at must never make it "the" active site: if it did,
+     reloading mid-session while the scheduler happened to have just run
+     would silently land the player in whatever city it last advanced,
+     not the one they were actually sitting in. */
+  function saveBackground(id, s) {
+    const store = ensureStore();
+    const rec = store.sites[id];
+    if (!rec) return false;
+    rec.snapshot = encode(s, rec);
+    return writeStore(store);
+  }
+
   /* Founds a new site and seeds it with a freshly generated, untouched city,
      so it has something to decode from the instant anyone switches to it. */
   function found(name, lat, lon, seed) {
@@ -262,7 +281,7 @@
     const site = {
       id, name, lat, lon, class: classify(lat),
       seed: seed === undefined ? Math.floor(Math.random() * 999999) : seed,
-      gen: GEN_VERSION, founded: Date.now()
+      gen: GEN_VERSION, founded: Date.now(), lastRealTick: Date.now()
     };
     const s = window.LM_SIM.newGame(site.seed, { class: site.class, sunSlope: slopeFor(site.lat) });
     store.sites[id] = Object.assign({}, site, { snapshot: encode(s, site) });
@@ -274,6 +293,21 @@
     const store = ensureStore();
     if (!store.sites[id]) return false;
     store.activeId = id;
+    return writeStore(store);
+  }
+
+  /* Records that the background scheduler just gave this site a turn — the
+     one field saveBackground() deliberately does not touch, since it is
+     about scheduling bookkeeping, not about the city's own simulated state.
+     Kept as its own tiny, explicit write rather than folded into
+     saveBackground() so a test (or the scheduler itself) can reason about
+     "was this ticked" and "was this saved" as the two separate facts they
+     are. */
+  function stampTick(id, now) {
+    const store = ensureStore();
+    const rec = store.sites[id];
+    if (!rec) return false;
+    rec.lastRealTick = now === undefined ? Date.now() : now;
     return writeStore(store);
   }
 
@@ -303,7 +337,7 @@
     const site = {
       id, name: rec.name, lat, lon, class: classify(lat),
       seed: seed === undefined ? Math.floor(Math.random() * 999999) : seed,
-      gen: GEN_VERSION, founded: rec.founded
+      gen: GEN_VERSION, founded: rec.founded, lastRealTick: Date.now()
     };
     const s = window.LM_SIM.newGame(site.seed, { class: site.class, sunSlope: slopeFor(site.lat) });
     store.sites[id] = Object.assign({}, site, { snapshot: encode(s, site) });
@@ -324,7 +358,8 @@
 
   window.LM_SITES = {
     encode, decode, classify, slopeFor, baseFor,
-    list, load, save, found, relocate, isUntouched, setActive, activeId, siteOf, sizeOf,
+    list, load, save, saveBackground, stampTick,
+    found, relocate, isUntouched, setActive, activeId, siteOf, sizeOf,
     /* exposed for the harness, and for the migration path in ui.js */
     migrateLegacy, ensureStore, GEN_VERSION, SITES_KEY, LEGACY_KEY
   };
