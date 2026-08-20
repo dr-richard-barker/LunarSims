@@ -377,11 +377,22 @@ The map is one patch of a sphere 10,921 km around, and the game now says so.
   already runs on, so it is a real place on the surface that stays where it
   is while you rotate the camera around it, not a lighting trick pinned to
   the screen.
-- **Many colonies.** Click empty ground on the globe to found one there;
-  click an existing mark — sized by population — to switch to it. Away
-  colonies are **frozen**: exactly as you left them, on whatever day you left
-  them on, never simulated in the background. A **Colonies tab** lists every
-  one you have founded, its era, population and age, a click away from
+- **Every colony is founded from the globe** — including the first one: a
+  fresh browser opens the globe before anything else and asks where to land,
+  rather than picking a spot silently. Click empty ground to found a colony
+  there. Click an existing mark — sized by population — and it opens a
+  **preview card** instead of switching outright: name, era, population, day,
+  and a real thumbnail decoded straight from that colony's own save, with its
+  own "Switch" button as the actual confirmation.
+- **Away colonies keep running.** A background scheduler gives each founded
+  colony you are not currently in an occasional turn — a real catch-up burst
+  of the same simulation the active city runs, not a frozen snapshot or an
+  approximation of one — on a slow round robin, one colony per turn, so a
+  growing empire's pace tapers gracefully instead of hitting a hard cap on
+  how many colonies can exist. A **Background sim** toggle, on by default,
+  switches back to the original frozen behaviour if you'd rather it stayed
+  that way. A **Colonies tab** lists every colony you have founded — era,
+  population, age, and how recently it last got a turn — a click away from
   switching back.
 - **Where you land changes what you get.** Terrain now comes in three
   classes — polar (the original), mare (flat, dark, lightly cratered, the
@@ -412,11 +423,14 @@ reachability, RCI growth and decay, the budget, coverage radii, the dust
 field, era gating, both event decks, every wonder's terrain gate, the traffic
 graph, complete AI-director runs of several hundred simulated days, lossless
 round-tripping of the sparse save format, generator-version isolation between
-site classes, and the globe's projection maths — a point at the sub-observer
+site classes, the globe's projection maths — a point at the sub-observer
 position must land exactly at the disc's centre, one 90° away exactly on the
-limb, anything further round correctly culled. **486 checks across 109
-scenarios.** Open it in a browser and re-run it after any change to those
-files.
+limb, anything further round correctly culled — and the background
+scheduler's catch-up math, round-robin selection and catch-up cap, verified
+against a scenario that ticks a colony through the scheduler and
+independently through direct simulation calls and diffs the two states
+byte-for-byte. **515 checks across 116 scenarios.** Open it in a browser and
+re-run it after any change to those files.
 
 Three things exist purely so this remains verifiable in a browser whose
 `requestAnimationFrame` is throttled to a fraction of a frame per second:
@@ -452,6 +466,7 @@ metro/
   js/agents.js                  pedestrians, cars, buses and trains (cosmetic)
   js/fx.js                       transient set pieces, on an injectable clock
   js/sites.js                     many cities: sparse save/load, one per seed
+  js/empire.js                     the background scheduler for away colonies
   js/globe.js                      the Moon as a projected sphere, and its own click/drag maths
   js/minimap.js                     one map, painted once, drawn at two sizes
   js/render.js                       isometric renderer, procedural, three detail tiers
