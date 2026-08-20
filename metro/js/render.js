@@ -1457,12 +1457,18 @@
 
   window.LM_RENDER = {
     draw, iso, pickTile, TW, TH,
+    /* the minimap draws its viewport box from this, so it can never drift
+       out of step with what the renderer actually shows */
+    visibleRange,
     /* Detail tier and sun angle, exposed so they can be pinned during
        verification — measuring what LOD is worth means drawing the far view
        at near detail, and screenshotting a given sun angle means holding the
        month still. Nothing in the game reads these. */
     LOD_FAR, LOD_MID, LOD_NEAR,
     debugPin(o) { Object.assign(FR, o); FR.pinned = true; },
-    debugUnpin() { FR.pinned = false; }
+    debugUnpin() { FR.pinned = false; },
+    /* exposed for the globe, which needs the same lunar-cycle phase to
+       place its own terminator — one clock, read by both views */
+    sunAzimuth
   };
 })();

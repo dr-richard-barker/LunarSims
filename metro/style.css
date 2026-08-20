@@ -406,3 +406,24 @@ button{font-family:var(--sans)}
 .xclose:hover{background:var(--panel-2);border-color:var(--line);color:var(--ink)}
 .sheet h2{padding-right:34px}
 .dhead{padding-right:34px}
+
+/* ---------- minimap ----------
+   The corner map floats over the main canvas rather than taking a row of its
+   own: the stage is already the tightest space on screen and a docked map
+   would cost the city the height it sits in. */
+.stage{position:relative}
+.minimap{
+  position:absolute;right:18px;bottom:46px;z-index:5;
+  border:1px solid var(--line);border-radius:8px;
+  background:var(--bg);box-shadow:0 8px 24px rgba(0,0,0,.55);
+  cursor:crosshair;opacity:.9;transition:opacity .15s;
+  image-rendering:pixelated;
+}
+.minimap:hover{opacity:1}
+/* the pop-up copy is in normal flow inside the sheet, not floating */
+.minimap.big{
+  position:static;display:block;margin:0 auto;
+  width:min(560px,70vh);height:min(560px,70vh);
+  box-shadow:none;opacity:1;
+}
+@media (max-width:900px){ .minimap{width:112px;height:112px;right:10px;bottom:40px} }

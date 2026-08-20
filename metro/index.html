@@ -33,8 +33,9 @@
       <button id="btnInvasion" class="mode" title="A separate, sillier deck: flying saucers, tractor beams, crop circles and a chrome figure on a board who is entirely good news. Off by default, independent of Disasters.">👽 Invasion</button>
     </div>
     <div class="modes">
+      <button id="btnGlobe" class="mode" title="The whole Moon. Drag to rotate, click empty ground to found a colony there, click an existing one to switch to it. Shift+G.">🌐 Globe</button>
       <button id="btnCentre" class="mode" title="Recentre the camera on the middle of the map">Centre</button>
-      <button id="btnNew" class="mode" title="Abandon this city and generate fresh terrain">New Colony</button>
+      <button id="btnNew" class="mode" title="Found a new colony on fresh terrain. The one you leave stays frozen exactly as it is — nothing is lost.">New Colony</button>
     </div>
   </div>
 </header>
@@ -59,6 +60,8 @@
       <button data-view="deposits">Deposits</button>
     </div>
     <canvas id="cv"></canvas>
+    <canvas id="mini" class="minimap" width="176" height="176"
+            title="Minimap — click or drag to jump the camera. Press Shift+M for a bigger one."></canvas>
     <div class="statusbar"><span id="hint"></span></div>
   </section>
 
@@ -67,6 +70,7 @@
       <button class="tab on" data-tab="info">City</button>
       <button class="tab" data-tab="budget">Budget</button>
       <button class="tab" data-tab="trends">Trends</button>
+      <button class="tab" data-tab="colonies">Colonies</button>
     </nav>
     <div class="tabpane on" id="pane-info">
       <h3 class="sec">Era</h3>
@@ -82,8 +86,32 @@
     </div>
     <div class="tabpane" id="pane-budget"></div>
     <div class="tabpane" id="pane-trends"></div>
+    <div class="tabpane" id="pane-colonies"></div>
   </aside>
 </main>
+
+<div class="modal" id="mapModal" hidden>
+  <div class="sheet wide">
+    <button class="xclose" id="mapClose" title="Close">✕</button>
+    <h2>Colony map</h2>
+    <p class="lede">Click or drag anywhere to move the camera there. The white box is what you
+      are looking at now.</p>
+    <canvas id="miniBig" width="560" height="560" class="minimap big"></canvas>
+    <div class="sheetfoot"><button class="mode" id="mapDone">Close</button></div>
+  </div>
+</div>
+
+<div class="modal" id="globeModal" hidden>
+  <div class="sheet wide">
+    <button class="xclose" id="globeClose" title="Close">✕</button>
+    <h2>The Moon</h2>
+    <p class="lede" id="globeLede">Drag to rotate. Click empty ground to found a colony there — click
+      an existing colony to switch to it. Away colonies stay exactly as you left them.</p>
+    <canvas id="globeCanvas" width="560" height="560" style="display:block;margin:0 auto;cursor:grab;touch-action:none"></canvas>
+    <div id="globeFound" hidden></div>
+    <div class="sheetfoot"><button class="mode" id="globeDone">Close</button></div>
+  </div>
+</div>
 
 <div class="toast" id="toast" hidden></div>
 
@@ -97,9 +125,12 @@
 <script src="js/disasters.js"></script>
 <script src="js/invasion.js"></script>
 <script src="js/sim.js"></script>
+<script src="js/sites.js"></script>
 <script src="js/autopilot.js"></script>
 <script src="js/agents.js"></script>
 <script src="js/fx.js"></script>
+<script src="js/minimap.js"></script>
+<script src="js/globe.js"></script>
 <script src="js/render.js"></script>
 <script src="js/ui.js"></script>
 </body>

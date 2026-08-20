@@ -21,10 +21,19 @@
   const STATE_VERSION = 4;
   const buildById = id => BUILDINGS.find(b => b.id === id);
 
-  function newGame(seed) {
-    const w = T.makeMap(seed === undefined ? Math.floor(Math.random() * 9999) : seed);
+  /* `opts`, forwarded straight to T.makeMap, is entirely optional — every
+     existing call in this codebase omits it and keeps getting exactly the
+     polar world it always has. Only sites.js's found() passes one, for a
+     colony founded somewhere other than the default pole. */
+  function newGame(seed, opts) {
+    const w = T.makeMap(seed === undefined ? Math.floor(Math.random() * 9999) : seed, opts);
     const s = {
       version: STATE_VERSION, seed: w.seed,
+      /* Set once at generation from the site's latitude and never touched
+         again — see terrain.js's computeSun for what it does. Carried on
+         the live state (rather than re-derived from a site record) so it
+         serialises with everything else and a save is self-contained. */
+      sunSlope: w.sunSlope,
       map: w.map,
       day: 1,
       credits: K.START_CREDITS,

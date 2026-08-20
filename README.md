@@ -357,21 +357,79 @@ Everything in the invasion deck is a public-domain pulp archetype drawn from
 scratch — saucers, tractor beams, burrowing monsters, body snatchers. There are
 no named or licensed characters anywhere in it.
 
+### Many cities, one Moon
+
+The map is one patch of a sphere 10,921 km around, and the game now says so.
+
+- **A minimap**, always up in the corner and full-size in a pop-up (Shift+M).
+  One pixel per tile, painted once and cached rather than redrawn every
+  frame; click or drag either copy to jump the camera there.
+- **A globe** (Shift+G): the whole Moon, drawn as projected polygons rather
+  than per-pixel — the same flat procedural style as everything else in this
+  game, just wrapped around a sphere. Drag to rotate. The maria and named
+  craters sit at real, if only roughly-approximated, selenographic
+  coordinates — Imbrium, Serenitatis, Tranquillitatis and Crisium on the near
+  side, Moscoviense and Ingenii on the far side, Shackleton and Peary at the
+  poles — so the near side reads as patched with maria and the far side does
+  not, the single most recognisable fact about the real Moon, for free,
+  because the coordinates are genuine rather than scattered for balance. The
+  terminator is tied to the same 29.5-day cycle the city view's own lighting
+  already runs on, so it is a real place on the surface that stays where it
+  is while you rotate the camera around it, not a lighting trick pinned to
+  the screen.
+- **Many colonies.** Click empty ground on the globe to found one there;
+  click an existing mark — sized by population — to switch to it. Away
+  colonies are **frozen**: exactly as you left them, on whatever day you left
+  them on, never simulated in the background. A **Colonies tab** lists every
+  one you have founded, its era, population and age, a click away from
+  switching back.
+- **Where you land changes what you get.** Terrain now comes in three
+  classes — polar (the original), mare (flat, dark, lightly cratered, the
+  smooth basaltic plains), highland (rough, heavily cratered, the highest
+  relief) — and sunlight is driven by real latitude rather than one fixed
+  constant: near a pole, permanent shadow and the peaks of eternal light both
+  exist, the trade-off the game was built around; near the equator, permanent
+  shadow (and the ice that depends on it) becomes rare — measured at more
+  than an order of magnitude down — while open sky becomes the default state
+  of nearly every tile, trading the pole's power-vs-ice puzzle for a
+  different one: solar siting barely matters, and finding a floor still dark
+  enough for a radio telescope becomes the hard search instead.
+- **Colonies are cheap to keep.** A city is stored as its seed plus a sparse
+  diff against what that seed would generate fresh — height edits, cleared
+  boulders, buildings, zoning, dust, pipes — rather than as its whole
+  16,384-tile map, because the map is fully deterministic from the seed and
+  storing it twice would be pointless. Measured on a real, heavily-built
+  260-day city: full map 1.9 MB, sparse snapshot under 200 KB including its
+  complete history. That is the entire reason keeping dozens of colonies
+  around is affordable.
+
 ### Testing
 
-Everything under `metro/js/` except `render.js` and `ui.js` is DOM-free, so
-`metro/harness.html` drives the whole simulation headlessly: terrain cascade
-invariants, sun derivation, three-network reachability, RCI growth and decay,
-the budget, coverage radii, the dust field, era gating, both event decks, every
-wonder's terrain gate, the traffic graph, and complete AI-director runs of
-several hundred simulated days. **360 checks across 82 scenarios.** Open it in
-a browser and re-run it after any change to those files.
+Everything under `metro/js/` except `render.js`, `ui.js` and `globe.js`'s own
+`draw()` is DOM-free, so `metro/harness.html` drives the whole simulation
+headlessly: terrain cascade invariants, sun derivation, three-network
+reachability, RCI growth and decay, the budget, coverage radii, the dust
+field, era gating, both event decks, every wonder's terrain gate, the traffic
+graph, complete AI-director runs of several hundred simulated days, lossless
+round-tripping of the sparse save format, generator-version isolation between
+site classes, and the globe's projection maths — a point at the sub-observer
+position must land exactly at the disc's centre, one 90° away exactly on the
+limb, anything further round correctly culled. **486 checks across 109
+scenarios.** Open it in a browser and re-run it after any change to those
+files.
 
-Two things exist purely so this remains verifiable in a browser whose
+Three things exist purely so this remains verifiable in a browser whose
 `requestAnimationFrame` is throttled to a fraction of a frame per second:
 `LM_FX` takes an **injectable clock**, so any moment of any animation can be
-pinned and screenshotted, and `window.__lm` (matching `farm/`'s `window.__lf`)
-exposes the renderer and camera so a given tile can be looked at directly.
+pinned and screenshotted; `window.__lm` (matching `farm/`'s `window.__lf`)
+exposes the renderer and camera so a given tile — or a wonder on high ground,
+which the naive version of that camera helper got wrong the first time — can
+be looked at directly; and the globe's own projection functions are pure and
+take their camera state as plain arguments rather than reading it off the
+page, specifically so a sign error in the rotation math (which shipped once,
+and stayed invisible to a round-trip test because both directions shared the
+same mistake) can be caught by checking a known point rather than only by
+checking self-consistency.
 
 ### Layout
 
@@ -393,8 +451,11 @@ metro/
   js/autopilot.js              the AI auto-play director
   js/agents.js                  pedestrians, cars, buses and trains (cosmetic)
   js/fx.js                       transient set pieces, on an injectable clock
-  js/render.js                    isometric renderer, procedural, three detail tiers
-  js/ui.js                         tools, camera, panels, trends, main loop, saving
+  js/sites.js                     many cities: sparse save/load, one per seed
+  js/globe.js                      the Moon as a projected sphere, and its own click/drag maths
+  js/minimap.js                     one map, painted once, drawn at two sizes
+  js/render.js                       isometric renderer, procedural, three detail tiers
+  js/ui.js                            tools, camera, panels, colonies, main loop, saving
 ```
 
 ## On the crop list

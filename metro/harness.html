@@ -56,15 +56,19 @@ td.mark{width:34px;text-align:center}
 <script src="js/disasters.js"></script>
 <script src="js/invasion.js"></script>
 <script src="js/sim.js"></script>
+<script src="js/sites.js"></script>
 <script src="js/autopilot.js"></script>
 <script src="js/agents.js"></script>
 <script src="js/fx.js"></script>
+<script src="js/minimap.js"></script>
+<script src="js/globe.js"></script>
 <script>
 (function () {
   const T = window.LM_TERRAIN, G = window.LM_GRID, Z = window.LM_ZONES, S = window.LM_SIM;
   const B = window.LM_BUDGET, SV = window.LM_SERVICES, E = window.LM_ERAS;
   const AI = window.LM_AUTO, DIS = window.LM_DISASTERS, AG = window.LM_AGENTS;
-  const INV = window.LM_INVASION, FX = window.LM_FX;
+  const INV = window.LM_INVASION, FX = window.LM_FX, MM = window.LM_MINIMAP, ST = window.LM_SITES;
+  const GL = window.LM_GLOBE;
   const K = window.LM_DATA.K, LM_DATA = window.LM_DATA;
 
   /* A fixed-sequence stand-in for Math.random, so every scenario that rolls
@@ -2049,8 +2053,680 @@ td.mark{width:34px;text-align:center}
           ['and is still solvent', long.credits, '>=0'],
           ['and something actually happened to it', long.log.length, '>0']
         ];
+      } },
+
+    /* ---------- v3 phase 1: the minimap ---------- */
+
+    { name: 'The minimap tells the same story as the main view',
+      why: 'a minimap that did not distinguish a crater floor from a rim, or a tower from open ground, would be a decorative rectangle — the point is to find things on it at a glance',
+      run() {
+        const mk = o => Object.assign({ x: 0, y: 0, h: 5, t: 'flat', sun: 0.8, v: 0.5 }, o);
+        const lum = c => c[0] * 0.30 + c[1] * 0.59 + c[2] * 0.11;
+
+        const shadowed = MM.colourFor(mk({ sun: 0.02 }));
+        const sunlit   = MM.colourFor(mk({ sun: 1 }));
+        const low      = MM.colourFor(mk({ h: 0 }));
+        const high     = MM.colourFor(mk({ h: K.MAX_H }));
+        const skylight = MM.colourFor(mk({ t: 'skylight' }));
+
+        const zoned = MM.colourFor(mk({ zone: { kind: 'hab', density: 'high', stage: 0 } }));
+        const built1 = MM.colourFor(mk({ zone: { kind: 'hab', density: 'high', stage: 1 } }));
+        const built4 = MM.colourFor(mk({ zone: { kind: 'hab', density: 'high', stage: 4 } }));
+        const trade4 = MM.colourFor(mk({ zone: { kind: 'trade', density: 'high', stage: 4 } }));
+        const wonder = MM.colourFor(mk({ b: { type: 'elevator' } }));
+        const bare   = MM.colourFor(mk({}));
+
+        return [
+          ['a permanently shadowed floor reads darker than a lit rim',
+            lum(shadowed) < lum(sunlit) * 0.55, true],
+          ['high ground reads brighter than low', lum(high) > lum(low), true],
+          ['a skylight is the darkest thing on the map', lum(skylight) < 20, true],
+          ['zoned but unbuilt ground is dimmer than a built block',
+            lum(zoned) < lum(built1), true],
+          ['and density brightens it further', lum(built4) > lum(built1), true],
+          ['habitation and trade are told apart by hue',
+            Math.abs(built4[2] - trade4[2]) > 40, true],
+          ['a wonder is the brightest mark there is',
+            lum(wonder) > lum(built4) && lum(wonder) > lum(bare), true],
+          ['every channel stays in range',
+            [shadowed, sunlit, low, high, skylight, zoned, built4, wonder, bare]
+              .every(c => c.every(v => v >= 0 && v <= 255)), true]
+        ];
+      } },
+
+    { name: 'Clicking the minimap picks the tile you pointed at',
+      why: 'the whole feature is "click there, go there" — an off-by-one in the mapping would send the camera somewhere plausible but wrong, which is worse than it not working at all',
+      run() {
+        /* a real element, because the mapping is defined against the box the
+           browser lays out rather than against the canvas attribute size */
+        const cv2 = document.createElement('canvas');
+        cv2.width = cv2.height = 200;
+        cv2.style.cssText = 'position:absolute;left:0;top:0;width:200px;height:200px';
+        document.body.appendChild(cv2);
+        const r = cv2.getBoundingClientRect();
+        const at = (fx, fy) => MM.tileAtPoint(cv2, r.left + fx * r.width, r.top + fy * r.height);
+
+        const tl = at(0.001, 0.001), br = at(0.999, 0.999), mid = at(0.5, 0.5);
+        const outLo = at(-2, -2), outHi = at(3, 3);
+        document.body.removeChild(cv2);
+        return [
+          ['the top-left corner is tile 0,0', [tl.x, tl.y].join(','), '0,0'],
+          ['the bottom-right is the last tile',
+            [br.x, br.y].join(','), [K.COLS - 1, K.ROWS - 1].join(',')],
+          ['the middle is the middle', [mid.x, mid.y].join(','), [K.COLS / 2, K.ROWS / 2].join(',')],
+          ['a point off the left is clamped, not negative',
+            outLo.x >= 0 && outLo.y >= 0, true],
+          ['and a point off the right is clamped to the map',
+            outHi.x <= K.COLS - 1 && outHi.y <= K.ROWS - 1, true]
+        ];
+      } },
+
+    /* ---------- v3 phase 2: sites and sparse saves ---------- */
+
+    { name: 'A sparse snapshot round-trips a battered city exactly',
+      why: 'this is the whole feature — a lossy round trip would not shrink saves, it would corrupt them the first time anyone sculpted terrain, built something, or got hit by a disaster',
+      run() {
+        const s = S.newGame(4242);
+        const site = { id: 't1', name: 'Test', lat: -85, lon: 0, class: 'polar', seed: s.seed, gen: 1 };
+
+        /* sculpt terrain, clear a boulder, build, zone, pipe */
+        for (let i = 0; i < 3; i++) T.raise(s, 64, 64);
+        T.clearBoulders(s, 65, 70);
+        S.place(s, T.tileAt(s, 60, 60), 'solar');
+        S.place(s, T.tileAt(s, 61, 60), 'tube');
+        S.place(s, T.tileAt(s, 62, 60), 'main');
+        S.paintZone(s, 63, 63, 2, 2, 'hab', 'high');
+        for (let i = 0; i < 40; i++) S.tick(s);
+
+        /* a disaster and an invasion event, so terrain edits and the
+           cosmetic-only fields (pattern, snatched) are both exercised */
+        if (DIS) DIS.fire(s, 'meteor', T.tileAt(s, 70, 70));
+        if (INV) {
+          INV.fire(s, 'circles', T.tileAt(s, 50, 50), seededRnd(77));
+          INV.fire(s, 'snatchers', T.tileAt(s, 63, 63), seededRnd(78));
+        }
+        for (let i = 0; i < 10; i++) S.tick(s);
+
+        const snap = ST.encode(s, site);
+        const back = ST.decode(site, snap);
+
+        /* null and undefined both mean "nothing here" everywhere the game
+           reads these fields (always as `if (t.b)`, never `=== null`), and a
+           freshly regenerated base tile that was never touched is undefined
+           while a live tile a disaster explicitly cleared is null — so the
+           comparison has to treat those two as equal or it flags a
+           difference the game itself cannot see. */
+        const cmp = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+        let mismatches = [];
+        for (let i = 0; i < s.map.length; i++) {
+          const a = s.map[i], b = back.map[i];
+          if (a.h !== b.h) mismatches.push('h@' + i);
+          if (a.t !== b.t) mismatches.push('t@' + i);
+          if (Math.abs((a.dust || 0) - (b.dust || 0)) > 0.015) mismatches.push('dust@' + i);
+          if (!cmp(a.b, b.b)) mismatches.push('b@' + i);
+          if (!!a.pipe !== !!b.pipe) mismatches.push('pipe@' + i);
+          if (!cmp(a.zone, b.zone)) mismatches.push('zone@' + i);
+          if ((a.pattern || 0) !== (b.pattern || 0)) mismatches.push('pattern@' + i);
+          if ((a.snatched || 0) !== (b.snatched || 0)) mismatches.push('snatched@' + i);
+        }
+        const metaOk = back.day === s.day && back.credits === s.credits &&
+          back.pop === s.pop && back.research === s.research &&
+          JSON.stringify(back.history) === JSON.stringify(s.history);
+
+        return [
+          ['the map has the same tile count coming back', back.map.length, s.map.length],
+          ['every tile field round-trips (dust to within its stored rounding)',
+            mismatches.length === 0 ? 'none' : mismatches.slice(0, 5).join(','), 'none'],
+          ['sun is recomputed rather than stored, and still matches',
+            s.map.every((t, i) => Math.abs(t.sun - back.map[i].sun) < 0.001), true],
+          ['deposits regenerate identically from the same seed',
+            s.map.every((t, i) => JSON.stringify(t.deposit) === JSON.stringify(back.map[i].deposit)), true],
+          ['the day/credits/population/research/history all came back', metaOk, true],
+          ['the decoded seed matches the site', back.seed, site.seed]
+        ];
+      } },
+
+    { name: 'An untouched city has nothing to store, and encoding is a fixed point',
+      why: 'if a freshly founded site produced edits against its own base, the base itself would be wrong — and if encoding a decoded snapshot produced a DIFFERENT snapshot, the format would drift a little more every time a city was saved and reloaded',
+      run() {
+        const s = S.newGame(909);
+        const site = { id: 't2', name: 'Fresh', lat: -85, lon: 0, class: 'polar', seed: s.seed, gen: 1 };
+        const snap0 = ST.encode(s, site);
+
+        const s2 = S.newGame(4242);
+        for (let i = 0; i < 3; i++) T.raise(s2, 64, 64);
+        S.place(s2, T.tileAt(s2, 60, 60), 'solar');
+        const site2 = { id: 't3', name: 'Built', lat: -85, lon: 0, class: 'polar', seed: s2.seed, gen: 1 };
+        const snapA = ST.encode(s2, site2);
+        const roundTripped = ST.decode(site2, snapA);
+        const snapB = ST.encode(roundTripped, site2);
+
+        return [
+          ['a brand new, untouched city has zero edits', snap0.edits.length, 0],
+          ['a built city has some', snapA.edits.length, '>0'],
+          ['encoding what you just decoded reproduces the same edit list',
+            JSON.stringify(snapA.edits), JSON.stringify(snapB.edits)]
+        ];
+      } },
+
+    { name: 'A sparse snapshot is dramatically smaller than the full map',
+      why: 'this is the number the whole architecture is justified by — a save that was not meaningfully smaller than storing the map outright would not be worth the extra machinery',
+      run() {
+        const s = S.newGame(777);
+        s.autoPlay = true;
+        for (let i = 0; i < 220; i++) S.tick(s);
+        const site = { id: 't4', name: 'Big', lat: -85, lon: 0, class: 'polar', seed: s.seed, gen: 1 };
+
+        const fullBytes = JSON.stringify(s).length;
+        const snap = ST.encode(s, site);
+        const sparseBytes = JSON.stringify(snap).length;
+        return [
+          ['the city actually developed', S.developedCount(s), '>0'],
+          ['the sparse snapshot is well under a tenth of the full map',
+            sparseBytes < fullBytes * 0.1, true],
+          ['concretely: full ' + Math.round(fullBytes / 1024) + ' KB vs sparse ' +
+            Math.round(sparseBytes / 1024) + ' KB', sparseBytes < fullBytes, true]
+        ];
+      } },
+
+    { name: 'The legacy single-city save migrates in as Colony One',
+      why: 'the player\'s existing city must not be discarded the day this format ships — losing someone\'s save is the one mistake here with no way back',
+      run() {
+        const savedSites = localStorage.getItem(ST.SITES_KEY);
+        const savedLegacy = localStorage.getItem(ST.LEGACY_KEY);
+        try {
+          localStorage.removeItem(ST.SITES_KEY);
+          const legacy = S.newGame(31415);
+          for (let i = 0; i < 15; i++) S.tick(legacy);
+          S.place(legacy, T.tileAt(legacy, 60, 60), 'solar');
+          localStorage.setItem(ST.LEGACY_KEY, JSON.stringify(legacy));
+
+          const store = ST.ensureStore();
+          const id = store.activeId;
+          const rec = store.sites[id];
+          const back = ST.load(id);
+
+          return [
+            ['a site was created from the legacy save', !!rec, true],
+            ['it is named and sited as Colony One at the pole', rec.name + '@' + rec.lat, 'Colony One@-85'],
+            ['it carries the legacy save\'s own seed', rec.seed, legacy.seed],
+            ['it became the active site', store.activeId, id],
+            ['and decoding it reproduces the legacy city\'s day and credits',
+              back.day + ',' + back.credits, legacy.day + ',' + legacy.credits],
+            ['migration does not run twice — calling ensureStore again is a no-op',
+              ST.ensureStore().activeId, id]
+          ];
+        } finally {
+          if (savedSites === null) localStorage.removeItem(ST.SITES_KEY); else localStorage.setItem(ST.SITES_KEY, savedSites);
+          if (savedLegacy === null) localStorage.removeItem(ST.LEGACY_KEY); else localStorage.setItem(ST.LEGACY_KEY, savedLegacy);
+        }
+      } },
+
+    { name: 'Founding, saving, listing and switching sites all work together',
+      why: 'this is the lifecycle every later phase (the globe, the colonies list) is built on top of — if any one step lost or mislabelled a city, everything above it would too',
+      run() {
+        const savedSites = localStorage.getItem(ST.SITES_KEY);
+        try {
+          localStorage.removeItem(ST.SITES_KEY);
+          const idA = ST.found('Alpha', -85, 0, 111);
+          const idB = ST.found('Beta', 5, 40, 222);
+
+          const a1 = ST.load(idA);
+          for (let i = 0; i < 20; i++) S.tick(a1);
+          T.clearBoulders(a1, 60, 60);   // seed 111 happens to put one there
+          const placeErr = S.place(a1, T.tileAt(a1, 60, 60), 'solar');
+          if (placeErr) throw new Error('setup failed: ' + placeErr);
+          ST.save(idA, a1);
+
+          const list = ST.list();
+          const activeAfterSave = ST.activeId();
+          ST.setActive(idB);
+
+          const siteA = ST.siteOf(idA), siteB = ST.siteOf(idB);
+          const reloadedA = ST.load(idA);
+          return [
+            ['two distinct sites were founded', list.length, 2],
+            ['they kept the names they were founded with',
+              list.map(r => r.name).sort().join(','), 'Alpha,Beta'],
+            ['Alpha at the pole was classed polar', siteA.class, 'polar'],
+            ['Beta near the equator was classed mare', siteB.class, 'mare'],
+            ['saving Alpha makes it the active site', activeAfterSave, idA],
+            ['switching to Beta updates the active site', ST.activeId(), idB],
+            ['Alpha kept its seed across the whole round trip', siteA.seed, 111],
+            ['and reloading Alpha still has the solar array it built',
+              reloadedA.map.filter(t => t.b && t.b.type === 'solar').length, '>0']
+          ];
+        } finally {
+          if (savedSites === null) localStorage.removeItem(ST.SITES_KEY); else localStorage.setItem(ST.SITES_KEY, savedSites);
+        }
+      } },
+
+    { name: 'found() does not itself make a site active',
+      why: 'a caller that wants a fresh site to become the resumable one has to say so explicitly — this is what ui.js\'s first-run bootstrap forgot to do, which meant a session that closed before its first autosave would found a second "Colony One" instead of resuming the first',
+      run() {
+        const savedSites = localStorage.getItem(ST.SITES_KEY);
+        try {
+          localStorage.removeItem(ST.SITES_KEY);
+          const before = ST.activeId();
+          const id = ST.found('Solo', -85, 0, 55);
+          const afterFound = ST.activeId();
+          ST.setActive(id);
+          const afterSetActive = ST.activeId();
+          return [
+            ['a brand new store starts with no active site', before, null],
+            ['founding one does not activate it on its own', afterFound, null],
+            ['setActive is what makes it resumable', afterSetActive, id]
+          ];
+        } finally {
+          if (savedSites === null) localStorage.removeItem(ST.SITES_KEY); else localStorage.setItem(ST.SITES_KEY, savedSites);
+        }
+      } },
+
+    { name: 'classify() sorts latitude into the three site classes',
+      why: 'this is the one piece of Phase 3 (site-driven terrain) that already has to exist and be right in Phase 2, because every founded site is labelled with it immediately',
+      run() {
+        return [
+          ['the pole is polar', ST.classify(-90), 'polar'],
+          ['just inside the polar band is still polar', ST.classify(76), 'polar'],
+          ['the equator is mare', ST.classify(0), 'mare'],
+          ['just inside the mare band is still mare', ST.classify(-19), 'mare'],
+          ['the mid-latitudes are highland', ST.classify(45), 'highland'],
+          ['classification does not care about hemisphere', ST.classify(-45), ST.classify(45)]
+        ];
+      } },
+
+    { name: 'A dozen cities fit comfortably inside the storage quota',
+      why: 'the plan\'s whole justification is that dozens of cities are affordable — measured here, not assumed, because a generous-looking sparse format could still add up',
+      run() {
+        const savedSites = localStorage.getItem(ST.SITES_KEY);
+        try {
+          localStorage.removeItem(ST.SITES_KEY);
+          const ids = [];
+          for (let i = 0; i < 6; i++) {
+            const id = ST.found('City ' + i, -80 + i * 5, i * 10, 1000 + i);
+            const s2 = ST.load(id);
+            s2.autoPlay = true;
+            for (let d = 0; d < 130; d++) S.tick(s2);
+            ST.save(id, s2);
+            ids.push(id);
+          }
+          const totalBytes = ids.reduce((a, id) => a + ST.sizeOf(id), 0);
+          const wholeStoreBytes = JSON.stringify(ST.ensureStore()).length;
+          return [
+            ['all six sites saved something', ids.every(id => ST.sizeOf(id) > 0), true],
+            ['six developed cities together: ' + Math.round(totalBytes / 1024) + ' KB',
+              totalBytes < 2 * 1024 * 1024, true],
+            ['the whole store round-trips through localStorage',
+              wholeStoreBytes > 0, true],
+            ['extrapolated to a few dozen cities it still fits a ~12 MB quota',
+              (totalBytes / 6) * 40 < 12 * 1024 * 1024, true]
+          ];
+        } finally {
+          if (savedSites === null) localStorage.removeItem(ST.SITES_KEY); else localStorage.setItem(ST.SITES_KEY, savedSites);
+        }
+      } },
+
+    /* ---------- v3 phase 3: site-driven terrain generation ---------- */
+
+    { name: 'Omitting generation options reproduces exactly what makeMap always has',
+      why: 'every world this game has ever generated is a polar world at the one fixed slope it always used — CLASS_PARAMS.polar has to be that same set of numbers given names, not a fresh guess at them, or every existing and migrated site would quietly regenerate as slightly different ground',
+      run() {
+        const seeds = [1, 4242, 90210, 555555];
+        const same = seeds.every(sd => {
+          const legacy = T.makeMap(sd);
+          const explicit = T.makeMap(sd, { class: 'polar', sunSlope: K.SUN_SLOPE });
+          return JSON.stringify(legacy.map) === JSON.stringify(explicit.map) &&
+                 legacy.sunSlope === explicit.sunSlope;
+        });
+        const defaultSlope = T.makeMap(1).sunSlope;
+        return [
+          ['four different seeds all round-trip identically', same, true],
+          ['the default (no opts) world carries the pole sunSlope', defaultSlope, K.SUN_SLOPE],
+          ['CLASS_PARAMS exposes exactly the three site classes',
+            Object.keys(T.CLASS_PARAMS).sort().join(','), 'highland,mare,polar']
+        ];
+      } },
+
+    { name: 'The three site classes actually generate different ground',
+      why: 'a class that was just a label on otherwise-identical terrain would make the whole "where you land matters" feature cosmetic — mare has to read flatter and less cratered, highland rougher and busier, on the same seed',
+      run() {
+        const seed = 8080;
+        const relief = cls => {
+          const w = T.makeMap(seed, { class: cls, sunSlope: 0.16 });
+          let sum = 0, sumSq = 0, boulders = 0, rough = 0;
+          for (const t of w.map) {
+            sum += t.h; sumSq += t.h * t.h;
+            if (t.t === 'boulder') boulders++;
+            if (t.t === 'rough') rough++;
+          }
+          const n = w.map.length, mean = sum / n;
+          return { variance: sumSq / n - mean * mean, boulders, rough, mean };
+        };
+        const polar = relief('polar'), mare = relief('mare'), highland = relief('highland');
+        return [
+          ['mare is flatter than polar (lower height variance)', mare.variance < polar.variance, true],
+          ['highland is rougher than polar (higher height variance)', highland.variance > polar.variance, true],
+          ['mare has fewer boulders than polar', mare.boulders < polar.boulders, true],
+          ['highland has more broken ground than polar', highland.rough > polar.rough, true],
+          ['and mare has the least broken ground of the three',
+            mare.rough < polar.rough && mare.rough < highland.rough, true]
+        ];
+      } },
+
+    { name: 'Every class still guarantees a buildable skylight',
+      why: 'the megadome wonder needs one, and mare/highland have no rille to hang it on the way polar does — losing it silently on two of the three classes would make one wonder pole-only without ever saying so',
+      run() {
+        for (const cls of ['polar', 'mare', 'highland']) {
+          const w = T.makeMap(3030, { class: cls, sunSlope: 0.5 });
+          const sk = w.map.find(t => t.t === 'skylight');
+          if (!sk) return [['a skylight exists on ' + cls, false, true]];
+        }
+        return [['every class generated exactly one skylight', true, true]];
+      } },
+
+    { name: 'slopeFor() runs from the measured pole value to the measured equator value',
+      why: 'this single number is the entire mechanism behind "where you land changes what you get" — get the endpoints or the monotonicity wrong and every other site-driven effect inherits the mistake',
+      run() {
+        return [
+          ['the pole matches the legacy constant exactly', ST.slopeFor(-90), K.SUN_SLOPE],
+          ['and so does the other pole', ST.slopeFor(90), K.SUN_SLOPE],
+          ['the equator is the measured, retuned value', ST.slopeFor(0), 0.9],
+          ['it rises monotonically from either pole toward the equator',
+            ST.slopeFor(-90) <= ST.slopeFor(-45) && ST.slopeFor(-45) <= ST.slopeFor(0), true],
+          ['and is symmetric across hemispheres', ST.slopeFor(-37), ST.slopeFor(37)]
+        ];
+      } },
+
+    { name: 'Latitude moves permanent shadow and ice in the right direction — measured, not assumed',
+      why: 'these are the numbers the whole "ice follows for free" claim rests on: seedDeposits was never touched for this phase, so if the relationship holds it is entirely because computeSun is reading a different slope, not because anything about deposits changed',
+      run() {
+        const seed = 4242;
+        const stats = slope => {
+          const w = T.makeMap(seed, { class: 'polar', sunSlope: slope });
+          let shadow = 0, ice = 0;
+          for (const t of w.map) {
+            if (t.sun <= K.SUN_SHADOW) shadow++;
+            if (t.deposit && t.deposit.kind === 'ice') ice++;
+          }
+          return { shadow, ice, relief: w.map.map(t => t.h + ':' + t.t).join('') };
+        };
+        const pole = stats(ST.slopeFor(-90)), eq = stats(ST.slopeFor(0));
+        return [
+          ['the relief is identical either way — only the slope changed', eq.relief, pole.relief],
+          ['the pole has real permanent shadow to lose', pole.shadow, '>500'],
+          ['the equator has far less of it', eq.shadow < pole.shadow / 5, true],
+          ['the pole has real ice to lose', pole.ice, '>200'],
+          ['the equator has far less of that too', eq.ice < pole.ice / 5, true]
+        ];
+      } },
+
+    { name: 'baseFor() dispatches on the SITE\'s generator version, not the current one',
+      why: 'this is the guarantee the whole versioning scheme exists for — bumping GEN_VERSION for new sites must never change what an already-founded gen 1 site regenerates into, however many generators come after it',
+      run() {
+        const gen1 = { seed: 606, gen: 1, class: 'highland', lat: 0 };  // class/lat should be IGNORED for gen 1
+        const gen1Implicit = { seed: 606, class: 'highland', lat: 0 };  // no gen field at all — same as gen 1
+        const gen2Mare = { seed: 606, gen: 2, class: 'mare', lat: 0 };
+        /* lat -90, the TRUE pole, not merely a "polar-classed" latitude —
+           slopeFor is continuous and only returns exactly K.SUN_SLOPE at
+           -90 itself (see the slopeFor scenario), so a polar gen 2 site
+           there is the one case where it SHOULD reproduce gen 1 exactly —
+           a useful check in its own right, just not of "does gen 2 use its
+           class and latitude at all", which needs a site where they
+           actually make a difference. */
+        const gen2Pole = { seed: 606, gen: 2, class: 'polar', lat: -90 };
+
+        const plain = T.makeMap(606);
+        const b1 = ST.baseFor(gen1), b1i = ST.baseFor(gen1Implicit);
+        const bMare = ST.baseFor(gen2Mare), bPole = ST.baseFor(gen2Pole);
+
+        return [
+          ['a gen 1 site ignores its own class/lat fields entirely',
+            JSON.stringify(b1.map), JSON.stringify(plain.map)],
+          ['a site with no gen field at all is treated the same as gen 1',
+            JSON.stringify(b1i.map), JSON.stringify(plain.map)],
+          ['a gen 2 site actually uses class and latitude',
+            JSON.stringify(bMare.map) === JSON.stringify(plain.map), false],
+          ['a gen 2 polar site at the TRUE pole reproduces gen 1 exactly',
+            JSON.stringify(bPole.map), JSON.stringify(plain.map)],
+          ['which is exactly because its sunSlope matches gen 1\'s constant',
+            bPole.sunSlope, K.SUN_SLOPE]
+        ];
+      } },
+
+    { name: 'newGame threads generation options through without disturbing any existing caller',
+      why: 'hundreds of scenarios in this very harness call S.newGame(seed) with one argument and rely on getting a polar world back — this is the one test that would catch a change to that default breaking all of them at once',
+      run() {
+        const plain = S.newGame(707);
+        const explicit = S.newGame(707, { class: 'polar', sunSlope: K.SUN_SLOPE });
+        const mare = S.newGame(707, { class: 'mare', sunSlope: 0.9 });
+        return [
+          ['no-argument newGame still carries the pole slope', plain.sunSlope, K.SUN_SLOPE],
+          ['matches an explicit polar call tile for tile', JSON.stringify(plain.map), JSON.stringify(explicit.map)],
+          ['a mare call actually produces different, flatter ground',
+            JSON.stringify(mare.map) === JSON.stringify(plain.map), false],
+          ['and carries the slope it was given', mare.sunSlope, 0.9]
+        ];
+      } },
+
+    { name: 'found() and migrateLegacy() write the generator version they are supposed to',
+      why: 'a founded site that was accidentally stamped gen 1 would silently ignore its own class and latitude forever; a migrated legacy site stamped anything OTHER than gen 1 would risk regenerating as different ground the moment GEN_VERSION next moves',
+      run() {
+        const savedSites = localStorage.getItem(ST.SITES_KEY);
+        const savedLegacy = localStorage.getItem(ST.LEGACY_KEY);
+        try {
+          localStorage.removeItem(ST.SITES_KEY);
+          const id = ST.found('Equatorial', 3, 12, 999);
+          const founded = ST.siteOf(id);
+
+          localStorage.removeItem(ST.SITES_KEY);
+          const legacy = S.newGame(31416);
+          localStorage.setItem(ST.LEGACY_KEY, JSON.stringify(legacy));
+          const migrated = ST.ensureStore();
+          const migRec = migrated.sites[migrated.activeId];
+
+          return [
+            ['a freshly founded site gets the current generator', founded.gen, ST.GEN_VERSION],
+            ['and the current generator is 2', ST.GEN_VERSION, 2],
+            ['founding at a near-equatorial latitude classes it mare', founded.class, 'mare'],
+            ['a migrated legacy site is always stamped gen 1, regardless of GEN_VERSION', migRec.gen, 1]
+          ];
+        } finally {
+          if (savedSites === null) localStorage.removeItem(ST.SITES_KEY); else localStorage.setItem(ST.SITES_KEY, savedSites);
+          if (savedLegacy === null) localStorage.removeItem(ST.LEGACY_KEY); else localStorage.setItem(ST.LEGACY_KEY, savedLegacy);
+        }
+      } },
+
+    /* ---------- v3 phase 4: the globe ---------- */
+
+    { name: 'The orthographic projection puts known points in known places',
+      why: 'this is the entire geometric contract the globe is built on — get the sub-observer point, the limb or the far-side cull wrong and every feature, city marker and click ever drawn on it is wrong in the same way',
+      run() {
+        const view = { lon: 20, lat: 10 };
+        const centre = GL.project(view.lat, view.lon, view);
+        const flat = { lon: 20, lat: 0 };
+        const limb = GL.project(0, flat.lon + 90, flat);
+        const beyond = GL.project(0, flat.lon + 91, flat);
+        const before = GL.project(0, flat.lon + 89, flat);
+        const antipode = GL.project(view.lat, view.lon + 180, view);
+        return [
+          ['the sub-observer point projects to the exact centre',
+            Math.hypot(centre.x, centre.y) < 1e-9, true],
+          ['and reads fully facing the camera (z = 1)', Math.abs(centre.z - 1) < 1e-9, true],
+          ['90 degrees away (equatorial) lands exactly on the limb', Math.abs(limb.z) < 1e-9, true],
+          ['at exactly unit radius', Math.abs(Math.hypot(limb.x, limb.y) - 1) < 1e-9, true],
+          ['91 degrees away is just past the limb and culled', beyond.visible, false],
+          ['89 degrees away is just short of it and visible', before.visible, true],
+          ['the antipode is on the far side and culled', antipode.visible, false]
+        ];
+      } },
+
+    { name: 'Rotating the camera moves what faces it, correctly on both axes',
+      why: 'yaw and pitch are two separate rotations composed together — a sign error on either one still produces something that LOOKS like a working globe (everything still projects somewhere on the disc), which is exactly why this needs a check against a known reference point rather than just eyeballing a render',
+      run() {
+        const pitched = GL.project(30, 0, { lon: 0, lat: 30 });
+        const yawed = GL.project(0, 45, { lon: 45, lat: 0 });
+        const north = GL.project(80, 0, { lon: 0, lat: 0 });
+        const south = GL.project(-80, 0, { lon: 0, lat: 0 });
+        return [
+          ['pitching the view up 30 brings that latitude to the centre',
+            Math.hypot(pitched.x, pitched.y) < 1e-9, true],
+          ['yawing to a longitude brings it to the centre the same way',
+            Math.hypot(yawed.x, yawed.y) < 1e-9, true],
+          ['from an equatorial view, high northern latitude sits above centre (screen y < 0)',
+            north.visible && north.y < 0, true],
+          ['and high southern latitude sits below it', south.visible && south.y > 0, true]
+        ];
+      } },
+
+    { name: 'project and unproject are exact inverses across the whole visible hemisphere',
+      why: 'unproject is what turns a click into a landing site — if it did not exactly invert project, a click could found a colony somewhere other than where the player actually pointed',
+      run() {
+        let mismatches = 0, checked = 0, nullMisses = 0;
+        for (const v of [{ lon: 0, lat: 0 }, { lon: 45, lat: 20 }, { lon: -70, lat: -40 }, { lon: 200, lat: 60 }, { lon: 10, lat: -85 }]) {
+          for (let lat = -80; lat <= 80; lat += 20) {
+            for (let lon = -170; lon <= 170; lon += 20) {
+              const p = GL.project(lat, lon, v);
+              if (!p.visible) continue;
+              checked++;
+              const back = GL.unproject(p.x, p.y, v);
+              if (!back) { nullMisses++; continue; }
+              const dlat = Math.abs(back.lat - lat);
+              const dlon = Math.abs(((back.lon - lon + 540) % 360) - 180);
+              if (dlat > 1e-6 || dlon > 1e-6) mismatches++;
+            }
+          }
+        }
+        return [
+          ['a real number of points were actually checked', checked, '>200'],
+          ['none of them failed to unproject', nullMisses, 0],
+          ['and none of them came back at the wrong coordinate', mismatches, 0],
+          ['a click outside the unit disc misses entirely', GL.unproject(1.01, 0, { lon: 0, lat: 0 }), null],
+          ['a click just inside it hits', GL.unproject(0.99, 0, { lon: 0, lat: 0 }) !== null, true]
+        ];
+      } },
+
+    { name: 'The terminator is a real place on the Moon, not a screen-space lighting trick',
+      why: 'if litness read the view instead of the sun, the day/night line would spin along with whatever way the player last dragged the camera — the whole point of tying it to sunAzimuth is that it does not',
+      run() {
+        const sunLon = 45;
+        const litSameSpot1 = GL.litness(10, 60, sunLon);
+        const litSameSpot2 = GL.litness(10, 60, sunLon);
+        return [
+          ['the sub-solar point itself reads fully lit', GL.litness(0, sunLon, sunLon), 1],
+          ['the antipodal point reads at the ambient floor', GL.litness(0, sunLon + 180, sunLon), 0.12],
+          ['90 degrees round is also at the floor — the terminator is a sharp-ish line',
+            GL.litness(0, sunLon + 90, sunLon), 0.12],
+          ['a point halfway between is meaningfully brighter than the floor and dimmer than full',
+            GL.litness(0, sunLon + 45, sunLon), '>0.5'],
+          ['lighting a given point does not depend on the camera at all — same result called twice',
+            litSameSpot1, litSameSpot2]
+        ];
+      } },
+
+    { name: 'The near side is patched with maria and the far side almost is not',
+      why: 'this is the single most recognisable fact about the real Moon, and it only comes out of the feature list for free if the coordinates are genuinely real ones rather than scattered evenly for visual balance',
+      run() {
+        const nearLon = f => Math.abs(((f.lon + 180) % 360 + 360) % 360 - 180) <= 90;
+        const maria = GL.FEATURES.filter(f => f.kind === 'mare' || f.kind === 'mareThin');
+        const nearSideMaria = maria.filter(f => nearLon(f)).length;
+        const farSideMaria = maria.length - nearSideMaria;
+        return [
+          ['the feature list actually has maria to place', maria.length, '>=10'],
+          ['most of them are on the traditional Earth-facing near side',
+            nearSideMaria > farSideMaria * 2, true],
+          ['but a couple of real far-side maria are still there',
+            GL.FEATURES.some(f => f.id === 'moscoviense') && GL.FEATURES.some(f => f.id === 'ingenii'), true],
+          ['and both poles carry their real named craters',
+            GL.FEATURES.some(f => f.id === 'shackleton') && GL.FEATURES.some(f => f.id === 'peary'), true],
+          ['Shackleton sits at the south pole, not just "polar-classed"',
+            GL.FEATURES.find(f => f.id === 'shackleton').lat < -85, true]
+        ];
+      } },
+
+    { name: 'Feature outlines are stable and stay roughly round near the poles',
+      why: 'the wobble is generated once from a hash of the feature, not reshuffled every call — and longitude lines bunch together near the poles on any sphere, which the outline generator has to compensate for or a high-latitude feature like Frigoris would render as a thin sliver instead of a rounded shape',
+      run() {
+        const f = GL.FEATURES.find(x => x.id === 'imbrium');
+        const a = GL.outlineOf(f), b = GL.outlineOf(f);
+        const polar = GL.FEATURES.find(x => x.id === 'frigoris');
+        const outline = GL.outlineOf(polar);
+        const lonSpread = Math.max(...outline.map(p => p[1])) - Math.min(...outline.map(p => p[1]));
+        const latSpread = Math.max(...outline.map(p => p[0])) - Math.min(...outline.map(p => p[0]));
+        return [
+          ['an outline is a real closed ring of points', a.length, '>=15'],
+          ['calling it again returns the identical outline (cached, not reshuffled)',
+            JSON.stringify(a), JSON.stringify(b)],
+          ['every point stays within a sane distance of the centre',
+            a.every(([lat, lon]) => Math.hypot(lat - f.lat, lon - f.lon) < f.r * 2.5), true],
+          ['a high-latitude feature\'s outline is not absurdly stretched in longitude',
+            lonSpread < latSpread * 6, true]
+        ];
+      } },
+
+    { name: 'toScreen scales and offsets consistently with project',
+      why: 'this is the last link in the chain from a (lat, lon) to an actual canvas pixel — get the axis order or the radius wrong here and every feature and marker is drawn in the wrong place even though project() itself is correct',
+      run() {
+        const view = { lon: 0, lat: 0 };
+        const centre = GL.toScreen(GL.project(0, 0, view), 100, 100, 50);
+        const limb = GL.toScreen(GL.project(0, 90, view), 100, 100, 50);
+        return [
+          ['the sub-observer point lands exactly on the given centre', [centre.x, centre.y].join(','), '100,100'],
+          ['a limb point lands exactly one radius away from centre',
+            Math.abs(Math.hypot(limb.x - 100, limb.y - 100) - 50) < 1e-6, true]
+        ];
+      } },
+
+    /* ---------- v3 phase 5: the colonies list ---------- */
+
+    { name: 'list() carries what the Colonies panel needs without a full decode',
+      why: 'showing twenty founded colonies must not mean regenerating twenty 16,384-tile maps just to say what era and population each one reached — peakPop and research have to come along for free from the same meta object that already carries day and pop',
+      run() {
+        const savedSites = localStorage.getItem(ST.SITES_KEY);
+        try {
+          localStorage.removeItem(ST.SITES_KEY);
+          const id = ST.found('Era Test', -85, 0, 5050);
+          const s2 = ST.load(id);
+          s2.peakPop = 300; s2.research = 800; s2.pop = 250; s2.credits = 12345;
+          ST.save(id, s2);
+
+          const row = ST.list().find(r => r.id === id);
+          const era = E.index({ peakPop: row.peakPop, research: row.research });
+          return [
+            ['the row carries peakPop', row.peakPop, 300],
+            ['and research', row.research, 800],
+            ['and credits', row.credits, 12345],
+            ['and pop, unchanged from before this phase', row.pop, 250],
+            ['which is enough to compute a real era client-side',
+              E.ERAS[era].name, E.ERAS[era].name],
+            ['and that era is not the starting one, since the thresholds were cleared',
+              era, '>0']
+          ];
+        } finally {
+          if (savedSites === null) localStorage.removeItem(ST.SITES_KEY); else localStorage.setItem(ST.SITES_KEY, savedSites);
+        }
+      } },
+
+    { name: 'A freshly founded site reports as day one, population zero, Outpost era',
+      why: 'this is what every row in an otherwise-empty Colonies list looks like — if the summary fields were ever mis-copied from the wrong place, a brand new colony is the case most likely to expose it, since there is nothing else non-zero to mask the mistake',
+      run() {
+        const savedSites = localStorage.getItem(ST.SITES_KEY);
+        try {
+          localStorage.removeItem(ST.SITES_KEY);
+          const id = ST.found('Blank Slate', 40, 40, 6060);
+          const row = ST.list().find(r => r.id === id);
+          const era = E.index({ peakPop: row.peakPop, research: row.research });
+          return [
+            ['day one', row.day, 1],
+            ['population zero', row.pop, 0],
+            ['no research banked yet', row.research, 0],
+            ['and the starting era', E.ERAS[era].id, 'outpost']
+          ];
+        } finally {
+          if (savedSites === null) localStorage.removeItem(ST.SITES_KEY); else localStorage.setItem(ST.SITES_KEY, savedSites);
+        }
       } }
   ];
+
 
   /* ---------- runner ---------- */
 

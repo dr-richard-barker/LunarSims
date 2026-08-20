@@ -11,8 +11,11 @@
   const Z = window.LM_ZONES, S = window.LM_SIM, R = window.LM_RENDER, B = window.LM_BUDGET;
   const E = window.LM_ERAS;
   const K = D.K;
-  const SAVE_KEY = 'lunar-metropolis.save.v2';
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  /* Which site the running city belongs to. Set by load() at startup and
+     kept current by every save() — see sites.js for the format a city is
+     actually stored in. */
+  let activeSiteId = null;
 
   let s = load() || S.newGame();
   const ui = {
@@ -37,6 +40,7 @@
        where the traffic layer is told its cached street graph is stale —
        cheaper than having agents.js hash 16,384 tiles to work it out. */
     if (window.LM_AGENTS) window.LM_AGENTS.invalidate();
+    if (window.LM_MINIMAP) window.LM_MINIMAP.invalidate();
   }
 
   /* ---------- canvas ---------- */
@@ -283,6 +287,16 @@
   }, { passive: false });
 
   window.addEventListener('keydown', e => {
+    /* Handled before the tool lookup, and gated on Shift, because every
+       single letter A-Z is already a tool's hotkey (see TOOLS in data.js) —
+       there was no free key left for either pop-up. Shift+<letter> never
+       collides: e.key is the same letter either way, but the tool lookup
+       below only ever runs when neither of these matched first. Escape
+       always closes whichever one is open, unshifted, since nothing else
+       claims it. */
+    if (e.key === 'Escape') { openMap(false); openGlobe(false); return; }
+    if (e.shiftKey && (e.key === 'm' || e.key === 'M')) { openMap(mapModal.hidden); return; }
+    if (e.shiftKey && (e.key === 'g' || e.key === 'G')) { openGlobe(globeModal.hidden); return; }
     const t = D.TOOLS.find(x => x.key.toLowerCase() === e.key.toLowerCase());
     if (t) { ui.tool = t.id; ui.levelTarget = null; buildPalette(); setHint(); }
   });
@@ -522,11 +536,74 @@
       </div>`;
   }
 
+  /* ---------- colonies ----------
+
+     Every founded site, however many days old its own city is — and every
+     one of those days is genuinely different, because away colonies are
+     frozen exactly where they were left rather than simulated in the
+     background. The "total population" figure below is therefore a sum of
+     snapshots taken at different moments, not a single lunar-wide instant —
+     said plainly in the panel itself rather than implied by a number that
+     looks more authoritative than it is. */
+  function buildColonies() {
+    const el = document.getElementById('pane-colonies');
+    const SITES = window.LM_SITES;
+    if (!SITES) { el.innerHTML = '<p class="note">Colonies are not available.</p>'; return; }
+    const list = SITES.list();
+    const eraName = r => E ? E.current({ peakPop: r.peakPop, research: r.research }).name : '—';
+    const classLabel = { polar: 'Polar', mare: 'Mare', highland: 'Highland' };
+
+    const totalPop = list.reduce((a, r) => a + r.pop, 0);
+    const totalResearch = Math.round(list.reduce((a, r) => a + r.research, 0));
+
+    const rows = list.map(r => `
+      <tr class="${r.id === activeSiteId ? 'lmine' : ''}" data-id="${r.id}" style="cursor:pointer">
+        <td>${r.name}${r.id === activeSiteId ? ' <span class="lscore">●</span>' : ''}</td>
+        <td class="ldim">${classLabel[r.class] || r.class}</td>
+        <td class="ldim">${r.lat >= 0 ? r.lat.toFixed(1) + 'N' : (-r.lat).toFixed(1) + 'S'},
+          ${r.lon >= 0 ? r.lon.toFixed(1) + 'E' : (-r.lon).toFixed(1) + 'W'}</td>
+        <td>${eraName(r)}</td>
+        <td>${r.pop.toLocaleString()}</td>
+        <td class="ldim">day ${r.day.toLocaleString()}</td>
+      </tr>`).join('');
+
+    el.innerHTML = `
+      <h3 class="sec">Every colony you have founded</h3>
+      <p class="note">Click a row to switch to that colony — whatever you are running now saves
+        first and stays exactly as you left it. ${list.length} founded so far.</p>
+      <div class="ltablewrap">
+        <table class="ltable">
+          <thead><tr><th>Colony</th><th>Terrain</th><th>Site</th><th>Era</th><th>Pop</th><th>Age</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      <p class="lfoot">
+        ${list.length} ${list.length === 1 ? 'colony' : 'colonies'} · ${totalPop.toLocaleString()} people across all of them ·
+        ${totalResearch.toLocaleString()} research banked between them.<br>
+        Every figure above is a snapshot from whatever day that colony was last left on, not one
+        shared instant — away colonies are frozen, not simulated in the background, so "total
+        population" is a sum of moments rather than a census.
+      </p>
+      <div class="modes" style="justify-content:flex-start;margin-top:10px">
+        <button class="mode" id="coloniesToGlobe">🌐 Open the globe</button>
+      </div>`;
+
+    el.querySelectorAll('tr[data-id]').forEach(tr => tr.onclick = () => {
+      const id = tr.dataset.id;
+      if (id === activeSiteId) { toast('That is the colony you are already in.'); return; }
+      switchTo(id);
+      document.querySelector('.tab[data-tab="colonies"]').click();
+    });
+    const toGlobe = document.getElementById('coloniesToGlobe');
+    if (toGlobe) toGlobe.onclick = () => openGlobe(true);
+  }
+
   document.querySelectorAll('.tab').forEach(t => t.onclick = () => {
     document.querySelectorAll('.tab').forEach(x => x.classList.toggle('on', x === t));
     document.querySelectorAll('.tabpane').forEach(p => p.classList.toggle('on', p.id === 'pane-' + t.dataset.tab));
     if (t.dataset.tab === 'budget') buildBudget();
     if (t.dataset.tab === 'trends') buildTrends();
+    if (t.dataset.tab === 'colonies') buildColonies();
   });
 
   document.querySelectorAll('#viewBar button').forEach(b => b.onclick = () => {
@@ -537,6 +614,225 @@
     ui.speed = +b.dataset.speed;
     document.querySelectorAll('.sp').forEach(x => x.classList.toggle('on', x === b));
   });
+
+  /* ---------- minimap ----------
+
+     Two canvases, one renderer. The corner map is always up; the pop-up is
+     the same picture at three times the size, which is the one you actually
+     navigate a 128-tile map with. Both accept a click or a drag and put the
+     camera where you pointed. */
+
+  const mini = document.getElementById('mini');
+  const miniBig = document.getElementById('miniBig');
+  const mapModal = document.getElementById('mapModal');
+
+  function drawMinimaps() {
+    const M = window.LM_MINIMAP;
+    if (!M) return;
+    M.draw(mini, s, ui, R, cssW, cssH);
+    if (!mapModal.hidden) M.draw(miniBig, s, ui, R, cssW, cssH);
+  }
+
+  /* Jumping the camera has to account for elevation the same way __lm.look
+     does — centreOn works on a tile's flat footprint, and on high ground that
+     puts the thing you aimed at well above the middle of the screen. */
+  function jumpTo(tx, ty) {
+    centreOn(tx, ty);
+    const t = T.tileAt(s, Math.round(tx), Math.round(ty));
+    if (t) ui.cam.y += t.h * K.LEVEL_PX * ui.cam.z;
+  }
+
+  function wireMinimap(cv2) {
+    let down = false;
+    const go = e => {
+      const p = window.LM_MINIMAP.tileAtPoint(cv2, e.clientX, e.clientY);
+      jumpTo(p.x + 0.5, p.y + 0.5);
+      drawMinimaps();
+    };
+    cv2.addEventListener('pointerdown', e => {
+      down = true;
+      try { cv2.setPointerCapture(e.pointerId); } catch (err) {}
+      go(e);
+      e.stopPropagation();
+    });
+    cv2.addEventListener('pointermove', e => { if (down) go(e); });
+    cv2.addEventListener('pointerup', () => { down = false; });
+    cv2.addEventListener('pointerleave', () => { down = false; });
+    /* the corner map sits over the main canvas — without this, scrolling on
+       it would zoom the city underneath */
+    cv2.addEventListener('wheel', e => e.stopPropagation());
+  }
+  wireMinimap(mini);
+  wireMinimap(miniBig);
+
+  function openMap(open) {
+    mapModal.hidden = !open;
+    if (open) drawMinimaps();
+  }
+  document.getElementById('mapClose').onclick = () => openMap(false);
+  document.getElementById('mapDone').onclick = () => openMap(false);
+  mapModal.addEventListener('click', e => { if (e.target === mapModal) openMap(false); });
+
+  /* ---------- the globe ----------
+
+     The whole Moon, in the same kind of pop-up the minimap uses. Unlike the
+     minimap, which mirrors state the main canvas already owns, the globe
+     has camera state of its own — which way it is currently rotated — that
+     has no other home, so it lives here as plain module state rather than
+     on ui.cam. */
+
+  const GL = window.LM_GLOBE;
+  const globeCanvas = document.getElementById('globeCanvas');
+  const globeModal = document.getElementById('globeModal');
+  const globeFoundBox = document.getElementById('globeFound');
+  const globeLede = document.getElementById('globeLede');
+
+  let globeView = { lon: 0, lat: 12 };
+  let globePending = null;      // { lat, lon } while the found-colony card is open
+
+  function globeGeom() {
+    const w = globeCanvas.width, h = globeCanvas.height;
+    return { cx: w / 2, cy: h / 2, R: Math.min(w, h) / 2 - 6 };
+  }
+
+  function drawGlobe() {
+    if (!GL || globeModal.hidden) return;
+    const { cx, cy, R: rad } = globeGeom();
+    const gctx = globeCanvas.getContext('2d');
+    gctx.clearRect(0, 0, globeCanvas.width, globeCanvas.height);
+    const sunLon = (R.sunAzimuth ? R.sunAzimuth(s) : 0) * 180 / Math.PI;
+    const sites = window.LM_SITES ? window.LM_SITES.list() : [];
+    GL.draw(gctx, { view: globeView, sunLon, sites, activeId: activeSiteId, cx, cy, R: rad });
+
+    /* the pending landing marker, if the found-colony card is open — drawn
+       after GL.draw() so it always shows on top */
+    if (globePending) {
+      const p = GL.project(globePending.lat, globePending.lon, globeView);
+      if (p.visible) {
+        const q = GL.toScreen(p, cx, cy, rad);
+        gctx.strokeStyle = '#ff9f6e'; gctx.lineWidth = 2;
+        gctx.beginPath(); gctx.arc(q.x, q.y, 7, 0, Math.PI * 2); gctx.stroke();
+        gctx.beginPath();
+        gctx.moveTo(q.x - 11, q.y); gctx.lineTo(q.x + 11, q.y);
+        gctx.moveTo(q.x, q.y - 11); gctx.lineTo(q.x, q.y + 11);
+        gctx.stroke();
+      }
+    }
+  }
+
+  /* Renders the found-a-colony card for wherever was just clicked — the
+     site's latitude, the class that latitude implies (see LM_SITES.classify,
+     the exact function a real founding will use), and what that class means
+     for the player about to land there. */
+  function renderGlobeFound() {
+    if (!globePending || !window.LM_SITES) { globeFoundBox.hidden = true; return; }
+    const { lat, lon } = globePending;
+    const cls = window.LM_SITES.classify(lat);
+    const blurb = {
+      polar: 'Low sun, permanent shadow in the deep craters, peaks of eternal light on the rims. The power-vs-ice trade-off this game was built around.',
+      mare: 'Flat, dark, lightly cratered. Sun is abundant almost everywhere and permanent shadow is rare — solar siting barely matters here, but so does the ice that shadow would have held.',
+      highland: 'Rough and heavily cratered, the highest relief of the three. Enough height almost anywhere to site a heliostat crown.'
+    }[cls];
+    globeFoundBox.hidden = false;
+    globeFoundBox.innerHTML = `
+      <div class="rows" style="margin:10px 0">
+        <div class="row"><span class="k">Latitude</span><span class="v">${lat.toFixed(1)}°${lat >= 0 ? 'N' : 'S'}</span></div>
+        <div class="row"><span class="k">Terrain</span><span class="v good">${cls[0].toUpperCase()}${cls.slice(1)}</span></div>
+      </div>
+      <p class="note">${blurb}</p>
+      <div class="modes" style="justify-content:flex-start;gap:6px;margin:6px 0 4px">
+        <button id="globeFoundYes" class="mode">Found a colony here</button>
+        <button id="globeFoundNo" class="mode">Cancel</button>
+      </div>`;
+    globeFoundBox.querySelector('#globeFoundYes').onclick = () => {
+      const n = window.LM_SITES.list().length + 1;
+      const id = foundAndEnter(`Colony ${n}`, +lat.toFixed(2), +lon.toFixed(2));
+      globePending = null;
+      openGlobe(false);
+      toast(`Founded at ${lat.toFixed(1)}°${lat >= 0 ? 'N' : 'S'} — welcome to ${window.LM_SITES.siteOf(id).name}.`);
+    };
+    globeFoundBox.querySelector('#globeFoundNo').onclick = () => { globePending = null; renderGlobeFound(); drawGlobe(); };
+  }
+
+  /* Drag to rotate; a short drag (or none at all) is treated as a click
+     instead, the same "did this move" threshold the main canvas uses for
+     terrain tools. A click either hits an existing city marker — switching
+     to it — or, over open ground, opens the found-colony card. */
+  (() => {
+    let down = false, dragged = false, last = null;
+    const SENS = 0.35;
+
+    globeCanvas.addEventListener('pointerdown', e => {
+      down = true; dragged = false;
+      last = { x: e.clientX, y: e.clientY };
+      try { globeCanvas.setPointerCapture(e.pointerId); } catch (err) {}
+      globeCanvas.style.cursor = 'grabbing';
+    });
+    globeCanvas.addEventListener('pointermove', e => {
+      if (!down) return;
+      const dx = e.clientX - last.x, dy = e.clientY - last.y;
+      if (Math.hypot(dx, dy) > 3) dragged = true;
+      if (dragged) {
+        globeView = {
+          lon: globeView.lon - dx * SENS,
+          lat: Math.max(-89, Math.min(89, globeView.lat + dy * SENS))
+        };
+        last = { x: e.clientX, y: e.clientY };
+        drawGlobe();
+      }
+    });
+    globeCanvas.addEventListener('pointerup', e => {
+      down = false;
+      globeCanvas.style.cursor = 'grab';
+      if (dragged) return;
+
+      const r = globeCanvas.getBoundingClientRect();
+      const { cx, cy, R: rad } = globeGeom();
+      /* the canvas element's CSS size and its pixel-coordinate size can
+         differ (it is styled to shrink on small screens) — scale the click
+         into the same pixel space GL.draw() actually drew into */
+      const px = (e.clientX - r.left) / r.width * globeCanvas.width;
+      const py = (e.clientY - r.top) / r.height * globeCanvas.height;
+
+      const sites = window.LM_SITES ? window.LM_SITES.list() : [];
+      let hitId = null, hitD = 12;
+      for (const site of sites) {
+        const p = GL.project(site.lat, site.lon, globeView);
+        if (!p.visible) continue;
+        const q = GL.toScreen(p, cx, cy, rad);
+        const d = Math.hypot(q.x - px, q.y - py);
+        if (d < hitD) { hitD = d; hitId = site.id; }
+      }
+      if (hitId) {
+        if (hitId === activeSiteId) { toast('That is the colony you are already in.'); return; }
+        globePending = null; renderGlobeFound();
+        switchTo(hitId);
+        openGlobe(false);
+        return;
+      }
+
+      const nx = (px - cx) / rad, ny = (py - cy) / rad;
+      const hit = GL.unproject(nx, ny, globeView);
+      globePending = hit;
+      renderGlobeFound();
+      drawGlobe();
+    });
+  })();
+
+  function openGlobe(open) {
+    globeModal.hidden = !open;
+    if (!open) { globePending = null; renderGlobeFound(); return; }
+    /* Centre the view on the active colony's own site, if it has one, so
+       opening the globe orients you on where you already are rather than
+       wherever the camera happened to be left last time. */
+    const active = window.LM_SITES ? window.LM_SITES.siteOf(activeSiteId) : null;
+    if (active) globeView = { lon: active.lon, lat: Math.max(-70, Math.min(70, active.lat)) };
+    drawGlobe();
+  }
+  document.getElementById('btnGlobe').onclick = () => openGlobe(globeModal.hidden);
+  document.getElementById('globeClose').onclick = () => openGlobe(false);
+  document.getElementById('globeDone').onclick = () => openGlobe(false);
+  globeModal.addEventListener('click', e => { if (e.target === globeModal) openGlobe(false); });
 
   /* ---------- modes ---------- */
 
@@ -655,18 +951,52 @@
       `<p class="note"><b style="font-family:var(--mono)">Day ${e.day}</b> — ${e.msg}</p>`).join('');
   }
 
-  document.getElementById('btnNew').onclick = () => {
-    if (!confirm('Start a new colony on fresh terrain? This clears the current city.')) return;
-    /* The three mode switches are a statement about how the player wants to
-       play, not part of the city — carry them across a new map rather than
-       making them set them again. */
-    const modes = { sandbox: s.sandbox, disastersOn: s.disastersOn, autoPlay: s.autoPlay };
-    s = Object.assign(S.newGame(), modes);
+  /* ---------- switching cities ----------
+
+     Three small entry points sharing one tail. `enterCity` is the whole
+     "leave one city, arrive in another" sequence: freeze whatever is
+     running now exactly where it is (the same "away cities are frozen"
+     rule every site follows), then reset every piece of UI state that is
+     about the OLD city rather than about the game in general.
+
+     switchTo() resumes an existing site exactly as it was saved — including
+     its own mode switches, untouched, because arriving in a city that had
+     Auto-play off should not silently turn it on just because the city you
+     left had it on. foundAndEnter() is the opposite case: a brand new city
+     has no settings of its own yet, so it inherits how you have been
+     playing, the same way "New Colony" always has. */
+  function enterCity(id, newState) {
+    save();
+    activeSiteId = id;
+    s = newState;
     ui.selected = null; ui.levelTarget = null;
     if (window.LM_AGENTS) window.LM_AGENTS.reset();
     centreOn(K.COLS / 2, K.ROWS / 2);
     refreshNets(); buildPalette(); renderTile(); renderHUD(); renderLog();
     renderOffer(); markModes(); setHint(); save();
+  }
+  function switchTo(id) {
+    const loaded = window.LM_SITES.load(id);
+    if (!loaded) return false;
+    enterCity(id, loaded);
+    return true;
+  }
+  function foundAndEnter(name, lat, lon) {
+    const modes = { sandbox: s.sandbox, disastersOn: s.disastersOn, autoPlay: s.autoPlay };
+    const id = window.LM_SITES.found(name, lat, lon);
+    enterCity(id, Object.assign(window.LM_SITES.load(id), modes));
+    return id;
+  }
+
+  document.getElementById('btnNew').onclick = () => {
+    if (!confirm('Found a new colony on fresh terrain? This one stays exactly as you leave it — nothing is lost.')) return;
+    /* The old city is not cleared, only left. It stays frozen at whatever
+       day you leave it on, retrievable once a way to switch back exists
+       (the Colonies list, later in this v3 arc) — the same "away cities are
+       frozen" rule the globe applies to every site. Still landed at the
+       default pole until the globe's own founding flow replaces this. */
+    const n = window.LM_SITES.list().length + 1;
+    foundAndEnter(`Colony ${n}`, -85, 0);
   };
   /* Centres on the city rather than on the map. The two are only the same
      thing on day one — a player settles wherever the terrain suited them, and
@@ -698,15 +1028,33 @@
 
   /* ---------- save ---------- */
 
-  function save() { try { localStorage.setItem(SAVE_KEY, JSON.stringify(s)); } catch (e) {} }
+  function save() {
+    if (!activeSiteId || !window.LM_SITES) return;
+    window.LM_SITES.save(activeSiteId, s);
+  }
+
+  /* Resumes whichever site was last active — including a legacy single-city
+     save, which LM_SITES migrates in as "Colony One" the first time its
+     store is touched, before this ever runs. If there is truly nothing to
+     resume (a fresh browser), founds a first colony rather than leaving the
+     game with nowhere to save to. */
   function load() {
-    try {
-      const raw = localStorage.getItem(SAVE_KEY);
-      if (!raw) return null;
-      const o = JSON.parse(raw);
-      if (o.version !== S.STATE_VERSION || !o.map || o.map.length !== K.COLS * K.ROWS) return null;
-      return o;
-    } catch (e) { return null; }
+    const SITES = window.LM_SITES;
+    if (!SITES) return null;
+    activeSiteId = SITES.activeId();
+    let loaded = activeSiteId ? SITES.load(activeSiteId) : null;
+    if (!loaded) {
+      /* found() does not itself make a site active — a later multi-city UI
+         may found one without switching to it. Here it is the only site
+         there is, so mark it active immediately: otherwise a session that
+         closes before the first autosave would leave the store's activeId
+         still null, and the very next load would found a second "Colony
+         One" rather than resuming this one. */
+      activeSiteId = SITES.found('Colony One', -85, 0);
+      SITES.setActive(activeSiteId);
+      loaded = SITES.load(activeSiteId);
+    }
+    return loaded;
   }
 
   /* ---------- loop ---------- */
@@ -741,10 +1089,12 @@
         if (n !== lastLogLen) { lastLogLen = n; renderLog(); renderOffer(); }
         const era = E ? E.index(s) : 0;
         if (era !== lastEra) { lastEra = era; buildPalette(); }
-        /* Trends is a full rebuild, so it only redraws while it is the pane
-           actually on screen. */
+        /* Trends and Colonies are both full rebuilds, so each only redraws
+           while it is the pane actually on screen. */
         const trends = document.getElementById('pane-trends');
         if (trends && trends.classList.contains('on')) buildTrends();
+        const colonies = document.getElementById('pane-colonies');
+        if (colonies && colonies.classList.contains('on')) buildColonies();
       }
     }
     /* Set pieces retire themselves on their own clock, which keeps running
@@ -762,7 +1112,7 @@
     /* Guarded for the same reason the tick is: an exception thrown out of a
        single frame would otherwise stop requestAnimationFrame for good and
        leave a black canvas with no way back short of a reload. */
-    try { R.draw(ctx, s, ui); }
+    try { R.draw(ctx, s, ui); drawMinimaps(); drawGlobe(); }
     catch (e) { if (!drawFailed) { drawFailed = true; console.error('draw failed', e); } }
     /* A full save is well over a megabyte of JSON on a 128x128 map, so it is
        throttled and only written when something actually changed. Saving on
