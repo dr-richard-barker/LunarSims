@@ -277,6 +277,39 @@
     return writeStore(store);
   }
 
+  /* True only for a site nobody has actually played yet: day one, no edits.
+     What "founded but not lived in" means, and the one condition relocate()
+     is allowed to act on. */
+  function isUntouched(id) {
+    const r = ensureStore().sites[id];
+    if (!r || !r.snapshot) return false;
+    return r.snapshot.meta.day === 1 && r.snapshot.edits.length === 0;
+  }
+
+  /* Moves a site to a different landing spot IN PLACE — same id, fresh
+     terrain at the new coordinates. Deliberately narrow: refuses anything
+     that is not isUntouched(), because relocating a city with real
+     buildings on it is not a coherent operation and nothing in the game
+     asks for that. This exists for exactly one caller — the first-boot
+     flow, which silently founds a default colony so the rest of the UI
+     always has something valid to render, then immediately offers the
+     globe to pick somewhere else. Without this, declining the default spot
+     would leave that auto-created colony behind as a dead, empty stub
+     cluttering the Colonies list forever. */
+  function relocate(id, lat, lon, seed) {
+    if (!isUntouched(id)) return false;
+    const store = ensureStore();
+    const rec = store.sites[id];
+    const site = {
+      id, name: rec.name, lat, lon, class: classify(lat),
+      seed: seed === undefined ? Math.floor(Math.random() * 999999) : seed,
+      gen: GEN_VERSION, founded: rec.founded
+    };
+    const s = window.LM_SIM.newGame(site.seed, { class: site.class, sunSlope: slopeFor(site.lat) });
+    store.sites[id] = Object.assign({}, site, { snapshot: encode(s, site) });
+    return writeStore(store);
+  }
+
   function siteOf(id) {
     const r = ensureStore().sites[id];
     if (!r) return null;
@@ -291,7 +324,7 @@
 
   window.LM_SITES = {
     encode, decode, classify, slopeFor, baseFor,
-    list, load, save, found, setActive, activeId, siteOf, sizeOf,
+    list, load, save, found, relocate, isUntouched, setActive, activeId, siteOf, sizeOf,
     /* exposed for the harness, and for the migration path in ui.js */
     migrateLegacy, ensureStore, GEN_VERSION, SITES_KEY, LEGACY_KEY
   };

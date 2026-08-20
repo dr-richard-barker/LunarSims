@@ -2724,6 +2724,104 @@ td.mark{width:34px;text-align:center}
         } finally {
           if (savedSites === null) localStorage.removeItem(ST.SITES_KEY); else localStorage.setItem(ST.SITES_KEY, savedSites);
         }
+      } },
+
+    /* ---------- v4 phase 1: founding from the globe ---------- */
+
+    { name: 'isUntouched() is true only for a real day-one, zero-edit site',
+      why: 'this is the entire safety rail relocate() is built on — get it wrong in the permissive direction and a lived-in city could be silently regenerated into different terrain',
+      run() {
+        const savedSites = localStorage.getItem(ST.SITES_KEY);
+        try {
+          localStorage.removeItem(ST.SITES_KEY);
+          const fresh = ST.found('Fresh', -85, 0, 111);
+          const untouchedAtFounding = ST.isUntouched(fresh);
+
+          const built = ST.found('Built', -85, 0, 222);
+          const b1 = ST.load(built);
+          T.raise(b1, 64, 64);
+          ST.save(built, b1);
+          const untouchedAfterEdit = ST.isUntouched(built);
+
+          const aged = ST.found('Aged', -85, 0, 333);
+          const a1 = ST.load(aged);
+          for (let i = 0; i < 5; i++) S.tick(a1);   // no edits, but no longer day one
+          ST.save(aged, a1);
+          const untouchedAfterDaysAlone = ST.isUntouched(aged);
+
+          return [
+            ['a freshly founded site is untouched', untouchedAtFounding, true],
+            ['a single terrain edit ends that', untouchedAfterEdit, false],
+            ['so does time alone, with no edits at all', untouchedAfterDaysAlone, false],
+            ['an unknown id is never untouched', ST.isUntouched('not-a-real-id'), false]
+          ];
+        } finally {
+          if (savedSites === null) localStorage.removeItem(ST.SITES_KEY); else localStorage.setItem(ST.SITES_KEY, savedSites);
+        }
+      } },
+
+    { name: 'relocate() moves an untouched site in place and refuses a lived-in one',
+      why: 'this is what stops declining the default landing spot from leaving a dead stub behind forever, and what stops it from ever being pointed at a city that already has something built on it',
+      run() {
+        const savedSites = localStorage.getItem(ST.SITES_KEY);
+        try {
+          localStorage.removeItem(ST.SITES_KEY);
+          const id = ST.found('Default', -85, 0, 42);
+          const before = ST.siteOf(id);
+
+          const moved = ST.relocate(id, 10, 60, 999);
+          const after = ST.siteOf(id);
+          const decoded = ST.load(id);
+
+          const stillOneSite = ST.list().length;
+
+          /* now build something and confirm a second relocate is refused */
+          const s2 = ST.load(id);
+          S.place(s2, T.tileAt(s2, 60, 60), 'solar');
+          ST.save(id, s2);
+          const refused = ST.relocate(id, -40, -40, 1234);
+          const unchanged = ST.siteOf(id);
+
+          return [
+            ['the relocate succeeded on an untouched site', moved, true],
+            ['the id did not change', after.id, before.id],
+            ['but the coordinates did', after.lat + ',' + after.lon, '10,60'],
+            ['and the class was recomputed for the new latitude', after.class, 'mare'],
+            ['the seed changed too, since a new spot means new terrain', after.seed !== before.seed, true],
+            ['decoding it now returns a fresh, untouched city at the new spot',
+              decoded.day + ',' + decoded.pop, '1,0'],
+            ['no second site was created — this is still one colony', stillOneSite, 1],
+            ['relocating a site with something built on it is refused', refused, false],
+            ['and it is left completely unchanged', unchanged.lat + ',' + unchanged.lon, '10,60']
+          ];
+        } finally {
+          if (savedSites === null) localStorage.removeItem(ST.SITES_KEY); else localStorage.setItem(ST.SITES_KEY, savedSites);
+        }
+      } },
+
+    { name: 'relocate() only ever touches the site it is given',
+      why: 'a founding flow that is about to run once per new player had better not have any blast radius on colonies that have nothing to do with it',
+      run() {
+        const savedSites = localStorage.getItem(ST.SITES_KEY);
+        try {
+          localStorage.removeItem(ST.SITES_KEY);
+          const keep = ST.found('Keep', -85, 0, 1);
+          const s1 = ST.load(keep);
+          for (let i = 0; i < 20; i++) S.tick(s1);
+          ST.save(keep, s1);
+          const before = ST.list().find(r => r.id === keep);
+
+          const other = ST.found('Other', 0, 0, 2);
+          ST.relocate(other, 45, 45, 3);
+
+          const after = ST.list().find(r => r.id === keep);
+          return [
+            ['the untouched-elsewhere colony is completely unaffected',
+              JSON.stringify(before), JSON.stringify(after)]
+          ];
+        } finally {
+          if (savedSites === null) localStorage.removeItem(ST.SITES_KEY); else localStorage.setItem(ST.SITES_KEY, savedSites);
+        }
       } }
   ];
 

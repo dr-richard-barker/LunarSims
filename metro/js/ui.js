@@ -16,6 +16,12 @@
      kept current by every save() — see sites.js for the format a city is
      actually stored in. */
   let activeSiteId = null;
+  /* True for exactly one thing: a brand-new player who has never founded
+     anywhere. load() sets this when it had to silently create a default
+     colony just so the rest of the UI has something valid to render before
+     the globe ever opens — see load() and the globe's found-panel confirm
+     handler, which is the only other place that reads or clears it. */
+  let firstLanding = false;
 
   let s = load() || S.newGame();
   const ui = {
@@ -686,6 +692,9 @@
   const globeModal = document.getElementById('globeModal');
   const globeFoundBox = document.getElementById('globeFound');
   const globeLede = document.getElementById('globeLede');
+  const globeLedeDefault = globeLede ? globeLede.textContent : '';
+  const globeLedeFirstLanding = 'This is the Moon. Drag to rotate, then click anywhere to choose ' +
+    'where your first colony lands — the terrain and the sun both depend on it.';
 
   let globeView = { lon: 0, lat: 12 };
   let globePending = null;      // { lat, lon } while the found-colony card is open
@@ -745,8 +754,23 @@
         <button id="globeFoundNo" class="mode">Cancel</button>
       </div>`;
     globeFoundBox.querySelector('#globeFoundYes').onclick = () => {
+      const latR = +lat.toFixed(2), lonR = +lon.toFixed(2);
+      /* First landing relocates the silent default site in place rather
+         than founding a second one — see LM_SITES.relocate()'s own doc
+         comment for why: declining the pole would otherwise leave that
+         auto-created stub behind forever, day one and empty, cluttering
+         the Colonies list with a city nobody ever meant to keep. */
+      if (firstLanding) {
+        window.LM_SITES.relocate(activeSiteId, latR, lonR);
+        firstLanding = false;
+        enterCity(activeSiteId, window.LM_SITES.load(activeSiteId));
+        globePending = null;
+        openGlobe(false);
+        toast(`Landed at ${lat.toFixed(1)}°${lat >= 0 ? 'N' : 'S'} — welcome to ${window.LM_SITES.siteOf(activeSiteId).name}.`);
+        return;
+      }
       const n = window.LM_SITES.list().length + 1;
-      const id = foundAndEnter(`Colony ${n}`, +lat.toFixed(2), +lon.toFixed(2));
+      const id = foundAndEnter(`Colony ${n}`, latR, lonR);
       globePending = null;
       openGlobe(false);
       toast(`Founded at ${lat.toFixed(1)}°${lat >= 0 ? 'N' : 'S'} — welcome to ${window.LM_SITES.siteOf(id).name}.`);
@@ -821,7 +845,18 @@
 
   function openGlobe(open) {
     globeModal.hidden = !open;
-    if (!open) { globePending = null; renderGlobeFound(); return; }
+    if (!open) {
+      globePending = null; renderGlobeFound();
+      /* Closing without picking anywhere else on a first landing means
+         keeping the default site — it is already a fully valid colony, so
+         there is nothing left to do but stop treating it as pending. A
+         later "New Colony" then correctly founds a genuinely new one
+         instead of relocating this one out from under whatever got built
+         on it since. */
+      firstLanding = false;
+      return;
+    }
+    if (globeLede) globeLede.textContent = firstLanding ? globeLedeFirstLanding : globeLedeDefault;
     /* Centre the view on the active colony's own site, if it has one, so
        opening the globe orients you on where you already are rather than
        wherever the camera happened to be left last time. */
@@ -988,16 +1023,12 @@
     return id;
   }
 
-  document.getElementById('btnNew').onclick = () => {
-    if (!confirm('Found a new colony on fresh terrain? This one stays exactly as you leave it — nothing is lost.')) return;
-    /* The old city is not cleared, only left. It stays frozen at whatever
-       day you leave it on, retrievable once a way to switch back exists
-       (the Colonies list, later in this v3 arc) — the same "away cities are
-       frozen" rule the globe applies to every site. Still landed at the
-       default pole until the globe's own founding flow replaces this. */
-    const n = window.LM_SITES.list().length + 1;
-    foundAndEnter(`Colony ${n}`, -85, 0);
-  };
+  /* Founding now always goes through the globe — "pick a spot" is the one
+     way a new colony gets made, whether this is your second colony or your
+     first (see firstLanding). No confirmation dialog needed here any more:
+     opening the globe commits nothing by itself, and the found-colony
+     card's own "Found a colony here" button is the actual confirmation. */
+  document.getElementById('btnNew').onclick = () => openGlobe(true);
   /* Centres on the city rather than on the map. The two are only the same
      thing on day one — a player settles wherever the terrain suited them, and
      the AI director picks its own site, which on a 128-tile map can be a long
@@ -1053,6 +1084,13 @@
       activeSiteId = SITES.found('Colony One', -85, 0);
       SITES.setActive(activeSiteId);
       loaded = SITES.load(activeSiteId);
+      /* A real player has never seen this happen — there is no city to
+         resume yet, so this default exists only to keep the rest of the UI
+         from having nothing to render. The globe opens automatically once
+         everything else has finished initialising (see the bottom of this
+         file) so the very first thing a new player does is pick a spot,
+         not discover one was already picked for them. */
+      firstLanding = true;
     }
     return loaded;
   }
@@ -1147,5 +1185,11 @@
 
   refreshNets();
   buildPalette(); setHint(); renderTile(); renderHUD(); renderLog(); renderOffer(); markModes();
+  /* The one thing a brand-new player sees before anything else: the globe,
+     asking where they want to land. Deferred to here rather than fired from
+     inside load() because nothing above this line — the canvas, the
+     palette, the globe's own DOM elements — exists yet at the point load()
+     runs. */
+  if (firstLanding) openGlobe(true);
   requestAnimationFrame(t => { last = t; requestAnimationFrame(frame); });
 })();
