@@ -206,7 +206,32 @@
     mare: '#3a4a5c', mareThin: '#3a4a5c', basin: '#4a4438', ray: '#e8e2d0', pole: '#8fd0ff'
   };
 
-  function drawFeature(ctx, f, view, cx, cy, R, sunLon) {
+  const clamp255 = v => Math.max(0, Math.min(255, v | 0));
+
+  /* A cheap "pillow shading" trick for a flat 2D fill standing in for a
+     round, sunken surface: instead of one flat colour, a radial gradient
+     from a bright highlight to a darker floor, with the highlight itself
+     offset toward wherever the sun currently projects on screen — so every
+     mare on the globe brightens on the side actually facing the sun, not
+     symmetrically, without needing real per-pixel normals. `sunScreen` is
+     computed once per draw() call rather than once per feature, since the
+     sun's screen position does not depend on which feature is being drawn. */
+  function bowlFill(ctx, cp, approxR, sunScreen, rC, gC, bC, alpha, shade) {
+    let dx = 0, dy = 0;
+    if (sunScreen) {
+      const vx = sunScreen.x - cp.x, vy = sunScreen.y - cp.y;
+      const len = Math.hypot(vx, vy) || 1;
+      const off = approxR * 0.38;
+      dx = (vx / len) * off; dy = (vy / len) * off;
+    }
+    const grad = ctx.createRadialGradient(cp.x + dx, cp.y + dy, 0, cp.x, cp.y, Math.max(1, approxR * 1.15));
+    const hi = shade * 1.35, lo = shade * 0.5;
+    grad.addColorStop(0, `rgba(${clamp255(rC * hi)},${clamp255(gC * hi)},${clamp255(bC * hi)},${alpha})`);
+    grad.addColorStop(1, `rgba(${clamp255(rC * lo)},${clamp255(gC * lo)},${clamp255(bC * lo)},${alpha})`);
+    return grad;
+  }
+
+  function drawFeature(ctx, f, view, cx, cy, R, sunLon, sunScreen) {
     const centre = project(f.lat, f.lon, view);
     if (centre.z < -0.25) return;    // well onto the far side — skip entirely
 
@@ -214,7 +239,9 @@
       const p = toScreen(centre, cx, cy, R);
       const l = litness(f.lat, f.lon, sunLon);
       const rr = Math.max(0.8, f.r * R / 90);
-      ctx.fillStyle = `rgba(232,226,208,${0.5 + l * 0.4})`;
+      /* rim-bright, floor-dark, offset the same way the maria are — a
+         punched crater rather than a flat dot */
+      ctx.fillStyle = bowlFill(ctx, p, rr, sunScreen, 232, 226, 208, 0.55 + l * 0.35, 1);
       ctx.beginPath(); ctx.arc(p.x, p.y, rr, 0, Math.PI * 2); ctx.fill();
       ctx.strokeStyle = `rgba(232,226,208,${0.22 + l * 0.2})`; ctx.lineWidth = Math.max(0.5, rr * 0.18);
       for (let i = 0; i < 6; i++) {
@@ -245,7 +272,9 @@
     const n = parseInt(tone.slice(1), 16);
     const rC = (n >> 16) & 255, gC = (n >> 8) & 255, bC = n & 255;
     const shade = 0.35 + l * 0.65;
-    ctx.fillStyle = `rgba(${rC * shade | 0},${gC * shade | 0},${bC * shade | 0},${f.kind === 'basin' ? 0.35 : 0.8})`;
+    const cp = toScreen(centre, cx, cy, R);
+    const approxR = pts.reduce((m, q) => Math.max(m, Math.hypot(q.x - cp.x, q.y - cp.y)), 1);
+    ctx.fillStyle = bowlFill(ctx, cp, approxR, sunScreen, rC, gC, bC, f.kind === 'basin' ? 0.35 : 0.8, shade);
     ctx.fill();
   }
 
@@ -260,6 +289,14 @@
        reads as dark far-side ground rather than a gap */
     ctx.fillStyle = '#0c1018';
     ctx.fillRect(cx - R, cy - R, R * 2, R * 2);
+
+    /* Where the sun currently projects on screen, ignoring visibility —
+       still meaningful as a 2D direction even when the sub-solar point
+       itself is on the far side, which is exactly when the whole visible
+       face is in relative dusk and litness() already darkens everything
+       accordingly. Computed once per draw() rather than once per feature,
+       since every feature and the specular sheen below share it. */
+    const sunScreen = toScreen(project(0, sunLon, view), cx, cy, R);
 
     /* the sphere itself, as a coarse lat/lon grid of shaded quads — see the
        module doc comment for why this beats an analytic terminator curve
@@ -286,7 +323,26 @@
       }
     }
 
-    for (const f of FEATURES) drawFeature(ctx, f, view, cx, cy, R, sunLon);
+    for (const f of FEATURES) drawFeature(ctx, f, view, cx, cy, R, sunLon, sunScreen);
+
+    /* A soft specular sheen centred on the sub-solar point — the same cheap
+       trick a CSS "glossy ball" uses, applied here with an additive blend
+       so it only ever brightens, never flattens the shading underneath.
+       Skipped when the sub-solar point is well onto the far side: the whole
+       face is in dusk, and a highlight centred off in the dark would just
+       look like a mistake rather than a sheen. */
+    const subZ = project(0, sunLon, view).z;
+    if (subZ > 0.15) {
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      const sheen = ctx.createRadialGradient(
+        sunScreen.x, sunScreen.y, 0, sunScreen.x, sunScreen.y, R * 0.85);
+      sheen.addColorStop(0, `rgba(255,250,235,${0.16 * subZ})`);
+      sheen.addColorStop(1, 'rgba(255,250,235,0)');
+      ctx.fillStyle = sheen;
+      ctx.fillRect(cx - R, cy - R, R * 2, R * 2);
+      ctx.restore();
+    }
 
     /* city markers, sized by population on a compressed scale so a
        thousand-fold difference in population is still just a modest size
