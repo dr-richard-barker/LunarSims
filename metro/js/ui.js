@@ -564,6 +564,21 @@
      last ticked, not a single lunar-wide instant. Said plainly in the panel
      itself rather than implied by a number that looks more authoritative
      than it is. */
+  /* How long ago a colony last got a turn — the active city is "live" (it is
+     advancing every frame, not on the scheduler's cadence at all); an away
+     one reads however long it has actually been since lastRealTick, which is
+     exactly what makes tapering visible as an empire grows: with one colony
+     that gap never exceeds the scheduler's own cadence, and with a dozen it
+     stretches out on its own, no separate prediction needed. */
+  function fmtAgo(ms) {
+    if (ms < 1500) return 'just now';
+    const sec = Math.round(ms / 1000);
+    if (sec < 60) return sec + 's ago';
+    const min = Math.round(sec / 60);
+    if (min < 60) return min + 'm ago';
+    return Math.round(min / 60) + 'h ago';
+  }
+
   function buildColonies() {
     const el = document.getElementById('pane-colonies');
     const SITES = window.LM_SITES;
@@ -574,6 +589,7 @@
 
     const totalPop = list.reduce((a, r) => a + r.pop, 0);
     const totalResearch = Math.round(list.reduce((a, r) => a + r.research, 0));
+    const now = Date.now();
 
     const rows = list.map(r => `
       <tr class="${r.id === activeSiteId ? 'lmine' : ''}" data-id="${r.id}" style="cursor:pointer">
@@ -584,6 +600,7 @@
         <td>${eraName(r)}</td>
         <td>${r.pop.toLocaleString()}</td>
         <td class="ldim">day ${r.day.toLocaleString()}</td>
+        <td class="ldim">${r.id === activeSiteId ? 'live' : fmtAgo(now - r.lastRealTick)}</td>
       </tr>`).join('');
 
     el.innerHTML = `
@@ -592,7 +609,7 @@
         first and stays exactly as you left it. ${list.length} founded so far.</p>
       <div class="ltablewrap">
         <table class="ltable">
-          <thead><tr><th>Colony</th><th>Terrain</th><th>Site</th><th>Era</th><th>Pop</th><th>Age</th></tr></thead>
+          <thead><tr><th>Colony</th><th>Terrain</th><th>Site</th><th>Era</th><th>Pop</th><th>Age</th><th>Updated</th></tr></thead>
           <tbody>${rows}</tbody>
         </table>
       </div>
@@ -713,6 +730,7 @@
 
   let globeView = { lon: 0, lat: 12 };
   let globePending = null;      // { lat, lon } while the found-colony card is open
+  let globePreviewId = null;    // a site id while its preview card is open
 
   function globeGeom() {
     const w = globeCanvas.width, h = globeCanvas.height;
@@ -793,10 +811,70 @@
     globeFoundBox.querySelector('#globeFoundNo').onclick = () => { globePending = null; renderGlobeFound(); drawGlobe(); };
   }
 
+  const globePreviewBox = document.getElementById('globePreview');
+
+  /* Paints a decoded state onto a throwaway 128x128 buffer and scales it into
+     the small on-screen canvas, the same two-step draw() itself does for the
+     real minimap — but into a canvas of its own rather than the module's
+     singleton buffer, since this state is a one-off decode for a colony
+     nobody switched to and has no business sharing (or invalidating) the
+     cache the live minimap repaints on every real map change. */
+  function paintPreviewThumb(canvas, decoded) {
+    const M = window.LM_MINIMAP;
+    if (!M || !canvas || !decoded) return;
+    const off = document.createElement('canvas');
+    off.width = K.COLS; off.height = K.ROWS;
+    M.paintInto(off, decoded);
+    const c = canvas.getContext('2d');
+    c.imageSmoothingEnabled = false;
+    c.clearRect(0, 0, canvas.width, canvas.height);
+    c.drawImage(off, 0, 0, canvas.width, canvas.height);
+  }
+
+  /* The globe's answer to "what is happening over there without switching to
+     it" — a decode is the same ~40ms already budgeted for switching itself,
+     just thrown away afterward rather than kept as the live game state. Reads
+     straight from storage, so it is always exactly as current as the last
+     time that colony was saved — the active city's own autosave, or the
+     background scheduler's, whichever last touched it. */
+  function renderGlobePreview(id) {
+    if (!id || !window.LM_SITES) { globePreviewBox.hidden = true; globePreviewId = null; return; }
+    const row = window.LM_SITES.list().find(r => r.id === id);
+    if (!row) { globePreviewBox.hidden = true; globePreviewId = null; return; }
+    globePreviewId = id;
+    const eraName = E ? E.current({ peakPop: row.peakPop, research: row.research }).name : '—';
+    globePreviewBox.hidden = false;
+    globePreviewBox.innerHTML = `
+      <div style="display:flex;gap:14px;align-items:flex-start;margin:10px 0">
+        <canvas id="globePreviewMini" width="110" height="110"
+                style="width:110px;height:110px;flex:none;border:1px solid var(--line);
+                       border-radius:6px;image-rendering:pixelated"></canvas>
+        <div class="rows" style="flex:1">
+          <div class="row"><span class="k">Colony</span><span class="v good">${row.name}</span></div>
+          <div class="row"><span class="k">Era</span><span class="v">${eraName}</span></div>
+          <div class="row"><span class="k">Population</span><span class="v">${row.pop.toLocaleString()}</span></div>
+          <div class="row"><span class="k">Day</span><span class="v">${row.day.toLocaleString()}</span></div>
+        </div>
+      </div>
+      <div class="modes" style="justify-content:flex-start;gap:6px;margin:6px 0 4px">
+        <button id="globePreviewSwitch" class="mode">Switch to ${row.name}</button>
+        <button id="globePreviewClose" class="mode">Close preview</button>
+      </div>`;
+    paintPreviewThumb(document.getElementById('globePreviewMini'), window.LM_SITES.load(id));
+    globePreviewBox.querySelector('#globePreviewSwitch').onclick = () => {
+      globePreviewId = null; globePreviewBox.hidden = true;
+      switchTo(id);
+      openGlobe(false);
+    };
+    globePreviewBox.querySelector('#globePreviewClose').onclick = () => {
+      globePreviewId = null; globePreviewBox.hidden = true; drawGlobe();
+    };
+  }
+
   /* Drag to rotate; a short drag (or none at all) is treated as a click
      instead, the same "did this move" threshold the main canvas uses for
-     terrain tools. A click either hits an existing city marker — switching
-     to it — or, over open ground, opens the found-colony card. */
+     terrain tools. A click either hits an existing city marker — opening its
+     preview card — or, over open ground, opens the found-colony card. */
   (() => {
     let down = false, dragged = false, last = null;
     const SENS = 0.35;
@@ -845,11 +923,12 @@
       if (hitId) {
         if (hitId === activeSiteId) { toast('That is the colony you are already in.'); return; }
         globePending = null; renderGlobeFound();
-        switchTo(hitId);
-        openGlobe(false);
+        renderGlobePreview(hitId);
+        drawGlobe();
         return;
       }
 
+      globePreviewId = null; globePreviewBox.hidden = true;
       const nx = (px - cx) / rad, ny = (py - cy) / rad;
       const hit = GL.unproject(nx, ny, globeView);
       globePending = hit;
@@ -862,6 +941,7 @@
     globeModal.hidden = !open;
     if (!open) {
       globePending = null; renderGlobeFound();
+      globePreviewId = null; globePreviewBox.hidden = true;
       /* Closing without picking anywhere else on a first landing means
          keeping the default site — it is already a fully valid colony, so
          there is nothing left to do but stop treating it as pending. A

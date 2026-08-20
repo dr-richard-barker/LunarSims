@@ -76,15 +76,27 @@
     return [r, g, b];
   }
 
-  function repaint(s) {
-    const img = bctx.createImageData(K.COLS, K.ROWS);
+  /* The actual paint loop, over ANY 128x128 canvas and ANY decoded state —
+     not just the live one this module caches. repaint() below is just this,
+     called on the module's own singleton buffer; the globe's colony preview
+     card (ui.js) calls it directly on a throwaway canvas of its own, for a
+     state that was decoded once for the preview and is never the live game
+     state, so it has no business sharing the cache this module invalidates
+     on every map change. */
+  function paintInto(canvas, s) {
+    const c = canvas.getContext('2d');
+    const img = c.createImageData(K.COLS, K.ROWS);
     const d = img.data;
     for (let i = 0; i < s.map.length; i++) {
-      const c = colourFor(s.map[i]);
+      const col = colourFor(s.map[i]);
       const p = i * 4;
-      d[p] = c[0] | 0; d[p + 1] = c[1] | 0; d[p + 2] = c[2] | 0; d[p + 3] = 255;
+      d[p] = col[0] | 0; d[p + 1] = col[1] | 0; d[p + 2] = col[2] | 0; d[p + 3] = 255;
     }
-    bctx.putImageData(img, 0, 0);
+    c.putImageData(img, 0, 0);
+  }
+
+  function repaint(s) {
+    paintInto(buf, s);
     dirty = false;
   }
 
@@ -132,5 +144,5 @@
     };
   }
 
-  window.LM_MINIMAP = { draw, invalidate, tileAtPoint, repaint, colourFor, buffer: buf };
+  window.LM_MINIMAP = { draw, invalidate, tileAtPoint, repaint, paintInto, colourFor, buffer: buf };
 })();
