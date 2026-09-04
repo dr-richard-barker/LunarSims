@@ -1,7 +1,7 @@
 /* Lunar Farm — interface, loop and persistence. */
 
 (function () {
-  const { K, CROPS, BUILDINGS, UPGRADES, EVENTS, MILESTONES } = window.LF_DATA;
+  const { K, CROPS, TRAITS, GMO, BUILDINGS, UPGRADES, EVENTS, MILESTONES } = window.LF_DATA;
   const S = window.LF_SIM;
   const R = window.LF_RENDER;
   /* One stable key from now on. The versioned keys are what earlier builds
@@ -30,7 +30,34 @@
   ];
   const GLYPH = {
     track: '═', rail: '╬', greenhouse: '⌂', solar: '▤', battery: '▬', hab: '◍',
-    isru: '⚗', composter: '♻', reactor: '☢', pad: '◎'
+    isru: '⚗', composter: '♻', reactor: '☢', pad: '◎', studio: '◉', vault: '⌸'
+  };
+
+  /* ---------- the catalogue's photographs ----------
+
+     Every image is openly licensed and carries its source, creator and licence in
+     img/credits.json, which is loaded once and shown beside the card that uses it.
+     Anything without a photograph falls back to a drawn plate rather than a hole. */
+  const PHOTO = 'img/';
+  let credits = null;
+  fetch(PHOTO + 'credits.json')
+    .then(r => r.ok ? r.json() : null)
+    .then(d => {
+      credits = {};
+      if (d && d.images) for (const row of d.images) credits[row.id] = row;
+      if (!$('#mPlant').hidden) renderCatalogue();
+    })
+    .catch(() => { credits = {}; });
+
+  const creditFor = id => (credits && credits[id]) || null;
+
+  const KIND_LABEL = {
+    leafy: 'leafy', fruit: 'fruit', grain: 'grain', root: 'root', flower: 'flower',
+    algae: 'algae', research: 'research', fibre: 'fibre', fungal: 'fungal', microbe: 'microbial'
+  };
+  const KIND_GLYPH = {
+    leafy: '🥬', fruit: '🍅', grain: '🌾', root: '🥕', flower: '🌼',
+    algae: '🌀', research: '🔬', fibre: '🧵', fungal: '🍄', microbe: '🧫'
   };
 
   /* Declared before load() runs: load() writes to it, and a `let` further down
@@ -423,10 +450,15 @@
       ['Oxygen', s.o2.toFixed(0) + ' kg', s.o2 < 40 ? 'bad' : s.o2 < 90 ? 'warn' : ''],
       ['CO₂', s.co2.toFixed(0) + ' kg', s.co2 < 20 ? 'bad' : s.co2 < 55 ? 'warn' : ''],
       ['Nutrients', fmt(s.nutrients), s.nutrients < 40 ? 'warn' : ''],
+      ['Residue', fmt(s.residue), ''],
       ['Crew', `${s.crew}/${S.crewCapacity(s)}`, ''],
       ['Morale', Math.round(s.morale) + '%', s.morale < 35 ? 'bad' : s.morale < 55 ? 'warn' : 'good'],
-      ['Science', fmt(s.science), '']
+      ['Science', fmt(s.science), ''],
+      ['Vault', S.accessions(s).length + '/' + S.vaultTarget(), S.vaultBuilt(s) ? 'good' : '']
     ];
+    if (S.count(s, 'studio')) {
+      chips.splice(1, 0, ['On air', '+' + fmt(s.media.today) + ' cr', s.media.today > 0 ? 'good' : 'warn']);
+    }
     $('#chips').innerHTML = chips.map(([k, v, c]) =>
       `<div class="chip ${c}"><b>${v}</b><span>${k}</span></div>`).join('');
 
@@ -482,6 +514,10 @@
       isru: s.isruOn ? 'Running: +14 L of water a day.' : 'Idle.',
       composter: 'Returning 75% of each crop’s fixed carbon at harvest.',
       pad: 'Resupply is 15% cheaper and produce sells for more.',
+      studio: S.studioLive(s)
+        ? `On air. Audience ${fmt(s.media.audience)}, paying ${fmt(s.media.today)} credits a day. Aired ${fmt(s.media.aired)} segments so far.`
+        : 'Off air — the studio has to touch the track network before anything can be filed.',
+      vault: `Sealed into the tube. ${S.accessions(s).length} of ${S.vaultTarget()} lines held, returning ${(S.accessions(s).length * 0.04).toFixed(2)} science a day.`,
       track: 'Graded surface road. Halls and modules touching the network are serviced by the crew.'
     }[t.b.type] || '';
     box.innerHTML = `<div class="baytitle"><h2>${B.name}</h2><span class="num">${coord}</span></div>
@@ -534,13 +570,19 @@
         <div class="row"><span class="k">Est. to harvest</span><span class="v">${f.growth >= 1 ? '—' : remain + ' d'}</span></div>
         <div class="row"><span class="k">Yield at full health</span><span class="v">${fmt(c.kcal * S.KCAL_SCALE * A)} kcal</span></div>
         <div class="row"><span class="k">Station pays</span><span class="v good">${fmt(c.value * S.VALUE_SCALE * A)} cr</span></div>
-        <div class="row"><span class="k">Lamps</span><span class="v ${f.litNow ? 'good' : 'warn'}">${f.litNow ? 'ON' : 'OFF'}</span></div>
+        ${c.dark
+          ? `<div class="row"><span class="k">Lighting</span><span class="v good">NONE NEEDED</span></div>`
+          : `<div class="row"><span class="k">Lamps</span><span class="v ${f.litNow ? 'good' : 'warn'}">${f.litNow ? 'ON' : 'OFF'}</span></div>`}
+        ${c.residue ? `<div class="row"><span class="k">Residue in store</span>
+          <span class="v ${f.starved ? 'bad' : 'good'}">${f.starved ? 'EMPTY — STALLED' : fmt(s.residue)}</span></div>` : ''}
+        ${c.respires ? '<div class="row"><span class="k">Gas exchange</span><span class="v">RESPIRES — GIVES CO₂</span></div>' : ''}
         <div class="row"><span class="k">Beds yielding</span><span class="v ${f.soil > 0.66 ? 'good' : 'warn'}">${pct(S.RAW_SOIL + (1 - S.RAW_SOIL) * (f.soil))}</span></div>
         ${f.serviced ? '' : '<div class="row"><span class="k">Service</span><span class="v bad">NO TRACK</span></div>'}
         ${f.infected ? '<div class="row"><span class="k">Status</span><span class="v bad">FUNGAL INFECTION</span></div>' : ''}
         ${f.dead ? '<div class="row"><span class="k">Status</span><span class="v bad">CROP LOST</span></div>' : ''}
       </div>
-      <p class="note">${c.note}</p>`;
+      <p class="note">${c.note}</p>
+      ${f.starved ? '<p class="note" style="border-left-color:var(--bad)">Nothing left for it to eat. Residue only comes from harvesting something photosynthetic — a farm of nothing but cultures starves.</p>' : ''}`;
 
     const mk = (label, cls, fn, disabled) => {
       const b = el('button', 'act ' + (cls || ''), label);
@@ -557,44 +599,184 @@
     mk(f.growth >= 1 ? 'Harvest' : 'Not ready', 'primary wide', () => act(S.harvest(s, f)), f.growth < 1);
   }
 
-  /* ---------- crop picker ---------- */
+  /* ---------- seed catalogue ----------
+
+     One sheet does two jobs. Opened from a hall it sows; opened from the header it
+     is a reference book — every line the farm can grow, what it is, what it is
+     based on and where its photograph came from. Engineered lines carry their
+     conventional parent's photograph, captioned as such. */
+
+  let catField = null;      // the hall being sown, or null when browsing
+  let catFilter = 'all';
+
+  const FILTERS = [
+    ['all', 'Everything'], ['leafy', 'Leafy'], ['fruit', 'Fruit'], ['root', 'Root'],
+    ['grain', 'Grain'], ['flower', 'Flower'], ['dark', 'Grows dark'],
+    ['micro', 'Microbial'], ['gmo', 'Engineered'], ['vault', 'Banked']
+  ];
+
+  function catalogueRows() {
+    const rows = CROPS.map(c => ({ c, gmo: null, owned: true }));
+    for (const g of GMO) {
+      const c = S.cropById(g.id);
+      if (c) rows.push({ c, gmo: g, owned: !!s.gmo[g.id] });
+    }
+    return rows;
+  }
+
+  function passesFilter(row) {
+    const c = row.c;
+    switch (catFilter) {
+      case 'all': return true;
+      case 'dark': return !!c.dark;
+      case 'micro': return c.kind === 'fungal' || c.kind === 'microbe' || c.kind === 'algae';
+      case 'gmo': return !!row.gmo;
+      case 'vault': return !!(s.vault.accessions && s.vault.accessions[c.id]);
+      default: return c.kind === catFilter;
+    }
+  }
+
+  /* the plate: a photograph where we have one, a drawn panel where we do not */
+  function plateHTML(c, gmo) {
+    const photoId = gmo ? gmo.base : c.id;
+    const cr = creditFor(photoId);
+    const glyph = KIND_GLYPH[c.kind] || '🌱';
+    const drawn = `<div class="drawn" style="--pc:${c.colour}">${glyph}</div>`;
+    const img = cr
+      ? `<img src="${PHOTO}${cr.file}" alt="${c.name}" loading="lazy"
+             onerror="this.style.display='none'">`
+      : '';
+    const parent = gmo
+      ? `<div class="parentnote">Photograph shows the conventional parent, ${S.cropById(gmo.base).name}. There is no photograph of an engineered line.</div>`
+      : '';
+    return `<div class="plate">${drawn}${img}
+      <span class="kindtag">${KIND_LABEL[c.kind] || c.kind}</span>
+      ${gmo ? '<span class="gmotag">engineered</span>' : ''}${parent}</div>`;
+  }
+
+  function creditLine(c, gmo) {
+    const cr = creditFor(gmo ? gmo.base : c.id);
+    if (!cr) return '<div class="credit">Drawn plate — no photograph held for this line.</div>';
+    return `<div class="credit">${cr.creator ? cr.creator + ' · ' : ''}${cr.licence} · ${cr.source}</div>`;
+  }
+
+  function traitChips(c) {
+    if (!c.traits || !c.traits.length) return '';
+    return '<div class="traits">' + c.traits.map(id => {
+      const t = TRAITS.find(x => x.id === id);
+      return t ? `<span title="${t.basis.replace(/"/g, '&quot;')}">${t.name}</span>` : '';
+    }).join('') + '</div>';
+  }
+
+  function renderCatalogue() {
+    const sowing = !!catField;
+    const A = sowing ? S.area(catField) : 1;
+
+    $('#plantTitle').textContent = sowing ? 'Sow the hall' : 'Seed catalogue';
+    $('#plantLede').textContent = sowing
+      ? `${A} tiles under glass. The whole hall takes one line, and seed, yield and water all scale with the floor.`
+      : `Every line the farm can grow. ${CROPS.length} conventional, ${GMO.length} engineered, ${S.accessions(s).length} banked in the vault.`;
+
+    const fbox = $('#catFilter');
+    fbox.innerHTML = '';
+    for (const [id, label] of FILTERS) {
+      const btn = el('button', catFilter === id ? 'on' : '', label);
+      btn.onclick = () => { catFilter = id; renderCatalogue(); };
+      fbox.appendChild(btn);
+    }
+
+    const list = $('#cropList');
+    list.innerHTML = '';
+    const rows = catalogueRows().filter(passesFilter);
+    if (!rows.length) {
+      list.innerHTML = '<div class="empty" style="grid-column:1/-1">Nothing in the catalogue matches that yet.</div>';
+    }
+
+    for (const row of rows) {
+      const c = row.c, gmo = row.gmo;
+      const cost = sowing ? S.seedCost(c, catField) : Math.round(c.seed * 0.4);
+      const locked = gmo && !row.owned;
+      const tooDear = sowing && !locked && s.credits < cost;
+
+      const btn = el('button', 'crop' + (locked ? ' locked' : ''));
+      /* browsing leaves every card live to read; sowing is what can be refused */
+      btn.disabled = locked || tooDear;
+
+      const banked = s.vault.accessions && s.vault.accessions[c.id];
+      btn.innerHTML = plateHTML(c, gmo) + `
+        <div class="body">
+          <div class="top">
+            <b><span class="dot" style="background:${c.colour}"></span>${c.name}</b>
+            <span class="seed">${locked ? 'locked' : fmt(cost) + ' cr'}</span>
+          </div>
+          <div class="cv">${c.cultivar || '&nbsp;'}</div>
+          <div class="stats">
+            <span>${c.days} d</span>
+            <span>${c.kcal ? fmt(c.kcal * S.KCAL_SCALE * A) + ' kcal' : 'no calories'}</span>
+            <span>${fmt(c.value * S.VALUE_SCALE * A)} cr</span>
+            ${c.science > 2 ? `<span>+${c.science} sci</span>` : ''}
+            ${c.morale > 10 ? '<span>+morale</span>' : ''}
+            ${c.dark ? '<span>needs no lamp</span>' : ''}
+            ${c.residue ? `<span>eats ${c.residue} residue</span>` : ''}
+            ${banked ? '<span>banked</span>' : ''}
+          </div>
+          ${traitChips(c)}
+          <div class="blurb">${c.note}</div>
+          ${locked ? `<div class="lockmsg">${S.biotechOpen(s)
+              ? 'Develop this line in the Biotech Lab, under Research.'
+              : `The lab opens once every conventional crop has been sown — ${S.conventionalSown(s)} of ${CROPS.length} so far.`}</div>` : ''}
+          ${tooDear ? '<div class="lockmsg">Not enough credits for seed at this hall size.</div>' : ''}
+          ${creditLine(c, gmo)}
+        </div>`;
+
+      if (!locked && sowing) {
+        btn.onclick = () => {
+          const err = S.plant(s, catField, c.id);
+          if (err) return toast(err, true);
+          $('#mPlant').hidden = true;
+          toast(`${c.name} sown across ${A} tiles.`);
+          renderAll();
+        };
+      }
+      list.appendChild(btn);
+    }
+
+    renderCatalogueCredits();
+  }
+
+  function renderCatalogueCredits() {
+    const box = $('#catCreditBody');
+    if (!credits) { box.textContent = 'Loading credits…'; return; }
+    const rows = Object.values(credits).sort((a, b) => a.id.localeCompare(b.id));
+    if (!rows.length) { box.textContent = 'No photographs are bundled with this copy.'; return; }
+    box.innerHTML = `<p>Every photograph here is openly licensed. NASA imagery is public domain
+      under 17 U.S.C. §105; NASA does not endorse this game. The rest is Creative Commons, credited
+      to its photographer. Engineered lines are shown with their conventional parent's photograph.</p>
+      <table>${rows.map(r => `<tr>
+        <td>${r.id}</td>
+        <td>${r.title}</td>
+        <td>${r.creator || '—'}</td>
+        <td>${r.licence}</td>
+        <td><a href="${r.url}" target="_blank" rel="noopener">source</a></td>
+      </tr>`).join('')}</table>`;
+  }
+
   function openPlant() {
     const t = ui.selected ? S.tileAt(s, ui.selected.x, ui.selected.y) : null;
     const f = S.fieldAt(s, t);
     if (!f) return toast('Select a grow hall first.', true);
-    const A = S.area(f);
-    $('#plantLede').textContent =
-      `${A} tiles under glass. The whole hall takes one crop, and seed, yield and water all scale with the floor.`;
-    const list = $('#cropList');
-    list.innerHTML = '';
-    for (const c of CROPS) {
-      const cost = S.seedCost(c, f);
-      const btn = el('button', 'crop');
-      btn.disabled = s.credits < cost;
-      btn.innerHTML = `
-        <div class="top">
-          <b><span class="dot" style="background:${c.colour}"></span>${c.name}</b>
-          <span class="seed">${fmt(cost)} cr</span>
-        </div>
-        <div class="cv">${c.cultivar || '&nbsp;'}</div>
-        <div class="stats">
-          <span>${c.days} d</span>
-          <span>${c.kcal ? fmt(c.kcal * S.KCAL_SCALE * A) + ' kcal' : 'no calories'}</span>
-          <span>${fmt(c.value * S.VALUE_SCALE * A)} cr</span>
-          ${c.science > 2 ? `<span>+${c.science} sci</span>` : ''}
-          ${c.morale > 10 ? `<span>+morale</span>` : ''}
-        </div>`;
-      btn.onclick = () => {
-        const err = S.plant(s, f, c.id);
-        if (err) return toast(err, true);
-        $('#mPlant').hidden = true;
-        toast(`${c.name} sown across ${A} tiles.`);
-        renderAll();
-      };
-      list.appendChild(btn);
-    }
+    catField = f;
+    catFilter = 'all';
+    renderCatalogue();
     $('#mPlant').hidden = false;
   }
+
+  function openCatalogue() {
+    catField = null;
+    renderCatalogue();
+    $('#mPlant').hidden = false;
+  }
+  $('#btnCatalog').onclick = openCatalogue;
 
   /* ---------- systems ---------- */
   function renderSystems() {
@@ -665,6 +847,8 @@
         ${row('Harvests', s.stats.harvests)}
       </div>
 
+      ${S.count(s, 'studio') ? broadcastHTML() : ''}
+
       <h3 class="sec">Resupply</h3>
       <div class="rows">
         <div class="row"><span class="k">Water, 200 L</span><button class="ghost" data-buy="water">${fmt(840 * padDisc)} cr</button></div>
@@ -696,6 +880,65 @@
     });
   }
 
+  /* ---------- broadcast ----------
+
+     The audience is the interesting number, so it is the one shown large. The
+     novelty bars underneath are the actual lever: they say, plainly, which
+     subjects Earth is tired of and therefore what is worth planting next. */
+  const SEGMENT_NAME = {
+    harvest: 'Harvest day', standing: 'In the halls',
+    mess: 'At the mess table', bouquet: 'Arranging the flowers'
+  };
+
+  function subjectName(key) {
+    if (key === 'mess' || key.indexOf('mess_') === 0) {
+      const id = key.slice(5);
+      const c = id && id !== 'rations' && S.cropById(id);
+      return c ? `the mess table · ${c.name}` : 'the mess table';
+    }
+    const c = S.cropById(key);
+    return c ? c.name : key;
+  }
+
+  function broadcastHTML() {
+    const m = s.media;
+    const live = S.studioLive(s);
+    const row = (k, v, cls) => `<div class="row"><span class="k">${k}</span><span class="v ${cls || ''}">${v}</span></div>`;
+
+    const subs = Object.keys(m.novelty).sort((a, b) => m.novelty[b] - m.novelty[a]).slice(0, 8);
+    const bars = subs.map(key => {
+      const n = m.novelty[key];
+      const col = n > 0.6 ? 'var(--accent)' : n > 0.3 ? 'var(--warn)' : 'var(--bad)';
+      return `<div class="novrow">
+        <div class="nm">${subjectName(key)}</div>
+        <div class="bar"><i style="width:${Math.round(n * 100)}%;background:${col}"></i></div>
+      </div>`;
+    }).join('');
+
+    return `
+      <h3 class="sec">Broadcast</h3>
+      <div class="onair ${live ? 'live' : ''}">
+        <span class="lamp"></span>
+        <span class="who">${live ? 'On air' : 'Off air — no track to the studio'}</span>
+        <span class="aud">${fmt(m.audience)}</span>
+      </div>
+      <div class="rows">
+        ${row('Paid today', '+' + fmt(m.today) + ' cr', m.today > 0 ? 'good' : 'warn')}
+        ${row('Earned to date', fmt(m.revenue) + ' cr')}
+        ${row('Segments aired', fmt(m.aired))}
+        ${row('Last on air', (m.last && m.last.length)
+            ? m.last.map(x => {
+                const name = SEGMENT_NAME[x.kind] || x.kind;
+                /* the mess segment already names what they were eating */
+                return x.kind === 'mess' ? name : `${name} · ${subjectName(x.subject)}`;
+              }).join('<br>') : 'nothing yet')}
+      </div>
+      ${subs.length ? `<p style="font-size:11px;color:var(--ink-soft);margin:11px 0 0;line-height:1.55">
+        How fresh each subject is to the audience. A full bar has not been on screen lately and pays
+        the most; an empty one has been on every week. Sow something the camera has not seen.</p>
+      <div class="novlist">${bars}</div>` : ''}`;
+  }
+
   /* ---------- research ---------- */
   function renderResearch() {
     const p = $('#pane-research');
@@ -717,11 +960,116 @@
       item.appendChild(btn);
       p.appendChild(item);
     }
+    renderBiotech(p);
+  }
+
+  /* Only what actually moved. Listing every stat with "(was the same)" beside it
+     buries the two or three numbers the player is deciding on. */
+  function gmoDelta(c, base) {
+    const parts = [];
+    const good = t => `<span style="color:var(--accent)">${t}</span>`;
+    const num = (now, was, unit, lowerIsBetter) => {
+      if (Math.round(now) === Math.round(was)) return;
+      const better = lowerIsBetter ? now < was : now > was;
+      const txt = `${fmt(now)}${unit} (was ${fmt(was)}${unit})`;
+      parts.push(better ? good(txt) : `<span style="color:var(--warn)">${txt}</span>`);
+    };
+    const pctDown = (now, was, label) => {
+      if (now >= was - 1e-6) return;
+      parts.push(good(`${Math.round((1 - now / was) * 100)}% ${label}`));
+    };
+    num(c.days, base.days, ' d', true);
+    num(c.kcal, base.kcal, ' kcal', false);
+    num(c.value, base.value, ' cr', false);
+    num(c.science, base.science, ' sci', false);
+    pctDown(c.water, base.water, 'less water');
+    pctDown(c.nutrients, base.nutrients, 'less feed');
+    if (!c.dark && c.light) pctDown(c.light, 1, 'less lamp');
+    pctDown(c.radSens, base.radSens, 'less flare damage');
+    if (c.soilFloor) parts.push(good('yields in raw regolith'));
+    if (c.morale > base.morale) parts.push(good(`+${Math.round(c.morale - base.morale)} morale`));
+    return 'vs ' + base.name + ': ' + (parts.length ? parts.join(' · ') : 'a different balance, not a bigger number');
+  }
+
+  /* ---------- the biotech lab ----------
+
+     Gated on having sown the whole conventional roster, because the point of the
+     tier is that you have to have farmed the real thing before you get to improve
+     it. Every line names the traits it carries, and the reference below spells out
+     what each trait is and what it is based on. */
+  function renderBiotech(p) {
+    const open = S.biotechOpen(s);
+    const sown = S.conventionalSown(s);
+
+    p.appendChild(el('h3', 'sec', 'Biotech Lab'));
+
+    if (!open) {
+      p.appendChild(el('div', 'biolock',
+        `The lab needs the whole conventional roster in the ground before it will take a brief —
+         <b>${sown} of ${CROPS.length}</b> sown so far. Grow everything once, including the
+         mushrooms and the cultures, and sixteen engineered lines open up.`));
+    } else {
+      p.appendChild(el('p', '', `<span style="font-size:11.5px;color:var(--ink-soft);line-height:1.55">
+        The whole roster has been sown, so the lab is open. Each line is a real crop carrying real
+        traits; developing one costs credits and science, and its seed stays dearer than the
+        conventional stock for ever after.</span>`));
+
+      for (const g of GMO) {
+        const owned = !!s.gmo[g.id];
+        const c = S.cropById(g.id);
+        const base = S.cropById(g.base);
+        const affordable = s.credits >= g.cost && s.science >= g.science;
+        const item = el('div', 'item');
+        item.innerHTML = `
+          <h4><span>${g.name} <span style="color:var(--ink-soft);font-style:italic">${g.cultivar}</span></span>
+            <span class="cost">${fmt(g.cost)} cr · ${g.science} sci</span></h4>
+          <div class="traits">${g.traits.map(id => {
+            const t = TRAITS.find(x => x.id === id);
+            return t ? `<span title="${t.basis.replace(/"/g, '&quot;')}">${t.name}</span>` : '';
+          }).join('')}</div>
+          <p>${g.note}</p>
+          <p style="font-family:var(--mono);font-size:10px;color:var(--ink-faint)">
+            ${gmoDelta(c, base)}</p>`;
+        const btn = el('button', '', owned ? 'Developed' : 'Develop');
+        btn.disabled = owned || !affordable;
+        btn.onclick = () => act(S.developGmo(s, g.id));
+        item.appendChild(btn);
+        p.appendChild(item);
+      }
+    }
+
+    /* the trait reference is worth reading whether or not the lab is open */
+    const ref = el('details', 'traitref');
+    ref.innerHTML = '<summary>What each trait actually is</summary><dl>' +
+      TRAITS.map(t => `<dt>${t.name}</dt><dd>${t.basis} <em>${t.gain}</em></dd>`).join('') +
+      '</dl>';
+    p.appendChild(ref);
   }
 
   function renderGoals() {
-    $('#pane-goals').innerHTML = `<p style="font-size:11.5px;color:var(--ink-soft);line-height:1.55;margin:0 0 10px">
-      There is no ending. These are the marks of a farm that works.</p>` +
+    const held = S.accessions(s);
+    const target = S.vaultTarget();
+    const built = S.vaultBuilt(s);
+    const all = CROPS.concat(GMO.map(g => S.cropById(g.id))).filter(Boolean);
+    const pips = all.map(c => {
+      const has = !!(s.vault.accessions && s.vault.accessions[c.id]);
+      return `<i class="${has ? 'has' : ''}" style="${has ? 'background:' + c.colour : ''}" title="${c.name}${has ? ' — banked' : ''}"></i>`;
+    }).join('');
+    /* accessions banked that are not lines on the roster: wild relatives, landraces */
+    const extra = held.filter(id => !all.some(c => c.id === id)).length;
+
+    const vault = `<div class="vaultbox ${built ? 'built' : ''}">
+      <h4>${built ? 'Lunar Seed Vault' : 'Seed vault — not yet commissioned'}</h4>
+      <div class="count">${held.length}<small> / ${target} lines banked${extra ? ` · +${extra} wild` : ''}</small></div>
+      <div class="track"><i style="width:${Math.min(100, held.length / target * 100)}%"></i></div>
+      <div class="accgrid">${pips}</div>
+      <p>${built
+        ? `The chamber is sealed and cold in the tube below the skylight, and it is paying for itself in data on what it holds. Anything banked here can be re-sown from secured stock, whatever the surface does to the seed lockers.`
+        : `Everything you harvest is banked as a living accession. The vault itself goes into the lava tube through the skylight, where the rock holds one temperature and metres of basalt stop what the surface cannot — but it needs the biomass oxidation loop running, regolith overburden fitted, and twelve accessions in hand before anyone will sign it off.`}</p>
+    </div>`;
+
+    $('#pane-goals').innerHTML = vault + `<p style="font-size:11.5px;color:var(--ink-soft);line-height:1.55;margin:0 0 10px">
+      The farm feeds the colony. The vault is what the colony is for.</p>` +
       MILESTONES.map(m => {
         const d = s.done[m.id];
         return `<div class="goal ${d ? 'done' : ''}"><span class="tick">${d ? '✔' : '○'}</span>
@@ -1034,6 +1382,7 @@
   if (!s.log.length) {
     S.pushLog(s, 'Farm handover complete: one 3×2 grow hall, a habitat, four arrays and two battery banks.');
     S.pushLog(s, 'Drag out more halls with the Grow Hall tool. The sun sets on day 15 — plan for it.');
+    S.pushLog(s, 'Standing brief: this station exists to prove the tube can hold a vault. Every line you grow to harvest is banked as a living accession — the seed and spore of Earth, held where the rock is cold and still and the radiation cannot reach, for whoever comes after. Feed the colony first. Then fill the vault.');
   }
   announceLoad();
   buildPalette();

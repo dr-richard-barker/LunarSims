@@ -403,3 +403,141 @@ button{font-family:var(--sans)}
 .xclose:hover{background:var(--panel-2);border-color:var(--line);color:var(--ink)}
 .sheet h2{padding-right:34px}
 .dhead{padding-right:34px}
+
+/* ---------- seed catalogue ---------- */
+.catfilter{display:flex;flex-wrap:wrap;gap:5px;margin:0 0 12px}
+.catfilter button{
+  font-family:var(--mono);font-size:10px;letter-spacing:.06em;text-transform:uppercase;
+  padding:5px 9px;border-radius:999px;cursor:pointer;
+  background:var(--panel-2);border:1px solid var(--line);color:var(--ink-soft);
+}
+.catfilter button:hover{border-color:var(--accent-2);color:var(--ink)}
+.catfilter button.on{background:var(--accent);border-color:var(--accent);color:#08210f}
+
+.croplist{
+  display:grid;grid-template-columns:repeat(auto-fill,minmax(198px,1fr));gap:10px;
+  max-height:58vh;overflow-y:auto;padding-right:4px;
+}
+/* the card is a seed packet: plate on top, the facts beneath */
+.crop{
+  display:flex;flex-direction:column;text-align:left;padding:0;overflow:hidden;
+  background:var(--panel-2);border:1px solid var(--line);border-radius:10px;
+  color:var(--ink);cursor:pointer;font:inherit;
+}
+.crop:hover:not(:disabled){border-color:var(--accent)}
+.crop:disabled{opacity:.45;cursor:not-allowed}
+.crop.locked{cursor:default}
+.crop .plate{
+  position:relative;aspect-ratio:3/2;background:#0a0d14;overflow:hidden;flex:0 0 auto;
+  border-bottom:1px solid var(--line);
+}
+/* The drawn panel is the bed the photograph lies on: it shows through whenever
+   there is no photograph, or one fails to load. Both are positioned, so the
+   photograph wins on DOM order rather than needing a z-index. */
+.crop .plate .drawn{
+  position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  font-size:34px;background:radial-gradient(circle at 50% 62%,var(--pc,#3a4a3a),#0a0d14 72%);
+}
+.crop .plate img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}
+.crop .kindtag{
+  position:absolute;left:7px;top:7px;font-family:var(--mono);font-size:9px;
+  letter-spacing:.09em;text-transform:uppercase;padding:2px 6px;border-radius:4px;
+  background:rgba(8,10,16,.78);color:var(--ink-soft);backdrop-filter:blur(3px);
+}
+.crop .gmotag{
+  position:absolute;right:7px;top:7px;font-family:var(--mono);font-size:9px;
+  letter-spacing:.09em;text-transform:uppercase;padding:2px 6px;border-radius:4px;
+  background:rgba(138,180,255,.92);color:#0a1226;font-weight:600;
+}
+.crop .parentnote{
+  position:absolute;left:0;right:0;bottom:0;padding:14px 7px 5px;font-size:9px;line-height:1.4;
+  background:linear-gradient(180deg,rgba(8,10,16,0),rgba(8,10,16,.97) 55%);color:#c9d3e6;
+  text-shadow:0 1px 2px rgba(0,0,0,.9);
+}
+.crop .body{padding:9px 10px 10px;display:flex;flex-direction:column;gap:4px;flex:1 1 auto}
+.crop .top{display:flex;justify-content:space-between;align-items:baseline;gap:6px}
+.crop b{font-size:12.5px}
+.crop .seed{font-family:var(--mono);font-size:10.5px;color:var(--accent);white-space:nowrap}
+.crop .cv{font-size:10.5px;color:var(--ink-soft);font-style:italic}
+.crop .stats{font-family:var(--mono);font-size:9.5px;color:var(--ink-soft);margin-top:2px;display:flex;gap:9px;flex-wrap:wrap}
+.crop .dot{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:5px;vertical-align:baseline}
+.crop .traits{display:flex;flex-wrap:wrap;gap:4px;margin-top:3px}
+.crop .traits span{
+  font-size:9px;padding:2px 5px;border-radius:3px;
+  background:rgba(138,180,255,.14);color:var(--accent-2);border:1px solid rgba(138,180,255,.25);
+}
+.crop .blurb{font-size:10.5px;line-height:1.5;color:var(--ink-soft);margin-top:3px}
+.crop .lockmsg{font-size:10px;line-height:1.45;color:var(--warn);margin-top:3px}
+.crop .credit{font-size:8.5px;line-height:1.4;color:var(--ink-faint);margin-top:auto;padding-top:5px}
+.crop .credit a{color:var(--ink-faint)}
+
+.catcredits{margin-top:14px;border-top:1px solid var(--line);padding-top:10px}
+.catcredits summary{
+  cursor:pointer;font-family:var(--mono);font-size:10.5px;letter-spacing:.06em;
+  text-transform:uppercase;color:var(--ink-soft);
+}
+.catcredits summary:hover{color:var(--ink)}
+.catcredits table{width:100%;border-collapse:collapse;margin-top:9px;font-size:10.5px}
+.catcredits td{padding:4px 8px 4px 0;border-bottom:1px solid var(--line);color:var(--ink-soft);vertical-align:top}
+.catcredits td:first-child{font-family:var(--mono);color:var(--ink);white-space:nowrap}
+.catcredits a{color:var(--accent-2)}
+.catcredits p{font-size:11px;line-height:1.55;margin:8px 0 0}
+
+/* ---------- broadcast ---------- */
+.onair{
+  display:flex;align-items:center;gap:8px;padding:8px 10px;margin-bottom:9px;
+  background:var(--panel-2);border:1px solid var(--line);border-radius:8px;
+}
+.onair .lamp{width:9px;height:9px;border-radius:50%;background:var(--ink-faint);flex:0 0 auto}
+.onair.live .lamp{background:#ff5f5f;box-shadow:0 0 9px rgba(255,95,95,.75)}
+.onair .who{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-soft)}
+.onair .aud{margin-left:auto;font-family:var(--mono);font-size:12px;color:var(--ink)}
+.novlist{display:flex;flex-direction:column;gap:5px;margin-top:8px}
+.novrow{display:grid;grid-template-columns:1fr 62px;gap:8px;align-items:center;font-size:11px}
+.novrow .nm{color:var(--ink-soft);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.novrow .bar{height:5px;border-radius:3px;background:var(--panel-2);overflow:hidden}
+.novrow .bar i{display:block;height:100%;border-radius:3px}
+
+/* ---------- vault ledger ---------- */
+.vaultbox{
+  padding:11px 12px;margin-bottom:14px;border-radius:9px;
+  background:linear-gradient(180deg,#141b26,#10141c);border:1px solid var(--line);
+}
+.vaultbox.built{border-color:rgba(110,231,160,.42)}
+.vaultbox h4{
+  margin:0 0 3px;font-family:var(--mono);font-size:10.5px;letter-spacing:.11em;
+  text-transform:uppercase;color:var(--accent);
+}
+.vaultbox .count{font-size:22px;font-family:var(--mono);line-height:1.15}
+.vaultbox .count small{font-size:12px;color:var(--ink-soft)}
+.vaultbox p{font-size:11px;line-height:1.55;color:var(--ink-soft);margin:7px 0 0}
+.vaultbox .track{height:7px;border-radius:4px;background:#0a0d14;overflow:hidden;margin-top:8px}
+.vaultbox .track i{display:block;height:100%;background:linear-gradient(90deg,var(--accent-2),var(--accent))}
+.accgrid{display:flex;flex-wrap:wrap;gap:3px;margin-top:9px}
+.accgrid i{
+  width:9px;height:9px;border-radius:2px;background:var(--panel-2);
+  border:1px solid var(--line);display:block;
+}
+.accgrid i.has{border-color:transparent}
+
+/* ---------- biotech ---------- */
+.biolock{
+  padding:10px 12px;margin-bottom:12px;border-radius:8px;font-size:11.5px;line-height:1.55;
+  background:var(--panel-2);border:1px solid var(--line);border-left:3px solid var(--warn);color:var(--ink-soft);
+}
+.item .traits{display:flex;flex-wrap:wrap;gap:4px;margin:0 0 7px}
+.item .traits span{
+  font-size:9px;padding:2px 5px;border-radius:3px;
+  background:rgba(138,180,255,.14);color:var(--accent-2);border:1px solid rgba(138,180,255,.25);
+}
+.traitref{margin-top:6px}
+.traitref summary{cursor:pointer;font-size:11px;color:var(--ink-soft)}
+.traitref summary:hover{color:var(--ink)}
+.traitref dl{margin:8px 0 0;font-size:10.5px;line-height:1.55}
+.traitref dt{color:var(--accent-2);font-weight:600;margin-top:7px}
+.traitref dd{margin:2px 0 0;color:var(--ink-soft)}
+.traitref dd em{color:var(--ink);font-style:normal}
+
+@media (max-width:700px){
+  .croplist{grid-template-columns:repeat(auto-fill,minmax(150px,1fr));max-height:50vh}
+}

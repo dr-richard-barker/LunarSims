@@ -309,7 +309,7 @@ td.mark{width:34px;text-align:center}
         EV.forEach(e => e.choices.forEach(c => effects.push([e.id, c.effect])));
 
         /* declining a request is meant to leave the farm exactly as it was */
-        const DELIBERATE_NO_OPS = ['samp_keep'];
+        const DELIBERATE_NO_OPS = ['samp_keep', 'wild_decline', 'land_decline', 'comm_decline'];
 
         /* everything the effects can touch — a narrower snapshot reports real
            changes as no-ops, which is how the first cut of this test failed */
@@ -318,6 +318,8 @@ td.mark{width:34px;text-align:center}
           food: Math.round(s.food), science: s.science, morale: Math.round(s.morale),
           crew: s.crew, o2: Math.round(s.o2), co2: Math.round(s.co2),
           flags: s.flags,
+          residue: Math.round(s.residue), audience: Math.round(s.media.audience),
+          accessions: Object.keys(s.vault.accessions).sort().join(','), gmo: Object.keys(s.gmo).sort().join(','),
           soil: s.fields.map(x => x.soil), crops: s.fields.map(x => x.crop),
           infected: s.fields.map(x => x.infected), feed: s.fields.map(x => +x.feed.toFixed(2)),
           health: s.fields.map(x => +x.health.toFixed(2))
@@ -336,6 +338,9 @@ td.mark{width:34px;text-align:center}
             const t = s.map.find(t => !t.b && !t.f && t.t === 'flat');
             if (t) S.place(s, t, 'hab');
           }
+          S.place(s, S.tileAt(s, 13, 7), 'studio');
+          s.media.audience = 300;
+          ['romaine', 'potato', 'wheat', 'radish'].forEach(c => S.bankAccession(s, c));
           const before = snapshot(s);
           s.pendingEvent = id;
           try { S.resolveEvent(s, id, effect); }
@@ -361,6 +366,187 @@ td.mark{width:34px;text-align:center}
             effects.filter(([, ef]) => ef !== 'none' &&
               !S.resolveEvent.toString().includes(`'${ef}'`)).map(x => x[1]).join(', '), ''],
           ['a derated controller cuts solar', litBefore < litAfter || litAfter === 0, true]
+        ];
+      } },
+
+    /* ---- the studio, the microbes, the lab and the vault ---- */
+
+    { name: 'An expanding farm is never stranded',
+      why: 'the reported fault: money arrives only at harvest, so expanding left the player with nothing to spend for fifty days',
+      run() {
+        /* Plays the farm the way the complaint describes — build halls, sow, tend,
+           expand again — once without the studio and once with it, and measures
+           how long the player spends unable to afford anything. */
+        function play(withStudio) {
+          const s = S.newGame();
+          if (withStudio) S.place(s, S.tileAt(s, 13, 7), 'studio');
+          const mix = ['potato', 'romaine', 'wheat', 'radish', 'pakchoi', 'zinnia', 'duckweed', 'kale'];
+          let broke = 0, worst = 0, run = 0, rot = 0;
+          for (let d = 0; d < 200 && !s.over; d++) {
+            for (let h = 0; h < 24; h++) { S.tick(s); if (s.pendingEvent) s.pendingEvent = null; if (s.over) break; }
+            if (s.over) break;
+            for (const f of S.planted(s)) {
+              if (f.moisture < 0.4) S.water(s, f);
+              if (f.feed < 0.35) S.feed(s, f);
+              if (f.growth >= 1) { const c = f.crop; S.harvest(s, f); S.plant(s, f, c); }
+            }
+            if (s.credits > 6000) {
+              const spot = clearSpot(s, 3, 3);
+              if (spot && !S.addField(s, spot[0], spot[1], 3, 3)) {
+                S.plant(s, s.fields[s.fields.length - 1], mix[rot++ % mix.length]);
+              }
+            }
+            s.fields.forEach(f => { if (!f.crop && !f.dead) S.plant(s, f, 'potato'); });
+            if (s.water < 260 && s.credits > 2500) S.trade(s, 'water', 200);
+            if (s.nutrients < 120 && s.credits > 2500) S.trade(s, 'nutrients', 200);
+            /* "cannot afford to sow another hall of anything" */
+            if (s.credits < 1500) { broke++; run++; worst = Math.max(worst, run); } else run = 0;
+          }
+          return { days: s.day, over: !!s.over, broke, worst, earned: s.stats.mediaTotal || 0 };
+        }
+        const without = play(false), withIt = play(true);
+        return [
+          ['without a studio the farm strands itself', without.worst >= 30, true],
+          ['with one, it never goes 30 days unable to spend', withIt.worst, '<30'],
+          ['the studio earns while the crops are still growing', withIt.earned, '>4000'],
+          ['and the run lasts longer for it', withIt.days > without.days, true]
+        ];
+      } },
+
+    { name: 'The studio pays for variety, not volume',
+      why: 'the audience is the biodiversity incentive — a monoculture must earn visibly less than a rotation',
+      run() {
+        function play(mix) {
+          const s = S.newGame();
+          S.place(s, S.tileAt(s, 13, 7), 'studio');
+          s.credits = 400000; s.residue = 4000;
+          for (let i = 0; i < 5; i++) {
+            const spot = clearSpot(s, 2, 2);
+            if (spot) S.addField(s, spot[0], spot[1], 2, 2);
+          }
+          let rot = 0;
+          for (let d = 0; d < 180 && !s.over; d++) {
+            for (let h = 0; h < 24; h++) { S.tick(s); if (s.pendingEvent) s.pendingEvent = null; }
+            for (const f of S.planted(s)) {
+              if (f.moisture < 0.4) S.water(s, f);
+              if (f.feed < 0.35) S.feed(s, f);
+              if (f.growth >= 1) S.harvest(s, f);
+            }
+            s.fields.forEach(f => { if (!f.crop && !f.dead) { S.plant(s, f, mix[rot % mix.length]); rot++; } });
+            if (s.co2 < 60) S.trade(s, 'co2', 40);
+            if (s.nutrients < 150) S.trade(s, 'nutrients', 200);
+          }
+          return s;
+        }
+        const mono = play(['potato']);
+        const vary = play(['potato', 'romaine', 'radish', 'pakchoi', 'zinnia', 'duckweed', 'kale', 'onion', 'basil', 'mizuna']);
+        const ratio = (vary.stats.mediaTotal || 0) / Math.max(1, mono.stats.mediaTotal || 1);
+        return [
+          ['a monoculture still earns a floor', mono.stats.mediaTotal, '>8000'],
+          ['a varied farm earns substantially more', ratio, '>1.4'],
+          ['its audience is several times larger',
+            vary.media.audience > mono.media.audience * 2, true],
+          ['the repeated subject wears out', S.novelty(mono, 'potato') < 0.2, true],
+          ['no subject falls below the floor',
+            Object.keys(vary.media.novelty).every(k => vary.media.novelty[k] >= 0.07), true]
+        ];
+      } },
+
+    { name: 'Mushrooms grow through the lunar night',
+      why: 'a dark-grown culture is the answer to load shedding, and it must respire rather than photosynthesise',
+      run() {
+        const s = S.newGame();
+        s.credits = 200000; s.residue = 600;
+        const a = clearSpot(s, 2, 2); S.addField(s, a[0], a[1], 2, 2);
+        const shroom = s.fields[s.fields.length - 1];
+        S.plant(s, shroom, 'oyster');
+        const b = clearSpot(s, 2, 2); S.addField(s, b[0], b[1], 2, 2);
+        const leaf = s.fields[s.fields.length - 1];
+        S.plant(s, leaf, 'romaine');
+
+        const draw = S.lampNeed(s, shroom);
+        let nightDay = null, sAt = 0, lAt = 0, co2At = 0, resAt = 0;
+        let sEnd = 0, lEnd = 0, co2End = 0, resEnd = 0;
+        for (let d = 0; d < 45; d++) {
+          for (let h = 0; h < 24; h++) S.tick(s);
+          if (s.pendingEvent) s.pendingEvent = null;
+          for (const f of [shroom, leaf]) {
+            if (f.moisture < 0.4) S.water(s, f);
+            if (f.feed < 0.35) S.feed(s, f);
+          }
+          if (!S.isSunlit(s) && nightDay === null) {
+            nightDay = s.day; sAt = shroom.growth; lAt = leaf.growth; co2At = s.co2; resAt = s.residue;
+          }
+          if (nightDay && s.day === nightDay + 10) {
+            sEnd = shroom.growth; lEnd = leaf.growth; co2End = s.co2; resEnd = s.residue;
+            break;
+          }
+        }
+        return [
+          ['a mushroom bed asks for no lamp at all', draw, 0],
+          ['it keeps growing through ten days of darkness', sEnd - sAt, '>0.1'],
+          ['it outgrows a lit crop over the same dark stretch', sEnd - sAt > lEnd - lAt, true],
+          ['it gives carbon dioxide back rather than taking it', co2End >= co2At, true],
+          ['and it eats the residue to do it', resAt - resEnd, '>0']
+        ];
+      } },
+
+    { name: 'Engineered lines stay locked until the roster is sown',
+      why: 'the biotech tier is the reward for having grown everything conventional first',
+      run() {
+        const CROPS = window.LF_DATA.CROPS, GMO = window.LF_DATA.GMO;
+        const s = S.newGame();
+        s.credits = 999999; s.science = 999;
+        const blocked = S.developGmo(s, 'potato_g');
+        const sowBlocked = (() => {
+          const spot = clearSpot(s, 2, 2); S.addField(s, spot[0], spot[1], 2, 2);
+          return S.plant(s, s.fields[s.fields.length - 1], 'potato_g');
+        })();
+        CROPS.forEach(c => { s.stats.sown[c.id] = 1; });
+        const allowed = S.developGmo(s, 'potato_g');
+        const base = S.cropById('potato'), line = S.cropById('potato_g');
+        return [
+          ['the lab refuses before the roster is sown', !!blocked, true],
+          ['and the seed cannot be sown either', !!sowBlocked, true],
+          ['it opens once every conventional crop has gone in', allowed, null],
+          ['every line derives from a real crop',
+            GMO.every(g => !!S.cropById(g.base)), true],
+          ['every line derives cleanly', GMO.every(g => {
+            const c = S.cropById(g.id);
+            return c && c.days > 0 && isFinite(c.kcal) && isFinite(c.value) && c.seed > 0;
+          }), true],
+          ['improved harvest index actually yields more', line.kcal > base.kcal, true],
+          ['engineered seed costs more than conventional', line.seed > base.seed, true]
+        ];
+      } },
+
+    { name: 'The vault takes the skylight, and only when it is ready',
+      why: 'the vault is the point of the game, so its gate has to hold and its ledger has to count',
+      run() {
+        const CROPS = window.LF_DATA.CROPS;
+        const s = S.newGame();
+        s.credits = 999999; s.science = 999;
+        const sky = s.map.find(t => t.t === 'skylight');
+        const onGround = S.canPlace(s, S.tileAt(s, 10, 3), 'vault');
+        const bare = S.canPlace(s, sky, 'vault');
+        s.up.composter = true; s.up.shield = true;
+        const noAccessions = S.canPlace(s, sky, 'vault');
+        CROPS.slice(0, 12).forEach(c => S.bankAccession(s, c.id));
+        const ready = S.canPlace(s, sky, 'vault');
+        const placed = S.place(s, sky, 'vault');
+
+        /* accessions count distinct lines, not harvests */
+        const t = S.newGame();
+        S.bankAccession(t, 'potato'); S.bankAccession(t, 'potato'); S.bankAccession(t, 'romaine');
+        return [
+          ['it will not stand on open ground', !!onGround, true],
+          ['nor on the skylight before the loop and the shielding', !!bare, true],
+          ['nor without twelve accessions in hand', !!noAccessions, true],
+          ['with all three it is signed off', ready, null],
+          ['and it goes in', placed, null],
+          ['accessions count distinct lines, not harvests', S.accessions(t).length, 2],
+          ['the target is the whole roster',
+            S.vaultTarget(), CROPS.length + window.LF_DATA.GMO.length]
         ];
       } },
 
@@ -436,6 +622,9 @@ td.mark{width:34px;text-align:center}
   function judge(got, want) {
     if (typeof want === 'string' && want.startsWith('>=')) return got >= parseFloat(want.slice(2));
     if (typeof want === 'string' && want.startsWith('<=')) return got <= parseFloat(want.slice(2));
+    /* strict forms, checked after >= and <= so those still win */
+    if (typeof want === 'string' && want.startsWith('>')) return got > parseFloat(want.slice(1));
+    if (typeof want === 'string' && want.startsWith('<')) return got < parseFloat(want.slice(1));
     if (typeof want === 'string' && want.startsWith('~')) {
       const target = parseFloat(want.slice(1));
       return got !== null && Math.abs(got - target) <= Math.max(0.04, target * 0.06);

@@ -296,6 +296,82 @@
           ctx.beginPath(); ctx.arc(px, py - hgt * 0.85, 1.7 * q * scale, 0, 7); ctx.fill();
         }
         break;
+      case 'fibre': {
+        /* a woody stem carrying open bolls */
+        ctx.strokeStyle = shade('#6b6152', dim);
+        ctx.lineWidth = lw * 1.4;
+        ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(px, py - hgt); ctx.stroke();
+        for (let i = 0; i < 3; i++) {
+          const side = i % 2 ? 1 : -1;
+          const bx = px + side * wid * 0.34, by = py - hgt * (0.35 + i * 0.24);
+          ctx.strokeStyle = shade('#4f7a3f', dim); ctx.lineWidth = lw;
+          ctx.beginPath(); ctx.moveTo(px, by + 2 * scale); ctx.lineTo(bx, by); ctx.stroke();
+          if (g > 0.62) {
+            /* the boll splits open and the lint shows */
+            const q = (g - 0.62) / 0.38;
+            ctx.fillStyle = shade('#f2efe6', dim);
+            ctx.beginPath();
+            ctx.arc(bx, by, (1.4 + 1.9 * q) * scale, 0, 7);
+            ctx.fill();
+            ctx.strokeStyle = shade('#8a7f6a', dim); ctx.lineWidth = 0.8;
+            ctx.stroke();
+          } else {
+            ctx.fillStyle = shade('#5f8a4a', dim);
+            ctx.beginPath(); ctx.arc(bx, by, 1.6 * scale, 0, 7); ctx.fill();
+          }
+        }
+        break;
+      }
+      case 'fungal': {
+        /* a block of spent substrate with caps flushing off its face */
+        const bw = wid * 1.25, bh = hgt * 0.42;
+        ctx.fillStyle = shade('#6d5f4c', dim - 12);
+        ctx.fillRect(px - bw / 2, py - bh, bw, bh);
+        ctx.strokeStyle = shade('#4b4033', dim); ctx.lineWidth = 0.9;
+        ctx.strokeRect(px - bw / 2, py - bh, bw, bh);
+        const caps = Math.max(2, Math.round(2 + g * 5));
+        for (let i = 0; i < caps; i++) {
+          const t2 = (i + 0.5) / caps;
+          const cx = px - bw / 2 + t2 * bw;
+          const cy = py - bh * (0.35 + 0.5 * ((i * 37) % 10) / 10);
+          const r = (1.1 + g * 2.9) * scale;
+          ctx.fillStyle = shade(c.colour, dim + (i % 2 ? 6 : -10));
+          ctx.beginPath();
+          ctx.ellipse(cx, cy, r, r * 0.62, 0, Math.PI, 2 * Math.PI);   // the cap
+          ctx.fill();
+          ctx.fillStyle = shade(c.colour, dim - 26);
+          ctx.beginPath();
+          ctx.ellipse(cx, cy, r * 0.9, r * 0.20, 0, 0, Math.PI);       // gills beneath
+          ctx.fill();
+        }
+        break;
+      }
+      case 'microbe': {
+        /* a stirred vessel — this is a culture, not a canopy */
+        const vw = wid * 0.9, vh = hgt * 0.72;
+        ctx.fillStyle = 'rgba(200,225,242,0.14)';
+        ctx.beginPath();
+        ctx.ellipse(px, py - vh, vw / 2, vw * 0.20, 0, 0, 7); ctx.fill();
+        ctx.fillRect(px - vw / 2, py - vh, vw, vh);
+        const fill = vh * (0.18 + g * 0.74);
+        ctx.fillStyle = shade(c.colour, dim);
+        ctx.fillRect(px - vw / 2 + 1, py - fill, vw - 2, fill - 1);
+        ctx.fillStyle = shade(c.colour, dim + 26);
+        ctx.beginPath();
+        ctx.ellipse(px, py - fill, vw / 2 - 1, vw * 0.17, 0, 0, 7); ctx.fill();
+        ctx.strokeStyle = 'rgba(214,236,250,0.5)'; ctx.lineWidth = 1;
+        ctx.strokeRect(px - vw / 2, py - vh, vw, vh);
+        /* bubbles rising through the broth */
+        if (g > 0.2) {
+          ctx.fillStyle = 'rgba(255,255,255,0.34)';
+          for (let i = 0; i < 3; i++) {
+            const bx = px + ((i * 13) % 7 - 3) * scale * 0.6;
+            const byy = py - fill * (0.25 + i * 0.28);
+            ctx.beginPath(); ctx.arc(bx, byy, 0.8 * scale, 0, 7); ctx.fill();
+          }
+        }
+        break;
+      }
       case 'algae': {
         const tw = wid * 1.1, th = hgt * 0.8;
         ctx.fillStyle = 'rgba(195,225,240,0.16)';
@@ -615,7 +691,8 @@
       return;
     }
 
-    const Z = { solar: 26, battery: 24, hab: 30, isru: 42, composter: 32, reactor: 34, pad: 4 }[type] || 26;
+    const Z = { solar: 26, battery: 24, hab: 30, isru: 42, composter: 32, reactor: 34, pad: 4,
+                studio: 34, vault: 27 }[type] || 26;
     groundShadow(ctx, x + 0.1, y + 0.1, 0.8, 0.8, Z, sv);
     contact(ctx, x, y, 1, 1);
     if (site) return drawScaffold(ctx, x, y, 1, 1, Z, site, l);
@@ -803,6 +880,81 @@
         ctx.beginPath(); ctx.arc(p.x, p.y - Z, 3.2, 0, 7); ctx.fill();
         ctx.fillStyle = 'rgba(255,209,102,0.22)';
         ctx.beginPath(); ctx.arc(p.x, p.y - Z, 9, 0, 7); ctx.fill();
+        break;
+      }
+      case 'studio': {
+        /* a small pressurised block with a dish on the roof and the light on inside */
+        box(ctx, x + 0.14, y + 0.20, 0.72, 0.60, Z, '#8f93a4', l, { stroke: grey(165, l), lw: 1.2 });
+
+        /* window, lit whenever the studio is working */
+        const live = S.studioLive && S.studioLive(s);
+        ctx.fillStyle = live ? 'rgba(255,214,120,0.92)' : 'rgba(150,165,190,0.45)';
+        ctx.fillRect(p.x - 11, p.y - Z + 7, 22, 7);
+        ctx.strokeStyle = 'rgba(30,36,50,0.55)'; ctx.lineWidth = 1;
+        ctx.strokeRect(p.x - 11, p.y - Z + 7, 22, 7);
+
+        /* the dish, tipped up at Earth */
+        const dx = p.x + 9, dy = p.y - Z - 9;
+        ctx.strokeStyle = grey(150, l); ctx.lineWidth = 1.6;
+        ctx.beginPath(); ctx.moveTo(dx, p.y - Z + 1); ctx.lineTo(dx, dy); ctx.stroke();
+        ctx.fillStyle = `rgba(226,232,244,${0.45 + l * 0.5})`;
+        ctx.beginPath();
+        ctx.ellipse(dx, dy, 7.5, 4.6, -0.5, 0, 7);
+        ctx.fill();
+        ctx.strokeStyle = grey(120, l); ctx.lineWidth = 1;
+        ctx.stroke();
+        ctx.fillStyle = grey(90, l);
+        ctx.beginPath(); ctx.arc(dx, dy, 1.5, 0, 7); ctx.fill();
+
+        /* on-air lamp */
+        if (live) {
+          ctx.fillStyle = '#ff5f5f';
+          ctx.beginPath(); ctx.arc(p.x - 12, p.y - Z - 3, 2.2, 0, 7); ctx.fill();
+          ctx.fillStyle = 'rgba(255,95,95,0.22)';
+          ctx.beginPath(); ctx.arc(p.x - 12, p.y - Z - 3, 6.5, 0, 7); ctx.fill();
+        }
+        break;
+      }
+      case 'vault': {
+        /* The vault is a shaft head over the skylight, not a building on it: a
+           low collar round the opening and a lit wedge going down into the tube.
+           The pit itself is still drawn beneath, so it reads as a way in. */
+        ctx.fillStyle = grey(126, l);
+        diamond(ctx, x + 0.02, y + 0.02, 0.96, 0.96); ctx.fill();
+        ctx.fillStyle = '#05070c';
+        diamond(ctx, x + 0.20, y + 0.20, 0.6, 0.6); ctx.fill();
+
+        /* the wedge over the shaft */
+        const a1 = iso(x + 0.13, y + 0.13), b1 = iso(x + 0.87, y + 0.13);
+        const c1 = iso(x + 0.87, y + 0.87), d1 = iso(x + 0.13, y + 0.87);
+        ctx.beginPath();
+        ctx.moveTo(a1.x, a1.y - Z); ctx.lineTo(b1.x, b1.y - Z * 0.55);
+        ctx.lineTo(c1.x, c1.y - Z * 0.15); ctx.lineTo(d1.x, d1.y - Z * 0.55);
+        ctx.closePath();
+        ctx.fillStyle = tone('#aeb6c6', l, 1);
+        ctx.fill();
+        ctx.strokeStyle = grey(180, l); ctx.lineWidth = 1.2;
+        ctx.stroke();
+
+        /* the lit slot down the face */
+        ctx.fillStyle = 'rgba(150,230,255,0.85)';
+        ctx.beginPath();
+        ctx.moveTo(p.x - 2.5, p.y - Z * 0.86);
+        ctx.lineTo(p.x + 2.5, p.y - Z * 0.72);
+        ctx.lineTo(p.x + 2.5, p.y - Z * 0.10);
+        ctx.lineTo(p.x - 2.5, p.y - Z * 0.24);
+        ctx.closePath(); ctx.fill();
+        ctx.fillStyle = 'rgba(150,230,255,0.18)';
+        ctx.beginPath(); ctx.ellipse(p.x, p.y - Z * 0.5, 12, 9, 0, 0, 7); ctx.fill();
+
+        /* regolith heaped along the flanks, the way the real ones are */
+        ctx.fillStyle = grey(112, l);
+        for (const sx of [-1, 1]) {
+          const e = iso(x + 0.5 + sx * 0.44, y + 0.5);
+          ctx.beginPath();
+          ctx.ellipse(e.x, e.y - 3, 11, 6, 0, 0, 7);
+          ctx.fill();
+        }
         break;
       }
       case 'pad': {

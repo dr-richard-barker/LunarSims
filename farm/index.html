@@ -30,6 +30,7 @@
     </div>
     <div class="modes">
       <button id="btnAuto" class="mode" title="Let the crew tend, harvest, replant and restock on their own">Auto-manage</button>
+      <button id="btnCatalog" class="mode" title="The seed catalogue: every line, engineered or not">Catalogue</button>
       <button id="btnReport" class="mode" title="Telemetry report">Report</button>
       <button id="btnLeague" class="mode" title="Scores from past runs">League</button>
       <button id="btnSandbox" class="mode" title="Build anything at no cost">Sandbox</button>
@@ -79,11 +80,16 @@
 </main>
 
 <div class="modal" id="mPlant" hidden>
-  <div class="sheet wide">
-    <h2>Seed stock</h2>
+  <div class="sheet wide scroll">
+    <h2 id="plantTitle">Seed catalogue</h2>
     <p class="lede" id="plantLede">Choose what goes in the hall.</p>
+    <div class="catfilter" id="catFilter"></div>
     <div class="croplist" id="cropList"></div>
-    <div class="sheetfoot"><button class="ghost" data-close>Cancel</button></div>
+    <details class="catcredits" id="catCredits">
+      <summary>Where the photographs come from</summary>
+      <div id="catCreditBody">Loading credits…</div>
+    </details>
+    <div class="sheetfoot"><button class="ghost" data-close>Close</button></div>
   </div>
 </div>
 
@@ -150,6 +156,51 @@
       running — or you can pay to condition a hall outright with imported biomass. Bulldozing a hall
       throws that work away, so it is usually cheaper to replant than to rebuild.</p>
 
+    <h3>Earth is watching</h3>
+    <p>Build a <strong>Broadcast Studio</strong> and the farm starts paying its own way between
+      harvests. Every day it files what it has: the crop standing in the halls, the crew at the mess
+      table, a flower crop being cut and arranged. Earth pays a fee on delivery — that is the floor
+      that keeps you solvent while a potato takes three months — and pays again on the audience the
+      programme has built.</p>
+    <p><strong>The audience is the part that rewards variety.</strong> Every subject carries a
+      novelty that collapses the moment it airs and recovers slowly over the following fortnight.
+      Show the same potato every week and the fee shrinks and the audience drifts away; keep a dozen
+      different things standing in the ground and there is always a fresh one to lead with. A farm
+      that grows one crop very well earns roughly half what a farm growing twelve indifferently
+      does. That is deliberate: the camera is how biodiversity pays for itself.</p>
+
+    <h3>Things that grow in the dark</h3>
+    <p>Not everything in the catalogue is a plant. <strong>Oyster mushrooms</strong> fruit on the
+      spent straw and stover that every harvest leaves behind, and they need no lamp at all — which
+      means they keep producing straight through the fortnight of lunar night, when every lit hall
+      is being shed one at a time. They also <em>respire</em>: they burn oxygen and hand back carbon
+      dioxide, the reverse of a canopy, which quietly refills the buffer an exporting farm runs
+      down. Yeast and rhizobia work the same way. Cyanobacteria fix their own nitrogen and return it
+      to the nutrient tanks.</p>
+    <p>Watch the <strong>residue</strong> figure: it is what the cultures eat, and it only comes
+      from harvesting something photosynthetic. A farm of nothing but mushrooms starves.</p>
+
+    <h3>Biotechnology</h3>
+    <p>Sow every conventional crop in the catalogue at least once and the <strong>Biotech Lab</strong>
+      opens in the Research tab. Each engineered line is a real crop carrying real traits — improved
+      harvest index, biofortification, a photorespiratory bypass, faster relaxation of
+      non-photochemical quenching, extended bloom, radiation tolerance, reduced stomatal density,
+      perchlorate tolerance, a shortened cycle, molecular farming — and the catalogue tells you what
+      each one does and what it is based on. They cost credits and science to develop, and their
+      seed is dearer for ever after. They are also the only way to keep a farm growing once the
+      conventional roster has stopped surprising anybody.</p>
+
+    <h3>The vault is the point</h3>
+    <p>Everything you harvest is banked as an <strong>accession</strong>: a line held in living
+      store. The goal of the station is not the farm — it is the <strong>Lunar Seed Vault</strong>,
+      sunk into the lava tube through the skylight the settlement was founded on, where the rock
+      holds one temperature and tens of metres of basalt stop what no surface structure can. Get the
+      oxidation loop running, bury the modules under regolith, bank twelve accessions, and it can be
+      signed off. After that it pays a slow dividend in data on everything it holds, and a line kept
+      in the vault can be re-sown from secured stock when a tired-seed year would otherwise ruin it.</p>
+    <p>The ledger is at the top of the Goals tab. The target is every line the farm can grow, plant
+      and microbe alike, held against the possibility that somebody will need them.</p>
+
     <h3>The loop is closed</h3>
     <p>Plants make oxygen and consume carbon dioxide; the crew do the reverse. A surplus farm exports carbon
       inside the food it sells, so the buffer runs down over time — watch the CO₂ figure, build the biomass
@@ -170,12 +221,20 @@
       <li>Arabidopsis pays in science, which is what unlocks the serious hardware.</li>
       <li>Fungal infection spreads to neighbouring halls if you leave it.</li>
       <li>Surplus oxygen sells. So does surplus food, but selling food exports carbon.</li>
+      <li>The studio pays for what has not been on screen lately. Plant for the camera as well as the pantry.</li>
+      <li>Mushrooms do not care that the sun has set. Sow them before it does.</li>
+      <li>Every distinct line you harvest is banked. The vault is the only score that outlasts the run.</li>
     </ul>
 
     <h3>Credits</h3>
-    <p>An original game, written from scratch. It owes its shape to Maxis' <em>SimFarm</em> (1993), but shares
+      <p>An original game, written from scratch. It owes its shape to Maxis' <em>SimFarm</em> (1993), but shares
       no code or art with it. The crop roster is drawn from plants that have actually flown or are long-standing
       candidates for bioregenerative life support; the numbers are tuned for play, not for publication.</p>
+    <p>The catalogue photographs are openly licensed — public-domain NASA imagery of the crops that
+      have actually been grown in orbit, and Creative Commons photography for the rest. Every one is
+      credited by source, creator and licence inside the catalogue and in
+      <code>img/CREDITS.md</code>. Engineered lines are illustrated with their conventional parent's
+      photograph and captioned as such: there is no photograph of a cultivar that does not exist.</p>
 
     <div class="sheetfoot"><button class="ghost" data-close>Close</button></div>
   </div>

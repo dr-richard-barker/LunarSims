@@ -32,12 +32,15 @@ Pick a tool from the palette, then click or drag on the ground:
 - **Build** solar arrays, battery banks, habitats, an ilmenite reduction plant for
   water, a biomass oxidation loop for carbon, a landing pad and, eventually,
   fission surface power.
+- **Put the farm on air.** A broadcast studio films the harvest, the mess table and
+  the flowers being arranged, and pays every day — see *Earth is watching* below.
+- **Sink a seed vault into the tube** through the skylight the station was founded on.
 - **Answer the station alerts.** Eighteen of them, each a decision rather than a
   dice roll: shelter from a flare or keep the lamps on, patch a puncture or log it,
   buy certified seed or sow the tired stock, cut a leafy crop for the mess or bank
   the calories. Eighteen milestones mark a farm that works.
 
-Three things drive the difficulty:
+Four things drive the difficulty:
 
 - **The lunar night.** The cycle runs 29.5 Earth days, half of it dark. Solar gives
   you nothing for a fortnight, and lighting is shed one whole hall at a time as the
@@ -49,6 +52,85 @@ Three things drive the difficulty:
   anyone; potato, sweetpotato, wheat and soybean close the gap. Zinnias feed nobody
   and lift morale. Arabidopsis pays only in science, which is what unlocks the
   serious hardware.
+- **Cash arrives in lumps.** A potato is three months away from the day you sow it,
+  and until the studio is built there is nothing coming in between harvests. The
+  first serious decision of the game is whether to spend the opening capital on
+  another hall or on the thing that pays you while the hall grows.
+
+### Earth is watching
+
+The **Broadcast Studio** is the farm's second income, and the answer to running out
+of money halfway through a potato. Every day it files what it has: the crop standing
+in the halls, the crew at the mess table, a flower crop being cut and arranged.
+
+It pays twice. A **delivery fee** arrives per segment — that is the floor that keeps
+you solvent between harvests. Then it pays again on the **audience** the programme
+has built, and the audience is where biodiversity becomes an economic force rather
+than a nice idea:
+
+- Every subject carries a **novelty** that collapses the moment it airs and recovers
+  over the following fortnight.
+- The fee falls off gently with novelty, so a monoculture still earns a living.
+- Audience growth goes as novelty **squared**, so a tired subject adds almost nothing
+  to it.
+
+The measured effect, from `harness.html`: a farm rotating ten crops earns about
+**2.7×** what the same farm growing only potatoes earns, and holds an audience
+several times larger. Show Earth the same potato every week and the programme dies
+quietly.
+
+### Things that grow in the dark
+
+Not everything in the catalogue is a plant. **Oyster mushrooms** fruit on the spent
+straw and stover that every harvest leaves behind, and they need no lamp at all —
+so they keep producing straight through the fortnight of lunar night, when every lit
+hall is being shed one at a time. They also **respire**: they burn oxygen and hand
+back carbon dioxide, the reverse of a canopy, which quietly refills the buffer that
+an exporting farm runs down. They are also sensitive to it, and run to stem instead
+of cap if the hall gets too rich — which is a real constraint on growing them in a
+closed loop, not an invented one.
+
+Yeast and rhizobia work the same way; cyanobacteria fix their own nitrogen and
+return it to the nutrient tanks. All four are watched by the new **residue** figure,
+which is what the cultures eat and only comes from harvesting something
+photosynthetic. A farm of nothing but mushrooms starves.
+
+### Biotechnology
+
+Sow every conventional crop at least once and the **Biotech Lab** opens under
+Research. Sixteen engineered lines are then available to develop, each a real crop
+carrying real traits — improved harvest index, biofortification, a photorespiratory
+bypass, faster relaxation of non-photochemical quenching, extended bloom, radiation
+tolerance, reduced stomatal density, low-light tolerance, perchlorate tolerance, a
+shortened cycle, molecular farming, seed longevity, assisted fruit set, a nitrogen
+partnership, carbon dioxide tolerance.
+
+A line is not authored as a whole crop; it is its base crop run through its trait
+list, so the trait table *is* the design. The in-game reference under Research
+describes what each trait is and what it does to the farm. Engineered seed costs
+more than conventional, permanently.
+
+**[Fifteen Traits for a Moon Farm](https://claude.ai/code/artifact/c1c0c544-7b36-4f5e-b1ae-8d853a8256af)**
+sets the whole roster out in one page — what each trait is, what it buys, and an
+interactive composer that runs the game's own derivation so you can stack traits on
+any crop and watch credits per tile per day move. Its data is read from `data.js`,
+so the page and the game cannot drift apart.
+
+### The vault is the point
+
+Everything you harvest is banked as an **accession**: a line held in living store.
+The goal of the station is not the farm — it is the **Lunar Seed Vault**, sunk into
+the lava tube through the skylight the settlement was founded on, where the rock
+holds one temperature and tens of metres of basalt stop what no surface structure
+can. It needs the oxidation loop running, regolith overburden fitted, and twelve
+accessions in hand before it can be signed off. After that it pays a slow dividend
+in data on everything it holds, and a line kept in the vault can be re-sown from
+secured stock when a tired-seed year would otherwise ruin it.
+
+The ledger sits at the top of the Goals tab. The target is every line the farm can
+grow — twenty-nine conventional, sixteen engineered, plant and microbe alike — plus
+the crop wild relatives and landraces that arrive by lander and are worth taking in.
+That is the score that outlasts the run.
 
 ### The view
 
@@ -75,7 +157,11 @@ halls need no such help, because you can see straight through them.
 ### Extras in the header
 
 - **Auto-manage** hands the daily tending to the crew: they water, feed, treat,
-  harvest, replant and restock, keeping a working float in the bank.
+  harvest, replant and restock, keeping a working float in the bank. They rotate
+  deliberately, sowing whatever has been off screen longest, because that is what
+  the studio pays for.
+- **Catalogue** opens the seed catalogue outside of sowing: every line the farm can
+  grow, photographed and credited, with the engineered ones and their traits.
 - **Report** opens a telemetry dashboard — eight metrics over time with the lunar
   nights banded behind them — written either as a situation report to Earth
   Operations or, at one click, as a note to the settlers. Same facts, different room.
@@ -93,11 +179,23 @@ renderer to simulation, never back. That is what makes the balance testable, and
 simulation survived three renderer rewrites almost untouched.
 
 Open **`farm/harness.html`** in a browser. It loads only the data and the simulation, replaces
-`Math.random` with a seeded generator so runs are reproducible, and plays nine scenarios out
+`Math.random` with a seeded generator so runs are reproducible, and plays sixteen scenarios out
 over hundreds of simulated days — a careless farm failing, a competent one closing the food
 loop, auto-manage surviving unattended, the unserviced and rail modifiers each biting by the
 amount they claim, raw regolith yielding what the constant says, a monoculture costing morale,
-the lunar night shedding load, and a run surviving the JSON round trip it is stored as.
+the lunar night shedding load, every event choice resolving, saves carrying forward, and a run
+surviving the JSON round trip it is stored as.
+
+Five of those scenarios exist because of the systems above, and two are worth knowing about:
+
+- **An expanding farm is never stranded** is the regression test for the reported fault —
+  that money arrived only at harvest, so expanding left the player with nothing to spend for
+  fifty days. It plays the same farm with and without a studio and measures the longest run
+  of consecutive days spent unable to afford anything. Without one that run is thirty days or
+  more; with one it is **three**.
+- **The studio pays for variety, not volume** asserts the biodiversity incentive numerically:
+  a rotation of ten crops must out-earn a monoculture by a clear margin (it manages **2.7×**),
+  while a monoculture must still clear a survivable floor.
 
 It needs no install and no build step. **Re-run it after any change to `sim.js` or `data.js`** —
 balance is only visible over hundreds of days and cannot be judged by eye.
@@ -139,7 +237,10 @@ farm/
   harness.html      headless simulation tests — open it in a browser
   perf.html         frame-cost profile — open it in a browser
   style.css
-  js/data.js        crops, structures, equipment, events, milestones
+  img/              catalogue photography, openly licensed
+  img/credits.json  the manifest: source, creator and licence for every image
+  img/CREDITS.md    generated from the manifest — do not hand-edit
+  js/data.js        crops, traits, engineered lines, structures, equipment, events, milestones
   js/sim.js         the simulation — one tick is one hour
   js/agents.js      crew, rovers and build bots — cosmetic, reads the same state
   js/render.js      isometric canvas renderer, procedural throughout
@@ -475,16 +576,49 @@ metro/
 
 ## On the crop list
 
-The crops are real ones: `'Outredgeous'` red romaine, mizuna and Tokyo Bekana from
-the ISS Veggie experiments; the `'Red Robin'` dwarf tomato of VEG-05; the
-`'Española Improved'` chile of Plant Habitat-04; `'USU-Apogee'` dwarf wheat, bred at
-Utah State for controlled-environment life support; potato, sweetpotato and soybean
-from the CELSS-era candidate lists; Arabidopsis, which pays in data; and spirulina,
-the photosynthetic compartment of the MELiSSA loop.
+Twenty-nine conventional lines and sixteen engineered ones. The conventional crops
+are real, and so is the reason each is in the game:
+
+- **From the ISS Veggie and Advanced Plant Habitat programmes** — `'Outredgeous'` red
+  romaine, mizuna, Tokyo Bekana, `'Extra Dwarf'` pak choi and Red Russian kale (the
+  last two both VEG-04 crops); the `'Red Robin'` dwarf tomato of VEG-05; the
+  `'Española Improved'` chile and the radishes of Plant Habitat-04; the zinnia that
+  flowered in 2016.
+- **From the Chinese programme** — dwarf rice, taken from seed to seed aboard the
+  Wentian module in 2022, the first crop to complete a full life cycle in orbit; and
+  cotton, rapeseed and yeast, all of which flew in the Chang'e-4 biosphere canister,
+  where the cotton became the first plant to germinate on the Moon in January 2019.
+- **From the CELSS-era candidate lists** — potato, sweetpotato, soybean, peanut,
+  `'USU-Apogee'` dwarf wheat bred at Utah State for controlled-environment life
+  support, and strawberry.
+- **Because a crew has to want to eat** — basil, bunching onion, marigold, sunflower.
+- **Because not everything is a plant** — oyster mushroom on spent crop residue,
+  baker's yeast, *Anabaena* for nitrogen, rhizobial inoculant for the beds, and
+  spirulina, the photosynthetic compartment of the MELiSSA loop.
+- **Because it pays in data** — Arabidopsis.
 
 The **numbers attached to them are balanced for play, not measured.** Days to
 maturity are in the right region for each crop, and the gas, water and energy
 relationships behave qualitatively as they should, but nothing here should be cited.
+The engineered lines are extrapolations from real lines of plant biotechnology; the
+traits are described by what they do to a plant, not attributed to any publication.
+
+### The photographs
+
+The seed catalogue is illustrated with **openly licensed photography**, not with
+anything generated. Public-domain NASA imagery covers the crops that have actually
+been grown in orbit — the `'Outredgeous'` romaine the crew ate in 2015, the VEG-05
+tomato, Plant Habitat radishes, the Expedition 20 crew at the mess table. Creative
+Commons photography covers the rest.
+
+Every image is credited by source, creator and licence in
+[`farm/img/CREDITS.md`](farm/img/CREDITS.md), which is generated from
+`farm/img/credits.json` and never hand-written; the same table is readable inside
+the catalogue itself. Thirty-two photographs, about 1.7 MB.
+
+**Engineered lines are illustrated with their conventional parent's photograph, and
+captioned as such.** There is no photograph of a cultivar that does not exist, and
+the game does not pretend otherwise.
 
 ## The rest of the arcade
 

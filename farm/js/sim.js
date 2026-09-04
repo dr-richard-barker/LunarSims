@@ -4,7 +4,7 @@
    tile structure. One tick is one hour of station time. */
 
 (function () {
-  const { K, CROPS, UPGRADES, BUILDINGS, EVENTS, MILESTONES } = window.LF_DATA;
+  const { K, CROPS, TRAITS, GMO, UPGRADES, BUILDINGS, EVENTS, MILESTONES } = window.LF_DATA;
 
   /* Rates below are PER TILE of grow hall. One tile is a multi-tier rack of
      roughly 20 m2 of growing area. */
@@ -29,8 +29,88 @@
   const SOIL_PER_LIT_HOUR = 0.00004;
   const MAX_FIELD = 8;             // longest side you may drag
 
+  /* Residue is the half of every harvest nobody can eat: straw, stover, roots and
+     leaf trash. Photosynthetic crops leave it behind; the fungal and microbial
+     cultures live on it. */
+  const RESIDUE_PER_TILE = 2.2;
+
+  /* The studio. Audience is the stock, revenue is the flow off it, and novelty is
+     what stops a monoculture farming the camera as easily as it farms potatoes. */
+  const AUD_PER_SEGMENT = 44;      // audience gained by one aired segment at full novelty
+  const AUD_DECAY = 0.986;         // per day, so silence costs you the audience
+  const AUD_CAP = 2400;
+  const MEDIA_RATE = 0.75;         // credits per head of audience per day
+  const SEGMENT_FEE = 210;         // paid on delivery of a segment, novelty-weighted
+  const FEE_FLOOR = 0.22;          // a tired subject still gets a broadcast fee
+  const NOVELTY_SPEND = 0.34;      // what a subject's novelty falls to when it airs
+  const NOVELTY_RECOVER = 0.045;   // per day back toward 1
+  const NOVELTY_FLOOR = 0.07;
+  const SEGMENTS_PER_DAY = 2;
+
   const co2Cap = s => (s.up.composter ? 400 : 260);
-  const cropById = id => CROPS.find(c => c.id === id);
+
+  /* ---------- crops, conventional and engineered ----------
+
+     A GMO line is not authored as a whole crop; it is its base crop run through
+     its trait list. `mods` keys multiply, keys written with a leading + add, and
+     a handful are flags. Derived crops are cached because cropById is called
+     several times per field per tick. */
+  const FLAG_MODS = { keeps: 1, setFloor: 1, co2Shy: 1 };
+  const derivedCache = {};
+
+  function deriveCrop(g) {
+    const base = CROPS.find(c => c.id === g.base);
+    if (!base) return null;
+    const c = Object.assign({}, base, {
+      id: g.id, name: g.name, cultivar: g.cultivar, note: g.note,
+      gmo: true, base: g.base, traits: g.traits.slice(),
+      light: 1, flowers: 1, soilFloor: 0
+    });
+    for (const tid of g.traits) {
+      const t = TRAITS.find(x => x.id === tid);
+      if (!t) continue;
+      for (const key of Object.keys(t.mods)) {
+        const v = t.mods[key];
+        if (key[0] === '+') { const k = key.slice(1); c[k] = (c[k] || 0) + v; }
+        else if (key === 'soilFloor') c.soilFloor = (c.soilFloor || 0) + v;
+        else if (FLAG_MODS[key]) c[key] = !!v;
+        else c[key] = (c[key] || 0) * v;
+      }
+    }
+    c.days = Math.max(6, Math.round(c.days));
+    c.kcal = Math.round(c.kcal);
+    c.value = Math.round(c.value);
+    c.morale = Math.round(c.morale * 10) / 10;
+    /* engineered seed is dearer to produce, and stays dearer */
+    c.seed = Math.round(base.seed * 1.6);
+    return c;
+  }
+
+  function cropById(id) {
+    const base = CROPS.find(c => c.id === id);
+    if (base) return base;
+    if (derivedCache[id]) return derivedCache[id];
+    const g = GMO.find(x => x.id === id);
+    if (!g) return null;
+    const made = deriveCrop(g);
+    if (made) derivedCache[id] = made;
+    return made;
+  }
+
+  /* everything sowable right now: the whole conventional roster plus developed lines */
+  const gmoById = id => GMO.find(g => g.id === id);
+  const sowable = s => CROPS.concat(GMO.filter(g => s.gmo && s.gmo[g.id]).map(g => cropById(g.id)));
+  /* the gate: every conventional crop has to have gone in the ground once */
+  const conventionalSown = s => CROPS.filter(c => s.stats.sown && s.stats.sown[c.id]).length;
+  const biotechOpen = s => conventionalSown(s) >= CROPS.length;
+
+  /* Lamp draw for one hall. A dark-grown culture needs none, and a low-light or
+     fast-relaxing line needs less of it. */
+  function lampNeed(s, f) {
+    const c = cropById(f.crop);
+    if (!c || c.dark) return 0;
+    return (f.w * f.h) * ledKW(s) * (c.light || 1);
+  }
   const buildById = id => BUILDINGS.find(b => b.id === id);
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const idx = (x, y) => y * K.COLS + x;
@@ -74,7 +154,7 @@
 
   /* Bump when the stored shape changes. Anything older is brought forward by
      migrate() rather than thrown away. */
-  const STATE_VERSION = 6;
+  const STATE_VERSION = 7;
 
   /* Bring a stored run up to the shape this code expects.
 
@@ -106,10 +186,31 @@
       .forEach(k => def(o.flags, k, 0));
     def(o.up, 'led', 0); def(o.up, 'recovery', 0);
 
+    /* v7 — the studio, the biotech tier and the vault.
+
+       stats.sown is seeded from stats.kinds rather than left empty: a run that
+       has already harvested twenty crops has plainly sown them, and starting its
+       biotech gate from zero would be taking work away from somebody who did it. */
+    def(o, 'residue', 0);
+    def(o, 'gmo', {});
+    def(o, 'media', null);
+    if (!o.media) {
+      o.media = { audience: 0, novelty: {}, aired: 0, revenue: 0, today: 0, reel: [], last: [] };
+    }
+    ['audience', 'aired', 'revenue', 'today'].forEach(k => def(o.media, k, 0));
+    def(o.media, 'novelty', {}); def(o.media, 'reel', []); def(o.media, 'last', []);
+    def(o, 'vault', null);
+    if (!o.vault) o.vault = { accessions: {}, lost: 0, secured: false };
+    def(o.vault, 'accessions', {}); def(o.vault, 'lost', 0); def(o.vault, 'secured', false);
+    if (o.stats && o.stats.sown === undefined) {
+      o.stats.sown = Object.assign({}, o.stats.kinds || {});
+    }
+
     const st = o.stats;
     def(st, 'harvests', 0); def(st, 'kinds', {}); def(st, 'nightsSurvived', 0);
     def(st, 'closureStreak', 0); def(st, 'harvestedToday', 0);
     def(st, 'lastClosure', 0); def(st, 'brownouts', 0); def(st, 'seenNight', false);
+    def(st, 'sown', {}); def(st, 'mediaTotal', 0); def(st, 'ateRecently', 0); def(st, 'lastEaten', '');
     /* closure used to be a rolling window; it is now measured over the whole
        mission, so seed the totals from what the run has actually done */
     if (st.totalGrown === undefined) {
@@ -138,15 +239,19 @@
       version: STATE_VERSION,
       hour: 6, day: 1,
       credits: 12000, water: 900, o2: 240, co2: 200, nutrients: 400,
-      food: 600000, science: 0, spares: 6, pressure: 100, stored: 120,
+      food: 600000, science: 0, spares: 6, pressure: 100, stored: 120, residue: 0,
       crew: 3, morale: 72, photoperiod: 16, isruOn: true,
       auto: false, sandbox: false, history: [],
       map: makeMap(41), fields: [], nextField: 1,
       up: { led: 0, recovery: 0 },
       flags: { dust: 0, leak: 0, busfault: 0, biofilm: 0, thermal: 0, shutter: 0,
                seed: 0, railout: 0, mppt: 0 },
-      stats: { harvests: 0, kinds: {}, nightsSurvived: 0, closureStreak: 0,
-               harvestedToday: 0, totalGrown: 0, totalEaten: 0, lastClosure: 0, brownouts: 0, seenNight: false },
+      stats: { harvests: 0, kinds: {}, sown: {}, nightsSurvived: 0, closureStreak: 0,
+               harvestedToday: 0, totalGrown: 0, totalEaten: 0, lastClosure: 0, brownouts: 0,
+               seenNight: false, mediaTotal: 0, ateRecently: 0, lastEaten: '' },
+      gmo: {},
+      media: { audience: 0, novelty: {}, aired: 0, revenue: 0, today: 0, reel: [], last: [] },
+      vault: { accessions: {}, lost: 0, secured: false },
       done: {}, log: [], over: null, litFields: 0, wantFields: 0, litTiles: 0, wantTiles: 0
     };
     const put = (x, y, type) => { s.map[idx(x, y)].b = { type }; };
@@ -160,6 +265,7 @@
     addField(s, 9, 4, 4, 3, true);
     /* the beds you inherit have been worked for years */
     Object.assign(s.fields[0], { crop: 'potato', growth: 0.55, plantedDay: 1, soil: 0.8 });
+    s.stats.sown.potato = 1;
     return s;
   }
 
@@ -296,7 +402,7 @@
 
   function demand(s) {
     const ls = K.BASE_LIFE_SUPPORT + s.crew * K.LS_PER_CREW;
-    const lit = lightsOn(s) ? planted(s).reduce((a, f) => a + area(f), 0) * ledKW(s) : 0;
+    const lit = lightsOn(s) ? planted(s).reduce((a, f) => a + lampNeed(s, f), 0) : 0;
     const isru = (count(s, 'isru') && s.isruOn) ? K.ISRU_KW : 0;
     return { ls, lit, isru, total: ls + lit + isru };
   }
@@ -343,56 +449,87 @@
     let brownout = false, usedKW = 0, litFields = 0, litTiles = 0;
     for (const f of s.fields) f.litNow = false;
 
+    /* A mushroom bed or a fermenter fruits in the dark. It is never shed, never
+       counted against the lighting budget, and the fortnight of night costs it
+       nothing — which is the whole reason to grow one. */
+    const wantLight = crops.filter(f => lampNeed(s, f) > 0);
+    const darkGrown = crops.filter(f => lampNeed(s, f) === 0);
+    for (const f of darkGrown) f.litNow = true;
+
     if (baseSurplus < 0 && s.stored + baseSurplus < 0) {
       brownout = true;
       s.morale -= 0.6;
       s.o2 -= s.crew * K.CREW_O2 / 24 * 0.5;
       s.stored = 0;
+      for (const f of darkGrown) f.litNow = true;   // a brownout does not reach them
     } else if (on) {
       const pool = baseSurplus + s.stored;
-      for (const f of crops) {
-        const need = area(f) * per;
+      for (const f of wantLight) {
+        const need = lampNeed(s, f);
         if (usedKW + need <= pool) { f.litNow = true; usedKW += need; litFields++; litTiles += area(f); }
       }
       s.stored = clamp(s.stored + baseSurplus - usedKW, 0, storageCap(s));
-      brownout = litFields < crops.length;
+      brownout = litFields < wantLight.length;
     } else {
       s.stored = clamp(s.stored + baseSurplus, 0, storageCap(s));
     }
     if (brownout) s.stats.brownouts++;
-    s.litFields = litFields; s.wantFields = on ? crops.length : 0;
+    s.litFields = litFields; s.wantFields = on ? wantLight.length : 0;
     s.litTiles = litTiles;
-    s.wantTiles = on ? crops.reduce((a, f) => a + area(f), 0) : 0;
+    s.wantTiles = on ? wantLight.reduce((a, f) => a + area(f), 0) : 0;
+    s.darkFields = darkGrown.length;
 
     /* --- crops --- */
     const touching = serviceSet(s);
     let o2Made = 0, co2Used = 0, waterUsed = 0, nutrUsed = 0;
     const carbonLimit = clamp(s.co2 / 14, 0.15, 1);
 
+    let residueUsed = 0, nFixed = 0;
+
     for (const f of crops) {
       const c = cropById(f.crop);
       const A = area(f);
-      const rate = 1 / (c.days * s.photoperiod);
+      /* c.days means days, so a dark culture running around the clock divides by
+         24 where a lit canopy divides by its photoperiod. */
+      const rate = 1 / (c.days * (c.dark ? 24 : s.photoperiod));
       f.serviced = fieldServiced(s, f, touching);
       f.railed = fieldRailed(s, f);
 
-      if (f.litNow) {
+      /* Fungal and microbial beds eat the residue store. Run it dry and they stall
+         where a plant would simply go dark. */
+      const wantRes = c.residue ? (c.residue / (c.days * 24)) * A : 0;
+      const fed = wantRes <= 0 || s.residue >= wantRes;
+      f.starved = !fed;
+
+      if (f.litNow && fed) {
         let g = 1;
         g *= clamp(f.moisture * 3, 0, 1);
         g *= clamp(f.feed * 3, 0, 1);
         g *= f.health;
-        g *= carbonLimit;
+        /* a respiring culture is not carbon-limited — it is making the carbon */
+        if (!c.respires) g *= carbonLimit;
+        /* mushrooms run to stem instead of cap when the hall gets close */
+        if (c.co2Shy && s.co2 > 150) g *= 0.68;
         if (!f.serviced) g *= UNSERVICED_PENALTY;
         if (f.railed && !s.flags.railout) g *= RAIL_BONUS;
-        g *= RAW_SOIL + (1 - RAW_SOIL) * f.soil;
+        const floor = clamp(RAW_SOIL + (c.soilFloor || 0), 0, 1);
+        g *= floor + (1 - floor) * f.soil;
         if (s.flags.thermal > 0) g *= 0.7;
         if (f.infected) g *= 0.5;
         if (s.pressure < 90) g *= 0.6;
 
         f.growth = clamp(f.growth + rate * g, 0, 1);
 
-        const o2 = O2_PER_LIT_HOUR * c.o2 * g * A;
-        o2Made += o2; co2Used += o2 * CO2_PER_O2; f.carbon += o2 * CO2_PER_O2;
+        const gas = O2_PER_LIT_HOUR * c.o2 * g * A;
+        if (c.respires) {
+          /* the reverse of a canopy: burns oxygen, hands back carbon dioxide */
+          o2Made -= gas;
+          co2Used -= gas * CO2_PER_O2;
+          residueUsed += wantRes;
+        } else {
+          o2Made += gas; co2Used += gas * CO2_PER_O2; f.carbon += gas * CO2_PER_O2;
+        }
+        if (c.fixesN) nFixed += (c.fixesN / 24) * g * A * 0.25;
 
         f.soil = clamp(f.soil + SOIL_PER_LIT_HOUR, 0, 1);
         f.moisture -= (c.water / 24) * 0.020;
@@ -452,7 +589,8 @@
     waterUsed += s.crew * K.CREW_WATER / 24;
     s.water -= waterUsed * (1 - rec);
     if (isruRan) s.water += 14 / 24;
-    s.nutrients = Math.max(0, s.nutrients - nutrUsed);
+    s.residue = Math.max(0, s.residue - residueUsed);
+    s.nutrients = Math.max(0, s.nutrients - nutrUsed + nFixed);
     if (s.nutrients <= 0) for (const f of crops) f.feed = Math.min(f.feed, 0.05);
     s.food -= dailyNeed(s) / 24;
     s.water = Math.max(0, s.water);
@@ -483,11 +621,19 @@
       if (f.infected && s.credits > 120 * area(f) * 3) treat(s, f);
       if (f.growth >= 1) harvest(s, f, log);
     }
-    /* replant anything standing empty, favouring calories but keeping variety */
+    /* Replant anything standing empty. The crew keep the calories coming, but
+       they also rotate deliberately: the studio pays for what has not been on
+       screen lately, so the least recently aired line goes in first. */
     const empties = s.fields.filter(f => !f.crop && !f.dead);
+    const staples = ['potato', 'wheat', 'sweetpotato', 'soybean', 'rice', 'peanut'];
+    const rotation = ['romaine', 'radish', 'pakchoi', 'kale', 'duckweed', 'zinnia',
+                      'mizuna', 'onion', 'arabidopsis', 'oyster', 'sunflower', 'basil'];
     empties.forEach((f, i) => {
-      const pick = i % 5 === 4 ? 'arabidopsis' : (i % 3 === 1 ? 'wheat' : 'potato');
-      plant(s, f, pick);
+      if (i % 2 === 0) return void plant(s, f, staples[i % staples.length]);
+      /* freshest first, so novelty and therefore revenue stay up */
+      const byNovelty = rotation.slice().sort((a, b) => novelty(s, b) - novelty(s, a));
+      for (const id of byNovelty) if (!plant(s, f, id)) return;
+      plant(s, f, 'potato');
     });
     if (s.flags.leak && s.spares >= 2) patchLeak(s);
 
@@ -502,8 +648,147 @@
     if (s.food > dailyNeed(s) * 80) sellFood(s, 60000);
   }
 
+  /* ---------- the studio ----------
+
+     Earth pays to watch the farm work, and what it will not pay for is the same
+     shot again. Every subject carries a novelty that collapses when it airs and
+     recovers slowly, so a farm growing one crop very well earns steadily less
+     from the camera than a farm growing twelve indifferently. That is the whole
+     mechanism: the audience is a biodiversity meter with a credit value. */
+
+  function studioLive(s) {
+    const t = built(s, 'studio')[0];
+    if (!t) return false;
+    return serviceSet(s).has(idx(t.x, t.y));
+  }
+
+  function queueSegment(s, kind, subject) {
+    if (!s.media) return;
+    s.media.reel.push({ kind, subject, day: s.day });
+    if (s.media.reel.length > 14) s.media.reel.shift();
+  }
+
+  const novelty = (s, k) => (s.media.novelty[k] === undefined ? 1 : s.media.novelty[k]);
+  const SEGMENT_WEIGHT = { bouquet: 1.45, harvest: 1.15, standing: 0.9, mess: 0.85 };
+
+  function runStudio(s) {
+    const m = s.media;
+    m.today = 0;
+    for (const k of Object.keys(m.novelty)) {
+      m.novelty[k] = Math.min(1, m.novelty[k] + NOVELTY_RECOVER);
+    }
+    if (!studioLive(s)) {
+      m.audience = Math.max(0, m.audience * AUD_DECAY);
+      m.last = [];
+      m.reel = [];
+      return;
+    }
+
+    /* The mess table. The crew eat every day, so this is the one segment that is
+       always available — it is the floor under the whole economy. Its subject is
+       whatever they are eating, which is why a farm with a varied menu earns more
+       from the same camera than a farm with one crop in the store. */
+    if (s.crew >= 2 && s.food > dailyNeed(s) * 2) {
+      queueSegment(s, 'mess', 'mess_' + (s.stats.lastEaten || 'rations'));
+    }
+
+    /* Anything standing in a hall is filmable, not only the day it is cut. This
+       is what makes variety pay continuously rather than once a season: a farm
+       with ten crops in the ground offers ten subjects every morning and can
+       always lead with a fresh one, where a monoculture has exactly one and the
+       audience has already seen it. */
+    for (const f of planted(s)) {
+      const c = cropById(f.crop);
+      if (c) queueSegment(s, 'standing', c.id);
+    }
+
+    /* air the freshest subjects, never the same one twice in a day */
+    const pool = m.reel.slice().sort((a, b) => novelty(s, b.subject) - novelty(s, a.subject));
+    const aired = [], seen = {};
+    for (const seg of pool) {
+      if (aired.length >= SEGMENTS_PER_DAY) break;
+      if (seen[seg.subject]) continue;
+      seen[seg.subject] = 1;
+      aired.push(seg);
+    }
+    m.reel = [];
+
+    let gain = 0, fees = 0;
+    for (const seg of aired) {
+      const n = novelty(s, seg.subject);
+      const w = SEGMENT_WEIGHT[seg.kind] || 1;
+      gain += AUD_PER_SEGMENT * n * n * w;
+      fees += SEGMENT_FEE * (FEE_FLOOR + (1 - FEE_FLOOR) * n) * w;
+      m.novelty[seg.subject] = Math.max(NOVELTY_FLOOR, n * NOVELTY_SPEND);
+      m.aired++;
+      if (seg.kind === 'bouquet') s.morale = clamp(s.morale + 1.6, 0, 100);
+    }
+    m.audience = clamp(m.audience * AUD_DECAY + gain, 0, AUD_CAP);
+
+    const pay = Math.round(fees + m.audience * MEDIA_RATE);
+    s.credits += pay;
+    m.today = pay;
+    m.revenue += pay;
+    s.stats.mediaTotal = (s.stats.mediaTotal || 0) + pay;
+    m.last = aired.map(a => ({ kind: a.kind, subject: a.subject }));
+  }
+
+  /* ---------- the vault ----------
+
+     An accession is a line held in living store. They accumulate from the first
+     harvest, because a farm banks what it grows whether or not the chamber is
+     finished; the vault in the tube is what makes them safe, and what makes them
+     pay. */
+
+  const accessions = s => Object.keys((s.vault && s.vault.accessions) || {});
+  const vaultBuilt = s => count(s, 'vault') > 0;
+  const vaultTarget = () => CROPS.length + GMO.length;
+
+  function bankAccession(s, id) {
+    if (!s.vault) return false;
+    if (s.vault.accessions[id]) return false;
+    s.vault.accessions[id] = s.day;
+    return true;
+  }
+
+  function loseAccessions(s, n) {
+    const held = accessions(s);
+    let lost = 0;
+    for (let i = 0; i < n && held.length; i++) {
+      const j = Math.floor(Math.random() * held.length);
+      delete s.vault.accessions[held[j]];
+      held.splice(j, 1);
+      lost++;
+    }
+    s.vault.lost += lost;
+    return lost;
+  }
+
+  /* ---------- biotechnology ---------- */
+
+  function developGmo(s, id) {
+    const g = gmoById(id);
+    if (!g) return 'Unknown line.';
+    if (s.gmo[id]) return 'That line is already developed.';
+    if (!biotechOpen(s)) {
+      return `The lab wants the whole conventional roster in the ground first — ${conventionalSown(s)} of ${CROPS.length} sown so far.`;
+    }
+    if (!s.sandbox) {
+      if (s.credits < g.cost) return `Developing that line costs ${g.cost.toLocaleString()} credits.`;
+      if (s.science < g.science) return `Needs ${g.science} science.`;
+      s.credits -= g.cost;
+      s.science -= g.science;
+    }
+    s.gmo[id] = s.day;
+    pushLog(s, `${g.name} ${g.cultivar} came out of the lab. It can be sown from now on.`);
+    return null;
+  }
+
   function endOfDay(s, log) {
     if (s.auto) autoManage(s, log);
+    runStudio(s);
+    /* a finished vault pays a slow dividend in data on everything it holds */
+    if (vaultBuilt(s)) s.science += accessions(s).length * 0.04;
     /* Food closure over the whole mission: everything grown divided by everything
        eaten. A windowed average is useless here — a staple takes longer to mature
        than any sensible window, so it reads zero between harvests. */
@@ -587,6 +872,24 @@
     const B = buildById(type);
     if (!B) return 'Unknown structure.';
     if (!t) return 'That is off the plot.';
+
+    /* The vault is the exception to the skylight rule, and the only one. It goes
+       down the shaft into the tube, where the rock holds one temperature and
+       tens of metres of basalt do what no surface structure can. */
+    if (type === 'vault') {
+      if (t.t !== 'skylight') return 'The vault goes into the tube. Build it on the skylight.';
+      if (t.b) return 'Something is already built here.';
+      if (count(s, 'vault') >= 1) return 'One vault is all the Moon needs.';
+      if (!s.up.composter) return 'Sign-off needs the biomass oxidation loop running first.';
+      if (!s.up.shield) return 'Sign-off needs regolith overburden fitted first.';
+      const held = accessions(s).length;
+      if (held < 12) return `Sign-off needs twelve accessions in hand. You have ${held}.`;
+      if (!ignoreCost && !s.sandbox) {
+        if (s.credits < B.cost) return 'Not enough credits.';
+        if (B.science && s.science < B.science) return `Needs ${B.science} science.`;
+      }
+      return null;
+    }
     if (t.f) return 'A grow hall covers that ground.';
     if (t.t === 'crater') return 'The ground drops away here — nothing will sit level.';
     if (t.t === 'skylight') return 'That is the tube skylight. It stays open.';
@@ -640,12 +943,20 @@
 
   function plant(s, f, cropId) {
     const c = cropById(cropId);
+    if (!c) return 'No such seed in the catalogue.';
     if (!f) return 'Crops only grow in a grow hall.';
     if (f.crop || f.dead) return 'That hall is not clear.';
+    if (gmoById(cropId) && !(s.gmo && s.gmo[cropId])) {
+      return 'That line has not been developed yet.';
+    }
     const cost = seedCost(c, f);
     if (s.credits < cost) return `Seed for that hall costs ${cost.toLocaleString()} credits.`;
     s.credits -= cost;
-    Object.assign(f, { crop: cropId, growth: 0, health: s.flags.seed > 0 ? 0.65 : 1,
+    s.stats.sown[cropId] = (s.stats.sown[cropId] || 0) + 1;
+    /* a line held in the vault is re-sown from secured stock, so a tired-seed
+       year cannot touch it — which is most of the point of banking it */
+    const secured = s.vault && s.vault.accessions[cropId] && vaultBuilt(s);
+    Object.assign(f, { crop: cropId, growth: 0, health: (s.flags.seed > 0 && !secured && !c.keeps) ? 0.65 : 1,
                        infected: false, dead: false,
                        moisture: 0.9, feed: 0.9, carbon: 0, warned: false, plantedDay: s.day });
     return null;
@@ -689,11 +1000,22 @@
        carbon leaves the loop inside the food. */
     s.co2 = clamp(s.co2 + f.carbon * (s.up.composter ? 0.75 : 0.42), 0, co2Cap(s));
     if (s.up.composter) s.nutrients += 4 * A;
+    /* Straw, stover and root trash. A photosynthetic crop leaves it behind; a
+       fungal or microbial culture has already eaten its way through it. */
+    if (!c.respires) s.residue += A * RESIDUE_PER_TILE * q;
     /* stubble and root mass go back into the beds */
-    const worked = s.up.composter ? 0.20 : 0.12;
+    const worked = (s.up.composter ? 0.20 : 0.12) + (c.conditions || 0);
     s.stats.harvests++;
     s.stats.kinds[c.id] = (s.stats.kinds[c.id] || 0) + 1;
     s.stats.harvestedToday += kcal;
+    if (c.kcal > 0) { s.stats.ateRecently = s.day; s.stats.lastEaten = c.id; }
+    /* the camera was there */
+    queueSegment(s, c.kind === 'flower' ? 'bouquet' : 'harvest', c.id);
+    /* and the line goes into store */
+    if (bankAccession(s, c.id) && s.stats.harvests > 1) {
+      const msg2 = `${c.name} banked as accession ${accessions(s).length} of ${vaultTarget()}.`;
+      if (log) log.push(msg2); else pushLog(s, msg2);
+    }
     const msg = `Harvested ${c.name}: ${kcal.toLocaleString()} kcal, ${pay.toLocaleString()} cr.`;
     if (log) log.push(msg); else pushLog(s, msg);
     const keptSoil = clamp(f.soil + worked, 0, 1);
@@ -905,6 +1227,55 @@
         break;
       case 'samp_keep': L('Request declined. The colony eats first.'); break;
 
+      case 'wild_bank':
+        if (s.credits < 2400) L('No budget for the grow-out. The crate flies home.');
+        else {
+          s.credits -= 2400;
+          s.science += 10;
+          let n = 0;
+          ['wild_aegilops', 'wild_solanum', 'wild_glycine'].forEach(id => { if (bankAccession(s, id)) n++; });
+          L(`Wild relatives grown out and banked: ${n} accession${n === 1 ? '' : 's'} nobody will want until they do.`);
+        }
+        break;
+      case 'wild_decline': L('The crate goes back up unopened.'); break;
+
+      case 'land_take':
+        if (bankAccession(s, 'landrace_maize')) {
+          s.science += 6;
+          s.morale = clamp(s.morale + 4, 0, 100);
+          L('Nine hundred years of somebody else\u2019s careful work, accepted into store.');
+        } else L('Already held in store.');
+        break;
+      case 'land_decline': L('Referred elsewhere. There may not be an elsewhere.'); break;
+
+      case 'cold_fix':
+        if (s.spares < 3 || s.credits < 900) {
+          const lost = loseAccessions(s, 2);
+          L(`Nothing to reseal the shaft with. ${lost} accession${lost === 1 ? '' : 's'} lost.`);
+        } else {
+          s.spares -= 3; s.credits -= 900;
+          s.vault.secured = true;
+          L('Shaft resealed. The chamber is back on its number.');
+        }
+        break;
+      case 'cold_ignore': {
+        const lost = loseAccessions(s, 3);
+        L(lost ? `The store warmed through. ${lost} accession${lost === 1 ? '' : 's'} lost, and they do not come back.`
+               : 'The store warmed through. Nothing in it yet to lose.');
+        break;
+      }
+
+      case 'comm_take': {
+        if (!studioLive(s)) { L('No studio on the network to shoot it with.'); break; }
+        const fresh = Object.keys(s.stats.kinds).length;
+        const fee = Math.round(600 + s.media.audience * 1.6 + fresh * 140);
+        s.credits += fee;
+        s.media.audience = clamp(s.media.audience * 1.12, 0, AUD_CAP);
+        L(`Commission delivered: ${fee.toLocaleString()} credits, and the audience grew on the back of it.`);
+        break;
+      }
+      case 'comm_decline': L('The broadcaster was told the farm is not a set.'); break;
+
       case 'therm_fix':
         if (s.credits < 500) { s.flags.thermal = 96; L('No budget for the scrub — running warm.'); }
         else { s.credits -= 500; s.flags.thermal = 0; L('Radiators scrubbed.'); }
@@ -941,6 +1312,10 @@
 
   window.LF_SIM = {
     newGame, migrate, STATE_VERSION,
+    /* studio, biotechnology and the vault */
+    studioLive, runStudio, queueSegment, novelty, developGmo, sowable, gmoById, SEGMENT_FEE,
+    biotechOpen, conventionalSown, accessions, vaultBuilt, vaultTarget, bankAccession,
+    lampNeed, deriveCrop, RESIDUE_PER_TILE, MEDIA_RATE, AUD_PER_SEGMENT, AUD_CAP,
     tick, place, bulldoze, plant, water, feed, treat, harvest, clear, autoManage,
     research, trade, sellFood, sellO2, resolveEvent, condition, conditionCost, patchLeak, RAW_SOIL,
     addField, removeField, checkField, fieldCost, fieldAt, fieldById, fieldTiles, canPlace,
