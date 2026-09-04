@@ -5,6 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Lunar Sims — classic simulation games, reimagined on the Moon</title>
 <meta name="description" content="Original browser simulation games set on the lunar surface, in the spirit of the classic Maxis sims. Lunar Farm and Artemis City are playable now.">
+<link rel="stylesheet" href="https://dr-richard-barker.github.io/Plant_response_to_radiation/cose/cose-theme.css">
+<link rel="stylesheet" href="https://dr-richard-barker.github.io/Plant_response_to_radiation/cose/cose-chrome.css">
+<link rel="stylesheet" href="https://dr-richard-barker.github.io/Plant_response_to_radiation/cose/cose-map.css">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🌘</text></svg>">
 <script>
   (function() {
@@ -83,7 +86,7 @@ footer{border-top:1px solid var(--line);padding:24px 0 40px;color:var(--ink-fain
 footer a{color:var(--ink-soft)}
 </style>
 </head>
-<body>
+<body data-site-id="LunarSims">
 
 <div style="max-width:940px; margin: 16px auto 0; padding: 0 22px; display: flex; justify-content: flex-end; position: absolute; left: 0; right: 0; z-index: 10;">
   <button id="themeToggleBtn" onclick="toggleTheme()" style="background: var(--panel); border: 1px solid var(--line); border-radius: 8px; color: var(--ink); padding: 6px 12px; cursor: pointer; font-family: var(--mono); font-size: 12px; font-weight: 600;" title="Toggle Theme">🌓</button>
@@ -329,5 +332,8 @@ footer a{color:var(--ink-soft)}
   
   initThemeIcon();
 </script>
+<script src="https://dr-richard-barker.github.io/Plant_response_to_radiation/cose/sites.js"></script>
+<script src="https://dr-richard-barker.github.io/Plant_response_to_radiation/cose/theme.js"></script>
+<script src="https://dr-richard-barker.github.io/Plant_response_to_radiation/cose/nav.js"></script>
 </body>
 </html>
