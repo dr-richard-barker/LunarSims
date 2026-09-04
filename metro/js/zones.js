@@ -75,6 +75,18 @@
       if (B.exportIncome) income += B.exportIncome;
     }
 
+    /* The deep arcologies contribute the same three currencies, but through
+       deep.js rather than off a flat field: what they deliver depends on how
+       far they have dug and how much ice is left within reach. Their jobs are
+       special jobs for the same reason a garrison's are — an arcology is not
+       a shop, and its employment must not read back as trade demand. */
+    if (window.LM_DEEP) {
+      const dp = window.LM_DEEP.totals(s);
+      pop += dp.housing;
+      specialJobs += dp.jobs;
+      income += dp.export;
+    }
+
     return { housingCap: pop, tradeJobs, industryJobs, specialJobs,
              jobs: tradeJobs + industryJobs + specialJobs,
              income, upkeep, draw };
@@ -102,7 +114,12 @@
       }
     }
     const svcDraw = window.LM_SERVICES ? window.LM_SERVICES.serviceDraw(s) : 0;
-    return { gen, o2Plants: plants, o2Draw: plants * 5 + svcDraw };
+    /* Pressurisation the colony has that did not come out of an oxygen plant.
+       A deep arcology cracks the ice it is bored into, so it carries some of
+       its own air — never all of it, which is what stops one from being a
+       self-sufficient city that ignores the rest of the colony. */
+    const extraAir = window.LM_DEEP ? window.LM_DEEP.totals(s).air : 0;
+    return { gen, o2Plants: plants, extraAir, o2Draw: plants * 5 + svcDraw };
   }
 
   /* RCI, each index running -1..+1. `bite` is the drag a tax rate above the
@@ -191,7 +208,7 @@
     const gen = pw.gen * eff.genMul;
     const load = t.draw + pw.o2Draw;
     const brownout = load > gen;
-    const airCap = Math.floor(pw.o2Plants * K.AIR_PER_PLANT * eff.airMul);
+    const airCap = Math.floor((pw.o2Plants * K.AIR_PER_PLANT + (pw.extraAir || 0)) * eff.airMul);
     const airShort = s.pop > airCap;
 
     for (const tile of s.map) {

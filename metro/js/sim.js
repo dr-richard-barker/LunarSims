@@ -119,6 +119,31 @@
     return true;
   }
 
+  /* Level, buildable, unzoned ground carrying nothing but the networks.
+
+     Deliberately NOT isOpen, which the arena uses and which refuses a site
+     with anything at all on it — including a transit tube. A deep arcology
+     has to be REACHED by transit, power and atmosphere before it will dig,
+     and "reached" means orthogonally adjacent, which is to say inside its own
+     pad. Refusing a pad a tube crosses would mean a player who lays the
+     networks first can never build on that ground, while one who builds first
+     and connects afterwards can: the same site, the opposite answer, decided
+     by nothing but the order they happened to work in.
+
+     Zoning and real structures still refuse it. The pad is about having a
+     site, not about having an empty map. */
+  function isPad(s, t, r) {
+    if (!isLevel(s, t, r)) return false;
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        const n = T.tileAt(s, t.x + dx, t.y + dy);
+        if (!n || n.zone) return false;
+        if (n.b && n.b.type !== 'tube' && n.b.type !== 'conduit') return false;
+      }
+    }
+    return true;
+  }
+
   /* A crater floor the sun never reaches: dark, and genuinely lower than the
      ground around it rather than merely shaded by a neighbouring tower. */
   /* Scanned five tiles out, not three. A crater floor wide enough to be worth
@@ -169,11 +194,31 @@
     if (B.needsHeight && t.h < B.needsHeight) {
       return `A space elevator has to be anchored at height ${B.needsHeight} or above — this ground is at ${t.h}.`;
     }
+    /* The deep arcologies. Two failures, told apart deliberately: no ice here
+       at all is a "you are in the wrong place" problem, and ice too lean for
+       this structure is a "keep surveying" one. Ice only survives in
+       permanent shadow, so this gate quietly also places them on the crater
+       floors — no separate shadow check is needed or wanted. */
+    if (B.needsIce) {
+      const rich = window.LM_DEEP ? window.LM_DEEP.iceAt(t) : 0;
+      if (!rich) {
+        return `A ${B.name.toLowerCase()} has to be bored into water ice — ` +
+          'find a permanently shadowed crater floor and read the Deposits view.';
+      }
+      if (B.needsIceRichness && rich < B.needsIceRichness) {
+        return `This ice is only ${Math.round(rich * 100)}% rich; a ` +
+          `${B.name.toLowerCase()} needs at least ${Math.round(B.needsIceRichness * 100)}%.`;
+      }
+    }
     if (B.needsLevel && !isLevel(s, t, B.needsLevel)) {
       return 'That needs level ground — flatten the site first.';
     }
     if (B.needsOpen && !isOpen(s, t, B.needsOpen)) {
       return `That needs a clear, level ${B.needsOpen * 2 + 1}x${B.needsOpen * 2 + 1} site.`;
+    }
+    if (B.needsPad && !isPad(s, t, B.needsPad)) {
+      return `That needs a level ${B.needsPad * 2 + 1}x${B.needsPad * 2 + 1} site with ` +
+        'nothing on it but the networks — flatten the floor and clear the zoning first.';
     }
     if (B.needsShadow && !inShadowedCrater(s, t)) {
       return 'A radio telescope has to sit on a permanently shadowed crater floor, with the rim above it to screen out Earth.';
@@ -204,7 +249,12 @@
     const B = buildById(type);
     s.credits -= cost(s, B.cost);
     if (B.subsurface) t.pipe = true;
-    else t.b = { type };
+    else if (B.maxLevels) {
+      /* A deep arcology opens as a collar and one gallery and sinks from
+         there — see deep.js. Everything else is finished the day it is paid
+         for, which is why only this branch carries state. */
+      t.b = { type, built: s.day, levels: 1, dig: 0, stalled: false };
+    } else t.b = { type };
     return null;
   }
 
@@ -389,6 +439,19 @@
     s.brownout = r.brownout;
     s.airShort = r.airShort;
 
+    /* The deep arcologies dig after the day has been evaluated, so a level
+       opened today counts from tomorrow — the same one-day lag a zone stage
+       gained today has. Loaded optionally, the discipline the whole tick
+       follows. */
+    if (window.LM_DEEP) {
+      for (const t of window.LM_DEEP.excavate(s, nets, r)) {
+        const B = buildById(t.b.type);
+        pushLog(s, `◉ The ${B.name} at ${t.x + 1}, ${t.y + 1} has opened level ` +
+          `${t.b.levels} of ${B.maxLevels}.` +
+          (t.b.levels >= B.maxLevels ? ' The bore is at its full depth.' : ''));
+      }
+    }
+
     /* Settled daily rather than in an annual lump, so the treasury is never
        ambushed by a bill it cannot pay and the player can watch a slider
        move the balance immediately. */
@@ -475,6 +538,6 @@
     buildById, count, zonedCount, developedCount, pushLog,
     offerMilitary, acceptMilitary, declineMilitary, militaryUnlocked,
     baseKindFor, BASE_KINDS, launchColonyShips,
-    isLevel, isOpen, inShadowedCrater, onPeakOfLight, besideLaunchPad
+    isLevel, isOpen, isPad, inShadowedCrater, onPeakOfLight, besideLaunchPad
   };
 })();

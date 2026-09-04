@@ -77,6 +77,15 @@
       if (t.zone && t.zone.kind === 'industry' && t.zone.stage > 0) {
         cur[idx(t.x, t.y)] += K.DUST_EMIT * t.zone.stage;
       }
+      /* A deep arcology that refines what it digs vents the fines at the
+         surface, and the deeper it goes the more of them. It emits into
+         exactly the same field industry does, so it is fouling arrays and
+         dragging land value through machinery that already exists rather
+         than a penalty bolted on beside it. */
+      if (t.b && window.LM_DEEP && window.LM_DEEP.isDeep(t.b.type)) {
+        const o = window.LM_DEEP.outputOf(s, t);
+        if (o && o.dust) cur[idx(t.x, t.y)] += o.dust;
+      }
     }
 
     /* diffusion + decay */

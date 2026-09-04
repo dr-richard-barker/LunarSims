@@ -907,6 +907,556 @@
     }
   }
 
+  /* ---- the deep arcologies ----
+
+     Every other structure in this renderer extrudes UPWARD: box() raises the
+     +x and +y outer faces off the ground, dome() stacks shrinking ellipses
+     above it. These go the other way, and a hole needs the inverse primitive.
+
+     What makes a pit read at all in a 2:1 isometric projection is that a ring
+     drawn both SMALLER and LOWER leaves a crescent of its predecessor showing
+     along the top — and that stack of crescents IS the far interior wall,
+     receding away from the camera. Depth is therefore carried entirely by
+     what you can see on the far side of the bore, which is exactly what you
+     see standing at the edge of a real shaft: the near wall is beneath you.
+
+     The whole descent is clipped to the mouth. That is not tidiness. Without
+     it a deep bore spills below its own tile and floats over whatever is in
+     front of it — and on a crater floor the tile in front is usually LOWER,
+     so it cannot paint over the spill the way flat ground would. Clipping
+     makes a hole a hole whatever the relief around it, and it is also what
+     lets the Core Arcology's chamber widen as it descends: the rock above
+     correctly hides the overhang.
+
+     Ring spacing is depth * f^0.72 rather than linear, so near rings are far
+     apart and far ones bunch together. That is foreshortening, and it buys an
+     apparent depth several times what the same pixels spent linearly would.
+
+     THE MOUTH HAS TO BE WIDE, and that is geometry rather than taste. Clipped
+     to the mouth, a ring whose top arc has descended past the mouth's own
+     bottom edge is cut away entirely — so the visible depth of a bore can
+     never exceed roughly the mouth's vertical radius, which in a 2:1
+     projection is a quarter of its width. A one-tile mouth therefore cannot
+     show more than about twenty pixels of shaft no matter what depth it is
+     given, and reads as a dish rather than a hole.
+
+     That is also true of a real shaft seen from this elevation: stand at the
+     edge of a narrow bore and the near rim hides the bottom. The answer is
+     the same in both cases — make the opening wider. Each of these already
+     demands a 3x3 or 5x5 pad, so a mouth that spans its own pad is honest as
+     well as legible, and it stops a megastructure reading as a manhole. */
+
+  const TAU = Math.PI * 2;
+
+  function ring(ctx, cx, cy, rx, ry) {
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, Math.max(0.4, rx), Math.max(0.3, ry), 0, 0, TAU);
+  }
+
+  /* Lit galleries on the FAR half of one ring only. The near half is on the
+     camera's own side of the bore; drawing windows there would put lit rooms
+     in mid-air over the void. */
+  function galleries(ctx, sp, g, cx, dim) {
+    const n = sp.windows;
+    if (!n) return;
+    ctx.fillStyle = 'rgba(' + sp.winRGB + ',' + (0.34 + dim * 0.52).toFixed(3) + ')';
+    for (let k = 0; k < n; k++) {
+      const a = Math.PI + (k + 0.5) / n * Math.PI;
+      const x = cx + Math.cos(a) * g.rx * 0.88;
+      const y = g.y + sp.ledge * 0.6 + Math.sin(a) * g.ry * 0.88;
+      ctx.fillRect(x - 1.5, y - 1.3, 3, 2.6);
+    }
+  }
+
+  /* Chords across the opening at rim height. A line crossing a void is the
+     single strongest cue that there IS a void — more convincing than any
+     amount of shading, because nothing else in the scene has anything to
+     cross. Each gets a drop shadow onto the wall below it. */
+  function spanBridges(ctx, cx, cy, RX, RY, n, l, col) {
+    for (let k = 0; k < n; k++) {
+      const a = (k / n) * Math.PI + Math.PI * 0.18;
+      const dx = Math.cos(a) * RX, dy = Math.sin(a) * RY;
+      ctx.strokeStyle = 'rgba(0,0,0,0.42)'; ctx.lineWidth = 4.4;
+      ctx.beginPath();
+      ctx.moveTo(cx + dx, cy + dy + 3); ctx.lineTo(cx - dx, cy - dy + 3); ctx.stroke();
+      ctx.strokeStyle = tone(col, Math.max(l, 0.62), 1); ctx.lineWidth = 2.4;
+      ctx.beginPath();
+      ctx.moveTo(cx + dx, cy + dy); ctx.lineTo(cx - dx, cy - dy); ctx.stroke();
+    }
+  }
+
+  /* A ring walkway with spurs, for a bore whose centre has something in it.
+     Straight chords are the better depth cue in general — they cross the void
+     — but four of them meeting over the Core's suspended lamp put a dark X on
+     the brightest and most important thing in the structure. */
+  function spanRing(ctx, cx, cy, RX, RY, l, col) {
+    ctx.strokeStyle = 'rgba(0,0,0,0.40)'; ctx.lineWidth = 4.6;
+    ring(ctx, cx, cy + 3, RX * 0.62, RY * 0.62); ctx.stroke();
+    ctx.strokeStyle = tone(col, Math.max(l, 0.62), 1); ctx.lineWidth = 2.6;
+    ring(ctx, cx, cy, RX * 0.62, RY * 0.62); ctx.stroke();
+    for (let k = 0; k < 6; k++) {
+      const a = (k / 6) * TAU + 0.25;
+      ctx.strokeStyle = 'rgba(0,0,0,0.40)'; ctx.lineWidth = 4.2;
+      ctx.beginPath();
+      ctx.moveTo(cx + Math.cos(a) * RX * 0.62, cy + Math.sin(a) * RY * 0.62 + 3);
+      ctx.lineTo(cx + Math.cos(a) * RX, cy + Math.sin(a) * RY + 3);
+      ctx.stroke();
+      ctx.strokeStyle = tone(col, Math.max(l, 0.62), 1); ctx.lineWidth = 2.4;
+      ctx.beginPath();
+      ctx.moveTo(cx + Math.cos(a) * RX * 0.62, cy + Math.sin(a) * RY * 0.62);
+      ctx.lineTo(cx + Math.cos(a) * RX, cy + Math.sin(a) * RY);
+      ctx.stroke();
+    }
+  }
+
+  function rimCollar(ctx, cx, cy, RX, RY, l, col) {
+    ctx.strokeStyle = tone(col, Math.max(l, 0.55), 1); ctx.lineWidth = 3.6;
+    ring(ctx, cx, cy, RX, RY); ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,248,232,' + (0.12 + l * 0.24).toFixed(3) + ')';
+    ctx.lineWidth = 1.1;
+    ring(ctx, cx, cy - 1.8, RX * 0.985, RY * 0.985); ctx.stroke();
+  }
+
+  /* The bore itself. Returns its geometry so the caller can hang a
+     superstructure off the rim without recomputing any of it. */
+  /* The band between the FAR arcs of two rings — the only part of a bore's
+     interior this camera can actually see.
+
+     Filling each ring as a whole ellipse was the first attempt and it is
+     wrong: the lower half of any such ellipse is the NEAR wall, the one on
+     the camera's own side of the hole, which you are looking over rather than
+     at. Painting it turned the bottom of every bore into a flat grey plate
+     and buried the floor under it. Drawing only the far crescent leaves the
+     near side as the void it should be, and the shaft reads as open. */
+  function crescent(ctx, cx, ay, arx, ary, by, brx, bry) {
+    ctx.beginPath();
+    ctx.ellipse(cx, ay, Math.max(0.4, arx), Math.max(0.3, ary), 0, Math.PI, TAU);
+    ctx.ellipse(cx, by, Math.max(0.4, brx), Math.max(0.3, bry), 0, TAU, Math.PI, true);
+    ctx.closePath();
+  }
+
+  function shaft(ctx, s, t, l, sp) {
+    const z = lift(t);
+    const p = iso(t.x + 0.5, t.y + 0.5);
+    const cy = p.y - z;
+    const RX = TW * 0.5 * sp.mouth, RY = TH * 0.5 * sp.mouth;
+
+    /* How far it has dug drives BOTH how many galleries there are and how
+       deep the hole goes, so a young arcology is a shallow scrape and a
+       finished one is a chasm. Watching it sink is most of the payoff.
+
+       Depth is DERIVED, not chosen. The clip makes RY a hard ceiling: anything
+       that has descended past the mouth's bottom edge is cut away entirely,
+       and the first thing to go is the floor and its glow — which is the one
+       part of a bore that has to be seen, because it is the central space the
+       whole structure is built around. The floor is a disc of radius
+       RY*taper(1) centred at the full depth, so keeping it in view means
+       depth + RY*taper(1) <= RY. Letting its near half be clipped is fine and
+       in fact correct (the near rim really does hide it), hence the 0.55.
+
+       Deriving this rather than hand-tuning a constant per structure means a
+       taper can be changed freely without silently amputating the bottom of
+       its own shaft — which is exactly what happened to all four of these the
+       first time round. */
+    const prog = clamp(sp.prog, 0, 1);
+    const N = Math.max(2, Math.round(2 + prog * (sp.rings - 2)));
+    const maxDepth = RY * (1 - sp.taper(1) * 0.55) * 0.88;
+    const depth = maxDepth * (sp.deep === undefined ? 1 : sp.deep) * (0.26 + 0.74 * prog);
+
+    /* graded apron and spoil banked around the mouth */
+    ctx.fillStyle = regolith(128, l);
+    ring(ctx, p.x, cy + TH * 0.07, RX * 1.20, RY * 1.20); ctx.fill();
+    ctx.fillStyle = regolith(162, l);
+    ring(ctx, p.x, cy + TH * 0.02, RX * 1.08, RY * 1.08); ctx.fill();
+
+    const geo = [];
+    for (let i = 0; i <= N; i++) {
+      const f = i / N;
+      const r = Math.max(0.06, sp.taper(f));
+      geo.push({ f, rx: RX * r, ry: RY * r, y: cy + depth * Math.pow(f, 0.72) });
+    }
+
+    ctx.save();
+    ring(ctx, p.x, cy, RX, RY); ctx.clip();
+
+    /* Void first, and everything after it only ever adds the far side back.
+       Whatever is left black is genuinely the part of the shaft the near rim
+       is standing in front of. */
+    ctx.fillStyle = '#05060a';
+    ctx.fillRect(p.x - RX - 2, cy - RY - 2, RX * 2 + 4, RY * 2 + depth + 120);
+
+    for (let i = 0; i < geo.length; i++) {
+      const g = geo[i], nx = geo[i + 1];
+      const dim = 1 - g.f * 0.78;                       // light falls off downward
+
+      /* the gallery deck: a horizontal surface seen from above, so it catches
+         what light there is and is the brightest thing at that depth */
+      if (sp.ledge > 0) {
+        ctx.fillStyle = tone(sp.terrace, Math.max(l, 0.66) * dim, 1);
+        crescent(ctx, p.x, g.y, g.rx, g.ry, g.y + sp.ledge, g.rx, g.ry);
+        ctx.fill();
+      }
+      /* and the wall dropping from it to the next deck down */
+      if (nx) {
+        ctx.fillStyle = tone(sp.wall, Math.max(l, 0.55) * dim, 0.74);
+        crescent(ctx, p.x, g.y + sp.ledge, g.rx, g.ry, nx.y, nx.rx, nx.ry);
+        ctx.fill();
+      }
+
+      if (FR.lod > LOD_FAR) {
+        galleries(ctx, sp, g, p.x, dim);
+        /* pilasters: vertical ribs down the far wall, which is what stops a
+           smooth cone reading as a painted circle */
+        if (FR.lod === LOD_NEAR && nx && sp.ribs) {
+          ctx.strokeStyle = 'rgba(0,0,0,0.34)'; ctx.lineWidth = 1;
+          for (let k = 0; k < sp.ribs; k++) {
+            const a = Math.PI + (k + 0.5) / sp.ribs * Math.PI;
+            ctx.beginPath();
+            ctx.moveTo(p.x + Math.cos(a) * g.rx, g.y + sp.ledge + Math.sin(a) * g.ry);
+            ctx.lineTo(p.x + Math.cos(a) * nx.rx, nx.y + Math.sin(a) * nx.ry);
+            ctx.stroke();
+          }
+        }
+      }
+    }
+
+    /* the floor at the bottom of the bore, drawn whole — it is horizontal, so
+       unlike the walls all of it faces the camera */
+    const floor = geo[geo.length - 1];
+    const fy = floor.y + sp.ledge;
+    ctx.fillStyle = tone(sp.wall, Math.max(l, 0.5) * 0.3, 0.7);
+    ring(ctx, p.x, fy, floor.rx, floor.ry); ctx.fill();
+
+    if (sp.interior) sp.interior(ctx, { p, cy, RX, RY, geo, floor, fy, depth, prog, l });
+
+    /* The near lip. Everything above is the far side of the bore; without
+       this the near half is an unbroken black field that reads as a hole in
+       the PICTURE rather than a hole in the ground. A single lit arc just
+       inside the mouth's lower edge is enough to put a rim back. */
+    ctx.strokeStyle = 'rgba(255,246,226,' + (0.10 + l * 0.20).toFixed(3) + ')';
+    ctx.lineWidth = 2.2;
+    ctx.beginPath();
+    ctx.ellipse(p.x, cy - 1, RX * 0.985, RY * 0.985, 0, 0, Math.PI);
+    ctx.stroke();
+    ctx.restore();
+
+    /* rimT is the rim radius in TILE units. Every mast, stack and pylon hung
+       off the rim is positioned with it, so widening a mouth moves its
+       furniture out to match instead of leaving it stranded in the void. */
+    return { p, cy, RX, RY, geo, floor, fy, depth, prog, rimT: sp.mouth * 0.5 };
+  }
+
+  /* A soft pool of light at the bottom of a bore — the "central space" every
+     one of these is built around, and the only warm thing on a crater floor
+     that has been at cryogenic temperatures for a billion years. */
+  function coreGlow(ctx, x, y, r, rgb, a) {
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0, 'rgba(' + rgb + ',' + a.toFixed(3) + ')');
+    g.addColorStop(0.55, 'rgba(' + rgb + ',' + (a * 0.34).toFixed(3) + ')');
+    g.addColorStop(1, 'rgba(' + rgb + ',0)');
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill();
+  }
+
+  function drawDeep(ctx, s, t, l) {
+    const type = t.b.type;
+    const B = BUILDINGS.find(b => b.id === type);
+    const levels = Math.max(1, t.b.levels || 1);
+    const prog = clamp(levels / (B.maxLevels || 1), 0, 1);
+    const z = lift(t);
+
+    if (type === 'sinkwell') {
+      /* An open terraced funnel: bone-white galleries stepping down around a
+         lattice lift spine. The plainest of the four, and the clearest read
+         of a city dug into the ground. */
+      const g = shaft(ctx, s, t, l, {
+        mouth: 2.40, rings: 9, ledge: 7, windows: 9, ribs: 6,
+        terrace: '#ded6c6', wall: '#6d6760', winRGB: '255,206,132',
+        taper: f => 1 - 0.80 * f,
+        prog,
+        interior(c, q) {
+          coreGlow(c, q.p.x, q.fy, Math.max(46, q.floor.rx * 3.2), '255,206,138', 0.78);
+          c.fillStyle = 'rgba(255,232,182,0.85)';
+          ring(c, q.p.x, q.fy, q.floor.rx * 0.72, q.floor.ry * 0.72); c.fill();
+          /* the lift spine, hanging the full bore on four cables */
+          c.strokeStyle = 'rgba(190,196,208,' + (0.30 + l * 0.4).toFixed(3) + ')';
+          c.lineWidth = 1.2;
+          for (const sx of [-1, 1]) {
+            c.beginPath();
+            c.moveTo(q.p.x + sx * 5, q.cy - q.RY * 0.2);
+            c.lineTo(q.p.x + sx * 2.4, q.fy);
+            c.stroke();
+          }
+          const car = ((Date.now() / 4200) % 1);
+          c.fillStyle = 'rgba(255,226,166,0.9)';
+          c.fillRect(q.p.x - 3, q.cy - q.RY * 0.2 + (q.fy - q.cy + q.RY * 0.2) * car - 2, 6, 4.6);
+        }
+      });
+      rimCollar(ctx, g.p.x, g.cy, g.RX, g.RY, l, '#cdc6b6');
+      spanBridges(ctx, g.p.x, g.cy, g.RX, g.RY, 3, l, '#c9c2b2');
+      if (FR.lod > LOD_FAR) {
+        /* head-frame and beacon on the rim */
+        const hf = g.rimT * 0.86;
+        const m = iso(t.x + 0.5 + hf, t.y + 0.5 - 0.1);
+        box(ctx, t.x + 0.38 + hf, t.y + 0.4, 0.26, 0.26, 30, '#b9b2a2', l, z, { noShadow: true });
+        ctx.fillStyle = 'rgba(255,196,120,' + (0.42 + beatPulse() * 0.46).toFixed(3) + ')';
+        ctx.beginPath(); ctx.arc(m.x + 0, m.y - z - 28, 2.4, 0, TAU); ctx.fill();
+      }
+      return;
+    }
+
+    if (type === 'cistern') {
+      /* The ice is melted rather than mined, so the floor of this one is
+         water: a lit reservoir with grow-decks tiered around it and mirror
+         masts on the rim throwing the only daylight this ground will ever
+         see down onto it. */
+      const g = shaft(ctx, s, t, l, {
+        mouth: 2.40, rings: 8, ledge: 8, windows: 8, ribs: 5,
+        terrace: '#7ed7a4', wall: '#495e69', winRGB: '186,255,222',
+        taper: f => 1 - 0.60 * f,
+        prog,
+        interior(c, q) {
+          /* the reservoir */
+          const rx = q.floor.rx * 1.5, ry = q.floor.ry * 1.5;
+          c.fillStyle = 'rgba(28,86,110,0.95)';
+          ring(c, q.p.x, q.fy, rx, ry); c.fill();
+          coreGlow(c, q.p.x, q.fy, Math.max(56, rx * 2.0), '120,232,255', 0.72);
+          c.strokeStyle = 'rgba(190,246,255,' + (0.22 + l * 0.3).toFixed(3) + ')';
+          c.lineWidth = 1;
+          const t0 = (Date.now() / 2600) % 1;
+          for (let k = 0; k < 3; k++) {
+            const w = ((k / 3) + t0) % 1;
+            ring(c, q.p.x, q.fy, rx * w, ry * w); c.stroke();
+          }
+          /* and the shafts of mirrored daylight coming down to meet it */
+          for (let k = 0; k < 3; k++) {
+            const a = Math.PI + (k + 0.5) / 3 * Math.PI;
+            const sx = q.p.x + Math.cos(a) * q.RX * 0.88;
+            const sy = q.cy + Math.sin(a) * q.RY * 0.88;
+            const grad = c.createLinearGradient(sx, sy, q.p.x, q.fy);
+            grad.addColorStop(0, 'rgba(255,250,224,' + (0.26 + l * 0.16).toFixed(3) + ')');
+            grad.addColorStop(1, 'rgba(190,246,255,0.02)');
+            c.fillStyle = grad;
+            c.beginPath();
+            c.moveTo(sx - 3, sy); c.lineTo(sx + 3, sy);
+            c.lineTo(q.p.x + 9, q.fy); c.lineTo(q.p.x - 9, q.fy);
+            c.closePath(); c.fill();
+          }
+        }
+      });
+      rimCollar(ctx, g.p.x, g.cy, g.RX, g.RY, l, '#9fc6c4');
+      spanBridges(ctx, g.p.x, g.cy, g.RX, g.RY, 2, l, '#a8d2c8');
+      if (FR.lod > LOD_FAR) {
+        /* mirror masts, angled to bounce the low sun down the bore */
+        for (let k = 0; k < 4; k++) {
+          const a = (k / 4) * TAU + Math.PI / 4;
+          const q = iso(t.x + 0.5 + Math.cos(a) * g.rimT * 0.94, t.y + 0.5 + Math.sin(a) * g.rimT * 0.94);
+          ctx.strokeStyle = grey(140, l); ctx.lineWidth = 1.4;
+          ctx.beginPath(); ctx.moveTo(q.x, q.y - z); ctx.lineTo(q.x, q.y - z - 18); ctx.stroke();
+          ctx.fillStyle = tone('#dff4ff', Math.max(l, 0.72), 1);
+          ctx.beginPath();
+          ctx.moveTo(q.x - 6, q.y - z - 18); ctx.lineTo(q.x + 6, q.y - z - 22);
+          ctx.lineTo(q.x + 6, q.y - z - 30); ctx.lineTo(q.x - 6, q.y - z - 26);
+          ctx.closePath(); ctx.fill();
+        }
+      }
+      return;
+    }
+
+    if (type === 'foundry') {
+      /* No terraces — a smooth inverted cone with a smelter at the bottom of
+         it, hoists riding the wall and a working town's worth of pipework
+         crowding the surface. Deliberately the ugly one. */
+      const g = shaft(ctx, s, t, l, {
+        mouth: 2.30, rings: 9, ledge: 0, windows: 7, ribs: 7,
+        terrace: '#5c5349', wall: '#4b433b', winRGB: '255,158,86',
+        /* Closes hard, but not to a point. At 0.90 the floor was eleven pixels
+           across and the smelter that is supposed to be the whole character of
+           this one had nowhere to burn. */
+        taper: f => 1 - 0.76 * f,
+        prog,
+        interior(c, q) {
+          /* the smelter: a pool of melt, the glow off it, and the haze that
+             glow is being seen through — the reason this one has no lit decks
+             is that all of its light comes from the bottom */
+          coreGlow(c, q.p.x, q.fy, Math.max(90, q.floor.rx * 4.0), '255,124,36',
+                   0.86 + beatPulse() * 0.14);
+          c.fillStyle = 'rgba(255,228,160,' + (0.82 + beatPulse() * 0.18).toFixed(3) + ')';
+          ring(c, q.p.x, q.fy, q.floor.rx * 0.92, q.floor.ry * 0.92); c.fill();
+          c.fillStyle = 'rgba(255,168,74,0.16)';
+          ring(c, q.p.x, q.fy - q.depth * 0.22, q.RX * 0.8, q.RY * 0.5); c.fill();
+          /* hoist cables with cars riding them, offset so they never line up */
+          for (let k = 0; k < 3; k++) {
+            const a = Math.PI + (k + 0.5) / 3 * Math.PI;
+            const sx = q.p.x + Math.cos(a) * q.RX * 0.9;
+            const sy = q.cy + Math.sin(a) * q.RY * 0.9;
+            c.strokeStyle = 'rgba(196,176,150,0.75)'; c.lineWidth = 1.3;
+            c.beginPath(); c.moveTo(sx, sy); c.lineTo(q.p.x, q.fy); c.stroke();
+            const u = ((Date.now() / 3400 + k / 3) % 1);
+            c.fillStyle = 'rgba(255,186,110,0.92)';
+            c.fillRect(sx + (q.p.x - sx) * u - 2, sy + (q.fy - sy) * u - 2, 4, 3.4);
+          }
+        }
+      });
+      rimCollar(ctx, g.p.x, g.cy, g.RX, g.RY, l, '#8a7f70');
+      spanBridges(ctx, g.p.x, g.cy, g.RX, g.RY, 2, l, '#8f8474');
+      if (FR.lod > LOD_FAR) {
+        /* stacks and pipework crowding the rim */
+        const rt = g.rimT * 0.82;
+        for (const [ox, oy, hh] of [[0.5 + rt, 0.1, 34], [0.5 + rt, 0.6, 24], [0.1, 0.5 + rt, 28]]) {
+          box(ctx, t.x + ox, t.y + oy, 0.2, 0.2, hh, '#8b7f6e', l, z, { noShadow: true });
+          const q = iso(t.x + ox + 0.1, t.y + oy + 0.1);
+          ctx.fillStyle = 'rgba(190,170,150,0.22)';
+          ctx.beginPath();
+          ctx.ellipse(q.x, q.y - z - hh - 7, 6, 4, 0, 0, TAU); ctx.fill();
+        }
+        ctx.strokeStyle = grey(120, l); ctx.lineWidth = 2;
+        const a0 = iso(t.x + 0.6 + rt, t.y + 0.2), b0 = iso(t.x + 0.2, t.y + 0.6 + rt);
+        ctx.beginPath();
+        ctx.moveTo(a0.x, a0.y - z - 12); ctx.lineTo(b0.x, b0.y - z - 12); ctx.stroke();
+      }
+      return;
+    }
+
+    if (type === 'core') {
+      /* The showstopper. A chamber bored so deep it widens as it goes, with
+         inverted towers hanging from its ceiling around a suspended sun-lamp.
+         The overhang only works because the descent is clipped to the mouth:
+         the rock above hides the part of the bell that is wider than the hole
+         it was dug through, exactly as it would. */
+      const g = shaft(ctx, s, t, l, {
+        mouth: 3.80, rings: 11, ledge: 9, windows: 12, ribs: 8,
+        /* Markedly darker than the other three, and deliberately so: this one
+           is a cavern lit BY its suspended lamp, not a lit room that happens
+           to contain one. Pale decks made the lamp the dimmest thing in its
+           own chamber. */
+        terrace: '#7f8ba6', wall: '#262b39', winRGB: '212,236,255',
+        /* Damped by f on purpose. An undamped sine bulge makes ring 1 wider
+           than the mouth itself, which pushes the hanging towers out under
+           the rock and leaves the chamber looking flat. Multiplying by f
+           holds the first rings at the mouth and opens the bell out below
+           it, where it can actually be seen. */
+        taper: f => 1 - 0.74 * f + 0.44 * Math.sin(Math.PI * f) * f,
+        prog,
+        interior(c, q) {
+          const hangTop = q.geo[2] || q.geo[1] || q.geo[0];
+          const lampY = q.cy + q.depth * 0.66;
+          const towers = [];
+          /* Only the far half of the ceiling. A tower hung from the near half
+             is behind the rim you are looking over, so it has nothing to be
+             seen against — and because it hangs DOWNWARD from a point already
+             near the bottom of the mouth, the clip cut each one to a stub and
+             left a row of grey sawteeth lying across the lamp. */
+          for (let k = 0; k < 9; k++) {
+            const a = Math.PI + (k + 0.5) / 9 * Math.PI;
+            const y = hangTop.y + Math.sin(a) * hangTop.ry * 0.80;
+            towers.push({
+              a, y,
+              x: q.p.x + Math.cos(a) * hangTop.rx * 0.80,
+              /* and never longer than the room left below it, so a tower can
+                 never reach the clip and be cut off mid-shaft */
+              len: Math.min(q.depth * (0.42 + ((k * 37) % 11) / 30),
+                            (q.cy + q.RY * 0.93) - y)
+            });
+          }
+          const draw = tw => {
+            /* a tower hanging point-down: wide at the ceiling, tapering to a
+               lit tip, with window rows all the way */
+            c.fillStyle = 'rgba(0,0,0,0.35)';                 // its own shadow side
+            c.beginPath();
+            c.moveTo(tw.x, tw.y); c.lineTo(tw.x + 10, tw.y);
+            c.lineTo(tw.x + 3, tw.y + tw.len); c.lineTo(tw.x, tw.y + tw.len);
+            c.closePath(); c.fill();
+            c.fillStyle = tone('#b8c4dc', Math.max(l, 0.55), 0.84);
+            c.beginPath();
+            c.moveTo(tw.x - 10, tw.y); c.lineTo(tw.x + 10, tw.y);
+            c.lineTo(tw.x + 3, tw.y + tw.len); c.lineTo(tw.x - 3, tw.y + tw.len);
+            c.closePath(); c.fill();
+            if (FR.lod > LOD_FAR) {
+              c.fillStyle = 'rgba(226,244,255,0.85)';
+              const rows = Math.max(3, Math.round(tw.len / 8));
+              for (let r = 1; r < rows; r++) {
+                const u = r / rows, hw = 7 - u * 4.6;
+                c.fillRect(tw.x - hw, tw.y + tw.len * u, hw * 2, 1.8);
+              }
+            }
+            c.fillStyle = 'rgba(255,240,196,0.95)';
+            c.beginPath(); c.arc(tw.x, tw.y + tw.len + 2, 2.6, 0, TAU); c.fill();
+          };
+          for (const tw of towers) draw(tw);
+
+          /* the suspended lamp, and the floor plaza it lights */
+          coreGlow(c, q.p.x, q.fy, Math.max(70, q.floor.rx * 2.4), '190,220,255', 0.55);
+          c.fillStyle = 'rgba(206,232,255,0.55)';
+          ring(c, q.p.x, q.fy, q.floor.rx * 0.8, q.floor.ry * 0.8); c.fill();
+          /* the suspended sun-lamp: the only daylight this city will ever get,
+             and the thing the whole chamber is arranged around */
+          coreGlow(c, q.p.x, lampY, 120 + beatPulse() * 16, '255,240,196', 1);
+          coreGlow(c, q.p.x, lampY, 46, '255,250,232', 1);
+          c.fillStyle = 'rgba(255,255,252,1)';
+          c.beginPath(); c.arc(q.p.x, lampY, 14, 0, TAU); c.fill();
+          c.strokeStyle = 'rgba(255,248,214,0.42)'; c.lineWidth = 1.2;
+          for (let k = 0; k < 10; k++) {
+            const a = (k / 10) * TAU + 0.2;
+            c.beginPath();
+            c.moveTo(q.p.x + Math.cos(a) * 14, lampY + Math.sin(a) * 14);
+            c.lineTo(q.p.x + Math.cos(a) * 34, lampY + Math.sin(a) * 34);
+            c.stroke();
+          }
+          /* the cable it hangs on, run up into the roof */
+          c.strokeStyle = 'rgba(190,206,232,0.5)'; c.lineWidth = 1.4;
+          c.beginPath();
+          c.moveTo(q.p.x, q.cy - q.RY * 0.35); c.lineTo(q.p.x, lampY - 9); c.stroke();
+
+        }
+      });
+      rimCollar(ctx, g.p.x, g.cy, g.RX, g.RY, l, '#c3cede');
+      /* a glazed cap, drawn as arcs rather than a filled dome so the chamber
+         below stays visible through it */
+      if (FR.lod > LOD_FAR) {
+        ctx.strokeStyle = 'rgba(198,232,255,' + (0.26 + l * 0.3).toFixed(3) + ')';
+        ctx.lineWidth = 1.3;
+        for (let i = 1; i <= 3; i++) {
+          const rx = Math.abs(Math.cos((i / 4) * Math.PI)) * g.RX;
+          if (rx < 0.5) continue;
+          ctx.beginPath();
+          ctx.ellipse(g.p.x, g.cy - 4, rx, g.RY * 0.92, 0, Math.PI, TAU);
+          ctx.stroke();
+        }
+        ctx.beginPath();
+        ctx.ellipse(g.p.x, g.cy - 4, g.RX, g.RY * 0.92, 0, Math.PI, TAU);
+        ctx.stroke();
+      }
+      spanRing(ctx, g.p.x, g.cy, g.RX, g.RY, l, '#cbd6e6');
+      if (FR.lod > LOD_FAR) {
+        for (let k = 0; k < 4; k++) {
+          const a = (k / 4) * TAU + Math.PI / 4;
+          const q = iso(t.x + 0.5 + Math.cos(a) * g.rimT * 0.96, t.y + 0.5 + Math.sin(a) * g.rimT * 0.96);
+          ctx.strokeStyle = grey(160, l); ctx.lineWidth = 1.8;
+          ctx.beginPath(); ctx.moveTo(q.x, q.y - z); ctx.lineTo(q.x, q.y - z - 40); ctx.stroke();
+          ctx.fillStyle = 'rgba(190,226,255,' + (0.5 + beatPulse() * 0.4).toFixed(3) + ')';
+          ctx.beginPath(); ctx.arc(q.x, q.y - z - 42, 2.4, 0, TAU); ctx.fill();
+        }
+      }
+      return;
+    }
+  }
+
+  /* An arcology that cannot dig gets a mark on the rim rather than a silent
+     stall. Every other stalled thing in this game says so somewhere; a hole
+     that has quietly stopped getting deeper would be the one exception. */
+  function drawDeepStall(ctx, s, t, l) {
+    if (!t.b || !t.b.stalled) return;
+    const B = BUILDINGS.find(b => b.id === t.b.type);
+    if (!B || (t.b.levels || 1) >= B.maxLevels) return;
+    const p = iso(t.x + 0.5, t.y + 0.5);
+    const y = p.y - lift(t) - 16;
+    ctx.fillStyle = 'rgba(255,178,74,' + (0.35 + beatPulse() * 0.5).toFixed(3) + ')';
+    ctx.beginPath();
+    ctx.moveTo(p.x, y - 7); ctx.lineTo(p.x + 6, y + 4); ctx.lineTo(p.x - 6, y + 4);
+    ctx.closePath(); ctx.fill();
+  }
+
   /* ---------- traffic and pedestrians (cosmetic, from agents.js) ----------
 
      Drawn INSIDE the back-to-front tile walk, bucketed by the tile they are
@@ -920,6 +1470,8 @@
      one is a data change here too. */
   const WONDER_IDS = new Set(BUILDINGS.filter(b => b.group === 'wonder').map(b => b.id));
   const isWonder = id => WONDER_IDS.has(id);
+  const DEEP_IDS = new Set(BUILDINGS.filter(b => b.group === 'deep').map(b => b.id));
+  const isDeepId = id => DEEP_IDS.has(id);
 
   /* Roughly how tall whatever stands on this tile is, in world units. Only
      used to decide whether it would hide a person standing behind it, so it
@@ -929,6 +1481,10 @@
     if (t.b) {
       const ty = t.b.type;
       if (ty === 'tube' || ty === 'conduit') return 0;
+      /* A deep arcology is a hole with a collar around it. Only the
+         superstructure can hide anyone, so it must not claim a tower's
+         height or it would swallow every pedestrian behind it. */
+      if (isDeepId(ty)) return 26;
       if (isWonder(ty)) return 120;
       return 22;
     }
@@ -1401,6 +1957,7 @@
       if (t.b) {
         if (t.b.type === 'tube') drawTube(ctx, s, t, litness(t));
         else if (t.b.type === 'conduit') drawConduit(ctx, s, t, litness(t));
+        else if (isDeepId(t.b.type)) { drawDeep(ctx, s, t, litness(t)); drawDeepStall(ctx, s, t, litness(t)); }
         else if (isWonder(t.b.type)) drawWonder(ctx, s, t, litness(t));
         else drawPlant(ctx, s, t, litness(t));
       } else if (t.zone) {

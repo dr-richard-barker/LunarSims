@@ -450,10 +450,13 @@
 
   /* ---------- wonders ---------- */
 
-  /* Both are terrain-gated, so the director does not sculpt for them — it
-     takes them if the map it settled on happens to allow one. */
+  /* All of them are terrain-gated, so the director does not sculpt for them
+     — it takes them if the map it settled on happens to allow one. The deep
+     arcologies are searched last on purpose: they are the most expensive
+     things on the list and they only pay off once the grid can carry them,
+     which by then the cheaper entries have already forced it to. */
   function ensureWonders(s, a) {
-    for (const id of ['megadome', 'massdriver']) {
+    for (const id of ['megadome', 'massdriver', 'sinkwell', 'cistern', 'foundry', 'core']) {
       if (S.count(s, id) >= 1) continue;
       if (E && !E.unlocked(s, id)) continue;
       if (!afford(s, buildCost(id))) continue;

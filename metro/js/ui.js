@@ -94,6 +94,7 @@
     { id: 'plant', label: 'Power & Life Support' },
     { id: 'service', label: 'Civic Services' },
     { id: 'wonder', label: 'Wonders' },
+    { id: 'deep', label: 'Deep Arcologies' },
     { id: 'zone', label: 'Zoning' },
     { id: 'district', label: 'Special Districts' }
   ];
@@ -126,12 +127,28 @@
           : locked ? E.lockReason(s, t.build)
           : (t.hint || (t.build ? S.buildById(t.build).desc : '') ||
              (t.zone ? Z.zoneById(t.zone).desc : ''));
-        b.onclick = () => { ui.tool = t.id; ui.levelTarget = null; buildPalette(); setHint(); };
+        b.onclick = () => {
+          ui.tool = t.id; ui.levelTarget = null;
+          /* A deep arcology is the only thing in the game sited off the
+             deposit map, so picking one up puts that map on screen. Nothing
+             else would ever teach a player to look at it. */
+          if (t.group === 'deep' && ui.view === 'terrain') setView('deposits');
+          buildPalette(); setHint();
+        };
         box.appendChild(b);
       });
       wrap.appendChild(box);
       nav.appendChild(wrap);
     }
+  }
+
+  /* Switching the map. Factored out of the view bar's own handler because
+     the palette drives it too — picking up a deep arcology puts the deposit
+     map on screen. */
+  function setView(v) {
+    ui.view = v;
+    document.querySelectorAll('#viewBar button')
+      .forEach(x => x.classList.toggle('on', x.dataset.view === v));
   }
 
   function setHint() {
@@ -335,6 +352,13 @@
     const hasT = G.hasTransit(s, t.x, t.y);
     const yn = v => v ? '<span class="v good">yes</span>' : '<span class="v bad">no</span>';
 
+    /* A deep arcology is the one structure whose readout changes day to day
+       — how far it has dug, how much ice it can still reach, and what that
+       is currently worth to the colony. */
+    const DP = window.LM_DEEP;
+    const deep = (DP && t.b && DP.isDeep(t.b.type)) ? DP.outputOf(s, t) : null;
+    const deepSpec = deep ? S.buildById(t.b.type) : null;
+
     let what = kind.name;
     if (t.b) what = S.buildById(t.b.type).name;
     else if (t.zone) {
@@ -353,6 +377,15 @@
         <div class="row"><span class="k">Power</span>${yn(hasP)}</div>
         <div class="row"><span class="k">Atmosphere</span>${yn(hasA)}</div>
         ${t.pipe ? `<div class="row"><span class="k">Buried main</span><span class="v good">yes</span></div>` : ''}
+        ${deep ? `<div class="row"><span class="k">Levels opened</span><span class="v${deep.levels >= deep.maxLevels ? ' good' : ''}">${deep.levels} / ${deep.maxLevels}</span></div>
+        <div class="row"><span class="k">Ice within reach</span><span class="v${deep.yield >= 1 ? ' good' : deep.yield <= 0.4 ? ' bad' : ''}">${Math.round(deep.yield * 100)}%</span></div>
+        <div class="row"><span class="k">Houses</span><span class="v">${Math.round(deep.housing).toLocaleString()}</span></div>
+        <div class="row"><span class="k">Employs</span><span class="v">${Math.round(deep.jobs).toLocaleString()}</span></div>
+        ${deep.air ? `<div class="row"><span class="k">Pressurises</span><span class="v">${Math.round(deep.air).toLocaleString()}</span></div>` : ''}
+        ${deep.export ? `<div class="row"><span class="k">Export income</span><span class="v">${Math.round(deep.export).toLocaleString()}/day</span></div>` : ''}
+        <div class="row"><span class="k">Excavation</span><span class="v${t.b.stalled ? ' bad' : deep.levels >= deep.maxLevels ? ' good' : ''}">${
+          deep.levels >= deep.maxLevels ? 'at full depth'
+          : t.b.stalled ? 'stalled' : 'sinking'}</span></div>` : ''}
         <div class="row"><span class="k">Dust</span><span class="v${(t.dust || 0) > 0.35 ? ' bad' : (t.dust || 0) > 0.12 ? ' warn' : ''}">${Math.round((t.dust || 0) * 100)}%</span></div>
       </div>
       ${ui.cov ? `<h3 class="sec">Civic coverage</h3><div class="rows">${
@@ -361,7 +394,12 @@
           return `<div class="row"><span class="k">${sv.name}</span><span class="v${c >= 50 ? ' good' : c === 0 ? ' bad' : ''}">${c}%</span></div>`;
         }).join('')}</div>` : ''}
       <p class="note">${t.b ? S.buildById(t.b.type).desc : t.zone ? Z.zoneById(t.zone.kind).desc : kind.note}</p>
-      ${dep ? `<p class="note"><b>${dep.name}</b> — richness ${Math.round(t.deposit.richness * 100)}%. ${dep.note}</p>` : ''}`;
+      ${dep ? `<p class="note"><b>${dep.name}</b> — richness ${Math.round(t.deposit.richness * 100)}%. ${dep.note}</p>` : ''}
+      ${deep && t.b.stalled && deep.levels < deep.maxLevels ? `<p class="note warnnote">The bore has stopped sinking. It needs a transit tube, current and
+        pressurisation all reaching it, and the colony to be neither browning out nor short of air. It keeps every level it has already opened.</p>` : ''}
+      ${deep && deepSpec ? `<p class="note">Each level opened adds ${deepSpec.housingPerLevel} residents and ${deepSpec.jobsPerLevel} jobs${
+        deepSpec.airPerLevel ? `, and pressurises ${deepSpec.airPerLevel} more — scaled by the ice within reach` : ''}.
+        Another arcology bored nearby would draw on the same deposit and both would yield less.</p>` : ''}`;
   }
 
   function bar(label, v) {
@@ -644,10 +682,7 @@
     if (t.dataset.tab === 'colonies') buildColonies();
   });
 
-  document.querySelectorAll('#viewBar button').forEach(b => b.onclick = () => {
-    ui.view = b.dataset.view;
-    document.querySelectorAll('#viewBar button').forEach(x => x.classList.toggle('on', x === b));
-  });
+  document.querySelectorAll('#viewBar button').forEach(b => b.onclick = () => setView(b.dataset.view));
   document.querySelectorAll('.sp').forEach(b => b.onclick = () => {
     ui.speed = +b.dataset.speed;
     document.querySelectorAll('.sp').forEach(x => x.classList.toggle('on', x === b));

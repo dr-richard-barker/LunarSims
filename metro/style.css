@@ -208,6 +208,9 @@ h3.sec:first-child{margin-top:0}
 .cultivar{font-size:11.5px;color:var(--ink-soft);font-style:italic;margin:0 0 8px}
 .note{font-size:11.5px;line-height:1.55;color:var(--ink-soft);margin:10px 0 0;
   padding:9px 10px;background:var(--panel-2);border-left:2px solid var(--accent-2);border-radius:0 5px 5px 0}
+/* a note about something the player can act on right now, rather than
+   background reading — the left rule is the whole signal */
+.note.warnnote{border-left-color:var(--warn);color:var(--ink)}
 
 .meter{margin:7px 0}
 .meter .lab{display:flex;justify-content:space-between;font-size:10.5px;color:var(--ink-soft);margin-bottom:3px;font-family:var(--mono)}

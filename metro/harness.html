@@ -51,6 +51,7 @@ td.mark{width:34px;text-align:center}
 <script src="js/grid.js"></script>
 <script src="js/budget.js"></script>
 <script src="js/services.js"></script>
+<script src="js/deep.js"></script>
 <script src="js/eras.js"></script>
 <script src="js/zones.js"></script>
 <script src="js/disasters.js"></script>
@@ -199,6 +200,64 @@ td.mark{width:34px;text-align:center}
         const t = T.tileAt(s, x, y);
         if (t) { t.h = h; t.t = 'flat'; }
       }
+  }
+
+  /* A shadowed, iced, level crater floor — the only ground a deep arcology
+     can be bored into. city() deliberately lifts sun to 0.6 across its working
+     area, so this has to put the dark back as well as the ice, and level the
+     floor, since these need a pad. */
+  function iceField(s, cx, cy, r, rich, frac) {
+    const f = frac === undefined ? 0.5 : frac;
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        if (dx * dx + dy * dy > r * r) continue;
+        const t = T.tileAt(s, cx + dx, cy + dy);
+        if (!t) continue;
+        t.h = 3; t.t = 'flat'; t.sun = 0.05;
+        t.b = null; t.zone = null;
+        /* Scattered, not paved. seedDeposits ices well under half of a
+           shadowed floor, and a field where every single tile carries ice
+           sums to two or three times anything the generator produces — which
+           pins iceYield against its ceiling and quietly hides exactly the
+           behaviour these scenarios exist to check. t.v is the same stable
+           per-tile value the generator itself scatters with. */
+        t.deposit = t.v <= f
+          ? { kind: 'ice', richness: rich === undefined ? 0.8 : rich }
+          : null;
+      }
+    }
+    /* the site itself always carries ice, so a scenario can site a bore at
+       the centre it just prepared without rolling for it */
+    const c = T.tileAt(s, cx, cy);
+    if (c) c.deposit = { kind: 'ice', richness: rich === undefined ? 0.8 : rich };
+  }
+
+  /* A colony that can actually carry a deep arcology, with one bored at
+     (60,60): a tube touching the pad from outside, a conduit spur inside it,
+     mains and thirty oxygen plants well clear of it, and reactors — because a
+     permanently shadowed floor has no sun to run anything on, which is half
+     the point of putting these where the ice is.
+
+     The pressurisation is deliberately enormous. An arcology at full depth
+     houses over a thousand people, and pop above airCap stalls the dig; a
+     colony that cannot breathe cannot finish digging the hole that is making
+     it short of air. */
+  function deepCity(id, seed) {
+    const s = grantEra(city(seed === undefined ? 777 : seed));
+    iceField(s, 60, 60, 6);
+    S.place(s, T.tileAt(s, 60, 58), 'tube');
+    S.place(s, T.tileAt(s, 60, 59), 'tube');
+    S.place(s, T.tileAt(s, 61, 60), 'conduit');        // inside the pad, and legal
+    for (let y = 61; y <= 71; y++) S.place(s, T.tileAt(s, 61, y), 'conduit');
+    for (let y = 60; y <= 70; y++) S.place(s, T.tileAt(s, 60, y), 'main');
+    for (let x = 50; x <= 79; x++) {
+      S.place(s, T.tileAt(s, x, 71), 'main');
+      S.place(s, T.tileAt(s, x, 72), 'o2');
+      S.place(s, T.tileAt(s, x, 73), 'conduit');
+    }
+    for (let x = 52; x <= 60; x++) S.place(s, T.tileAt(s, x, 74), 'reactor');
+    if (id) S.place(s, T.tileAt(s, 60, 60), id);
+    return s;
   }
 
   const SCENARIOS = [
@@ -1039,6 +1098,214 @@ td.mark{width:34px;text-align:center}
           ['the refusal names the requirement', /level|ridge|height/i.test(refusedLow || ''), true],
           ['it is allowed along a level ridge', okRidge, null],
           ['and it pays a standing export income', income, '>=640']
+        ];
+      } },
+
+    { name: 'A deep arcology has to be bored into water ice',
+      why: 'ice was surveyed onto every map from the first version and consumed by nothing — if these can be built off it, the deposit model stays decorative and the Deposits view stays pointless',
+      run() {
+        const s = grantEra(city());
+        iceField(s, 60, 60, 8);                  // wide enough to hold two pads
+        iceField(s, 74, 74, 4, 0.55);            // real ice, but lean
+        const dry = S.canPlace(s, T.tileAt(s, 50, 50), 'sinkwell');
+        const lean = S.canPlace(s, T.tileAt(s, 74, 74), 'cistern');
+        const ok = S.place(s, T.tileAt(s, 60, 60), 'sinkwell');
+        const t = T.tileAt(s, 60, 60);
+        /* iceField scatters, so pin ice on the two tiles this scenario goes
+           on to name rather than hoping the scatter put some there */
+        for (const [x, y] of [[62, 60], [64, 60]]) {
+          T.tileAt(s, x, y).deposit = { kind: 'ice', richness: 0.8 };
+        }
+        return [
+          ['it is refused on ground with no ice', dry !== null, true],
+          ['the refusal names the requirement', /ice/i.test(dry || ''), true],
+          ['lean ice is refused for a structure that needs rich ice', lean !== null, true],
+          ['and that refusal says so in percentages', /rich/i.test(lean || ''), true],
+          ['it is allowed on ice', ok, null],
+          ['it opens as a single gallery, not at full depth', t.b.levels, 1],
+          ['a colony bores only one of each', S.canPlace(s, T.tileAt(s, 62, 60), 'sinkwell') !== null, true],
+          ['but a different one is still allowed', S.canPlace(s, T.tileAt(s, 64, 60), 'foundry'), null]
+        ];
+      } },
+
+    { name: 'A pad may carry the networks that have to reach it',
+      why: 'these are the only structures that must be REACHED to work, and reaching means adjacent, which means inside their own pad — if a tube refused the site, laying the networks first would permanently forbid ground that building first and connecting after allows',
+      run() {
+        const s = grantEra(city());
+        iceField(s, 60, 60, 5);
+        S.place(s, T.tileAt(s, 60, 59), 'tube');      // inside the 3x3 pad
+        S.place(s, T.tileAt(s, 61, 60), 'conduit');   // and so is this
+        const withNets = S.canPlace(s, T.tileAt(s, 60, 60), 'sinkwell');
+
+        const solid = grantEra(city());
+        iceField(solid, 60, 60, 5);
+        S.place(solid, T.tileAt(solid, 59, 60), 'o2');
+        const withPlant = S.canPlace(solid, T.tileAt(solid, 60, 60), 'sinkwell');
+
+        const zoned = grantEra(city());
+        iceField(zoned, 60, 60, 5);
+        S.paintZone(zoned, 59, 60, 1, 1, 'hab', 'low');
+        const withZone = S.canPlace(zoned, T.tileAt(zoned, 60, 60), 'sinkwell');
+        return [
+          ['a tube and a conduit in the pad do not refuse it', withNets, null],
+          ['a real structure in the pad does', withPlant !== null, true],
+          ['so does zoned ground in the pad', withZone !== null, true],
+          ['the arena keeps the stricter rule it always had',
+            S.isOpen(zoned, T.tileAt(zoned, 60, 60), 1), false]
+        ];
+      } },
+
+    { name: 'A deep arcology sinks a level at a time while the city carries it',
+      why: 'opening at full depth would drop two thousand residents on a colony overnight; sinking is what ties a megastructure to the three networks the rest of the game is built on',
+      run() {
+        const s = deepCity('sinkwell');
+        const t = T.tileAt(s, 60, 60);
+        const nets = G.services(s);
+        const opened = t.b.levels;
+        for (let i = 0; i < 300; i++) S.tick(s);
+        const B = S.buildById('sinkwell');
+        const out = window.LM_DEEP.outputOf(s, t);
+        return [
+          ['every network reaches the bore', window.LM_DEEP.serviced(s, t, nets), true],
+          ['it started at one level', opened, 1],
+          ['it dug', t.b.levels > 1, true],
+          ['it reached its full depth', t.b.levels, B.maxLevels],
+          ['and stopped there rather than running away', t.b.levels <= B.maxLevels, true],
+          ['housing is levels times the per-level rate',
+            out.housing, B.housingPerLevel * B.maxLevels],
+          ['the city counts that housing', s.housingCap >= B.housingPerLevel * B.maxLevels, true],
+          ['its jobs are special jobs, not trade demand', Z.tally(s).tradeJobs, 0],
+          ['the colony logged each level as it opened',
+            s.log.filter(e => /level \d+ of/i.test(e.msg)).length, '>=2']
+        ];
+      } },
+
+    { name: 'A bore that loses its services stops digging and keeps what it opened',
+      why: 'the whole reason to make excavation continuous is that the grid can take it away again — but taking away a megastructure the player paid for would be the nearest thing this game has to a fail state',
+      run() {
+        const s = grantEra(city(778));
+        iceField(s, 60, 60, 6);
+        const t = T.tileAt(s, 60, 60);
+        /* placed by hand, four levels in, with nothing reaching it */
+        t.b = { type: 'sinkwell', built: 1, levels: 4, dig: 0, stalled: false };
+        for (let i = 0; i < 60; i++) S.tick(s);
+        const strandedLevels = t.b.levels;
+
+        const live = deepCity('sinkwell', 779);
+        const lt = T.tileAt(live, 60, 60);
+        for (let i = 0; i < 120; i++) S.tick(live);
+        const dug = lt.b.levels;
+        for (const q of live.map) if (q.b && q.b.type === 'reactor') q.b = null;
+        for (let i = 0; i < 60; i++) S.tick(live);
+        return [
+          ['an unserviced bore never digs', strandedLevels, 4],
+          ['and is marked stalled so the renderer and the panel can say so',
+            t.b.stalled, true],
+          ['a serviced one digs', dug > 1, true],
+          ['pulling the generation stops it', live.brownout, true],
+          ['but it keeps every level it had already opened', lt.b.levels >= dug, true]
+        ];
+      } },
+
+    { name: 'What a bore delivers scales with the ice actually within reach',
+      why: 'if only the tile underneath mattered, siting would be a single click on any ice at all and the deposit map would still not be worth reading',
+      run() {
+        const rich = grantEra(city(4242));
+        iceField(rich, 60, 60, 5, 0.9);
+        rich.map[T.idx(60, 60)].b = { type: 'cistern', built: 1, levels: 8, dig: 0 };
+
+        const thin = grantEra(city(4242));
+        iceField(thin, 60, 60, 5, 0.9);
+        /* same structure, same levels, but strip the ice around it back to a
+           single tile — the deposit it stands on is identical */
+        for (const q of thin.map) {
+          if (q.deposit && q.deposit.kind === 'ice' && !(q.x === 60 && q.y === 60)) q.deposit = null;
+        }
+        thin.map[T.idx(60, 60)].b = { type: 'cistern', built: 1, levels: 8, dig: 0 };
+
+        const a = window.LM_DEEP.outputOf(rich, T.tileAt(rich, 60, 60));
+        const b = window.LM_DEEP.outputOf(thin, T.tileAt(thin, 60, 60));
+        return [
+          ['a bore in a big deposit yields more than one on a single tile',
+            a.yield > b.yield, true],
+          ['air follows the ice', a.air > b.air, true],
+          ['housing does not — a gallery holds what it holds', a.housing, b.housing],
+          ['even the poorest site still delivers something',
+            b.air > 0 && b.yield >= window.LM_DEEP.YIELD_MIN, true],
+          ['and no site saturates the ceiling on a real deposit',
+            a.yield < window.LM_DEEP.YIELD_MAX, true]
+        ];
+      } },
+
+    { name: 'A second bore alongside splits the same deposit',
+      why: 'without this, the optimal play is to stack every arcology on the single richest tile on the map, and siting stops being a decision at all',
+      run() {
+        const s = grantEra(city(4243));
+        iceField(s, 60, 60, 6, 0.75);
+        s.map[T.idx(60, 60)].b = { type: 'sinkwell', built: 1, levels: 5, dig: 0 };
+        const alone = window.LM_DEEP.iceYield(s, T.tileAt(s, 60, 60));
+        s.map[T.idx(62, 60)].b = { type: 'foundry', built: 1, levels: 5, dig: 0 };
+        const shared = window.LM_DEEP.iceYield(s, T.tileAt(s, 60, 60));
+
+        const far = grantEra(city(4243));
+        iceField(far, 60, 60, 6, 0.75);
+        iceField(far, 44, 44, 6, 0.75);
+        far.map[T.idx(60, 60)].b = { type: 'sinkwell', built: 1, levels: 5, dig: 0 };
+        far.map[T.idx(44, 44)].b = { type: 'foundry', built: 1, levels: 5, dig: 0 };
+        const spaced = window.LM_DEEP.iceYield(far, T.tileAt(far, 60, 60));
+        return [
+          ['a neighbouring bore takes a share of the ice', shared < alone, true],
+          ['one sited well away takes none of it', spaced, alone],
+          ['and the loss is a share, not a wipeout', shared > alone * 0.4, true]
+        ];
+      } },
+
+    { name: 'The foundry vents dust and the other bores do not',
+      why: 'four megastructures that were all upside would make the group a strictly correct purchase — the industrial one has to cost the ground around it something',
+      run() {
+        const reach = (s, x, y) => {
+          let d = 0;
+          for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
+            const t = T.tileAt(s, x + dx, y + dy);
+            if (t) d += t.dust || 0;
+          }
+          return d;
+        };
+        const out = {};
+        for (const id of ['sinkwell', 'cistern', 'core', 'foundry']) {
+          const s = grantEra(city(31337));
+          iceField(s, 60, 60, 6);
+          s.map[T.idx(60, 60)].b = { type: id, built: 1, levels: 9, dig: 0 };
+          for (let i = 0; i < 60; i++) SV.diffuseDust(s);
+          out[id] = reach(s, 60, 60);
+        }
+        return [
+          ['the foundry raises a real dust load', out.foundry > 1, true],
+          ['the sinkwell raises none', out.sinkwell, 0],
+          ['nor does the cistern', out.cistern, 0],
+          ['nor the core', out.core, 0]
+        ];
+      } },
+
+    { name: 'Deep arcologies lift the air cap without disturbing the oxygen plants',
+      why: 'airCap was o2Plants times a constant for the whole life of this game; generalising it must leave a city with no arcologies computing exactly what it always did',
+      run() {
+        const plain = city(4242);
+        for (let x = 50; x <= 54; x++) S.place(plain, T.tileAt(plain, x, 50), 'o2');
+        const plainCap = Z.growthTick(plain, G.services(plain)).airCap;
+
+        const s = grantEra(city(4244));
+        iceField(s, 60, 60, 6);
+        for (let x = 50; x <= 54; x++) S.place(s, T.tileAt(s, x, 50), 'o2');
+        const before = Z.growthTick(s, G.services(s)).airCap;
+        s.map[T.idx(60, 60)].b = { type: 'cistern', built: 1, levels: 8, dig: 0 };
+        const after = Z.growthTick(s, G.services(s)).airCap;
+        return [
+          ['an oxygen-plant-only city is unchanged', plainCap, 5 * K.AIR_PER_PLANT],
+          ['and matches a second such city exactly', before, plainCap],
+          ['a cistern raises the cap', after > before, true],
+          ['by about the air it reports making',
+            after - before, '~' + window.LM_DEEP.outputOf(s, T.tileAt(s, 60, 60)).air]
         ];
       } },
 

@@ -331,7 +331,81 @@ const BUILDINGS = [
 
   { id: 'massdriver', name: 'Mass Driver', cost: 68000, group: 'wonder', era: 3,
     once: true, needsRidge: true, drawKw: 30, exportIncome: 640,
-    desc: 'An electromagnetic launch track flinging refined cargo to Earth orbit without rockets. Needs a long, high, level run to sit on, and pays a standing export income once it does.' }
+    desc: 'An electromagnetic launch track flinging refined cargo to Earth orbit without rockets. Needs a long, high, level run to sit on, and pays a standing export income once it does.' },
+
+  /* ---- the deep arcologies ----
+
+     SimCity 2000's arcologies were self-contained megastructures that housed
+     a city inside one building. These are the lunar answer, and they go the
+     other way: DOWN. A bore is sunk into a permanently shadowed crater floor
+     and the habitation is terraced around the void, which is roughly what
+     every serious proposal for long-term lunar settlement actually suggests
+     — a few metres of regolith over your head is the cheapest radiation
+     shielding available, and the temperature underground stops swinging.
+
+     They are the first structures in the game that CONSUME a deposit. Ice
+     only survives where the sun genuinely never reaches (see terrain.js's
+     seedDeposits), so requiring ice puts them on exactly the ground the rest
+     of the game has no use for: a shadowed floor earns nothing as land value
+     and generates nothing from solar. Going down inverts that — the worst
+     surface on the map becomes the best interior in the colony, and every
+     watt has to be conduited in across the dark from a peak of eternal light
+     or a reactor.
+
+     Unlike every other wonder they do not open finished. One arrives as a
+     collar and a single gallery and then sinks a level at a time, but only
+     while all three networks reach it and the colony is neither browning out
+     nor short of air — the same gate zoned ground grows under. Brown out the
+     grid and the digging stops where it is; it never loses what it opened.
+
+     `*PerLevel` fields are therefore rates, not totals: multiply by
+     `t.b.levels`. `air` and `export` are additionally scaled by how much ice
+     is actually within reach — see deep.js's iceYield.
+
+     `needsIceRichness` is 0.62 wherever it appears, and that is not an
+     arbitrary round number. seedDeposits derives richness from sun exposure,
+     and because the sun raycast is quantised the result is bimodal: a
+     shadowed tile is either around 0.5-0.6 or around 0.85, with nothing in
+     between. 0.62 is the only value that can separate the two at all —
+     anything from 0.66 to 0.85 selects exactly the same tiles, and anything
+     at or below 0.5 selects all of them.
+
+     It does not, on a generated map, refuse any site the pad requirement
+     would have accepted: measured across seeds, EVERY tile flat enough for a
+     3x3 pad already carries ice at 0.62 or better, because the lean ice lies
+     on crater slopes and slopes are never level. What it actually gates is
+     the sculpted case — levelling a pad out of a partially shadowed slope and
+     dropping a cistern on it. That is the right thing to refuse, and it is
+     worth knowing that this gate is quiet until a player goes looking for
+     it. */
+
+  { id: 'sinkwell', name: 'Sinkwell Arcology', cost: 64000, group: 'deep', era: 2,
+    once: true, needsIce: true, needsPad: 1,
+    maxLevels: 10, digDays: 24, drawKw: 34,
+    housingPerLevel: 110, jobsPerLevel: 30, airPerLevel: 8,
+    service: 'amenity', radius: 8,
+    desc: 'A terraced bore sunk into a shadowed ice floor, with habitation galleries stepping down around an open shaft. The cheapest way to put a lot of people underground, and it cracks a little of the ice it stands on for air. Must be built on water ice.' },
+
+  { id: 'cistern', name: 'Cistern Arcology', cost: 82000, group: 'deep', era: 2,
+    once: true, needsIce: true, needsIceRichness: 0.62, needsPad: 1,
+    maxLevels: 8, digDays: 26, drawKw: 40,
+    housingPerLevel: 60, jobsPerLevel: 22, airPerLevel: 34,
+    service: 'amenity', radius: 14,
+    desc: 'The ice is melted rather than mined: the floor of the shaft is a lit reservoir, ringed by grow-decks, with mirror masts on the surface throwing daylight down the bore onto it. Houses fewer people than the others and pressurises far more of them. Must be built on rich water ice.' },
+
+  { id: 'foundry', name: 'Foundry Arcology', cost: 74000, group: 'deep', era: 2,
+    once: true, needsIce: true, needsPad: 1,
+    maxLevels: 9, digDays: 22, drawKw: 52,
+    housingPerLevel: 45, jobsPerLevel: 60, airPerLevel: 0, exportPerLevel: 76,
+    dustPerLevel: 0.03,
+    desc: 'Electrolysis and smelting at the bottom of the shaft, hoists running the wall, and a working town wrapped around it. Employs more people than it houses and pays a standing export income — and vents fines at the surface that foul everything downrange. Must be built on water ice.' },
+
+  { id: 'core', name: 'Core Arcology', cost: 245000, group: 'deep', era: 3,
+    once: true, needsIce: true, needsIceRichness: 0.62, needsPad: 2,
+    maxLevels: 14, digDays: 30, drawKw: 96,
+    housingPerLevel: 175, jobsPerLevel: 55, airPerLevel: 18,
+    service: 'amenity', radius: 20,
+    desc: 'A cavern bored so deep it widens as it goes, with inverted towers hanging from its ceiling around a suspended sun-lamp. The largest structure the colony can build and the only one that houses a city rather than a district. Needs a clear five-by-five pad over the richest ice on the map.' }
 ];
 
 /* The five coverage services a civic building can project. Each names the
@@ -497,6 +571,16 @@ const TOOLS = [
      shadow whichever tool was declared earlier. */
   { id: 'arena',     name: 'Olympus Arena',   glyph: '◎', key: '6', group: 'wonder', build: 'arena' },
   { id: 'arcology',  name: 'Launch Arcology', glyph: '⬢', key: '7', group: 'wonder', build: 'arcology' },
+
+  /* The deep arcologies run on past the digits into the key beside them,
+     because 1-5 are the terrain tools and 6-7 are already spoken for above.
+     They are their own palette group rather than more wonders: they share a
+     siting rule (ice), a lifecycle (they sink over time) and a silhouette,
+     and reading them as one family is the point. */
+  { id: 'sinkwell', name: 'Sinkwell Arcology', glyph: '◉', key: '8', group: 'deep', build: 'sinkwell' },
+  { id: 'cistern',  name: 'Cistern Arcology',  glyph: '◍', key: '9', group: 'deep', build: 'cistern' },
+  { id: 'foundry',  name: 'Foundry Arcology',  glyph: '◭', key: '0', group: 'deep', build: 'foundry' },
+  { id: 'core',     name: 'Core Arcology',     glyph: '◎', key: '-', group: 'deep', build: 'core' },
 
   { id: 'hab_low',   name: 'Habitation · Low',  glyph: '▨', key: 'Q', group: 'zone', zone: 'hab',      density: 'low',  drag: 'rect' },
   { id: 'hab_high',  name: 'Habitation · High', glyph: '▧', key: 'W', group: 'zone', zone: 'hab',      density: 'high', drag: 'rect' },
