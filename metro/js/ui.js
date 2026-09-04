@@ -13,7 +13,7 @@
   const K = D.K;
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   /* Which site the running city belongs to. Set by load() at startup and
-     kept current by every save() — see sites.js for the format a city is
+     kept current by every save() — see colony-sites.js for the format a city is
      actually stored in. */
   let activeSiteId = null;
   /* True for exactly one thing: a brand-new player who has never founded

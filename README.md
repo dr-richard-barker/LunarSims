@@ -566,7 +566,7 @@ metro/
   js/autopilot.js              the AI auto-play director
   js/agents.js                  pedestrians, cars, buses and trains (cosmetic)
   js/fx.js                       transient set pieces, on an injectable clock
-  js/sites.js                     many cities: sparse save/load, one per seed
+  js/colony-sites.js              many cities: sparse save/load, one per seed
   js/empire.js                     the background scheduler for away colonies
   js/globe.js                      the Moon as a projected sphere, and its own click/drag maths
   js/minimap.js                     one map, painted once, drawn at two sizes

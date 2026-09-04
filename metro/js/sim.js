@@ -23,7 +23,7 @@
 
   /* `opts`, forwarded straight to T.makeMap, is entirely optional — every
      existing call in this codebase omits it and keeps getting exactly the
-     polar world it always has. Only sites.js's found() passes one, for a
+     polar world it always has. Only colony-sites.js's found() passes one, for a
      colony founded somewhere other than the default pole. */
   function newGame(seed, opts) {
     const w = T.makeMap(seed === undefined ? Math.floor(Math.random() * 9999) : seed, opts);

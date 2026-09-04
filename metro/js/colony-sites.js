@@ -17,7 +17,16 @@
    localStorage quota in this environment is around 12 MB, which is two
    full-map cities, or dozens of sparse ones.
 
-   No DOM references. ui.js owns *when* to save; this module owns *how*. */
+   No DOM references. ui.js owns *when* to save; this module owns *how*.
+
+   NAMED colony-sites.js, NOT sites.js. Every other CoSE repo keeps the shared
+   cross-site nav registry (window.BARKER_SITES) in a file called sites.js, and
+   a registry sync that went looking for that filename found this module instead
+   and overwrote it — twice, silently. The game lost window.LM_SITES for nine
+   days and 19 harness scenarios threw until it was restored from git. This repo
+   pulls the CoSE registry from the hosted copy (see the script tag at the foot
+   of ../index.html) and needs no local copy of it, so no file here should ever
+   be called sites.js again. */
 
 (function () {
   const { K } = window.LM_DATA;

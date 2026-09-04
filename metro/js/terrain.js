@@ -104,7 +104,7 @@
      relief. The threshold a blocker has to clear — how much higher a tile
      must be, per step of distance, to throw shadow — is SUN_SLOPE, and it is
      read off the world being computed rather than fixed globally: a site's
-     own sunSlope (set once at generation, from its latitude — see sites.js's
+     own sunSlope (set once at generation, from its latitude — see colony-sites.js's
      slopeFor()) is what actually distinguishes a pole from the equator. Near
      a pole that threshold is low, so a ridge only a couple of levels up
      throws shadow a long way — precisely why crater floors there stay
@@ -262,7 +262,7 @@
      through the globe (Phase 4) or found() with an explicit class ever pass
      one, and every one of THOSE also carries a gen number recording that it
      was built by this parameterised generator rather than the frozen
-     original — see sites.js. */
+     original — see colony-sites.js. */
   function makeMap(seed, opts) {
     const cls = (opts && opts.class) || 'polar';
     const P = CLASS_PARAMS[cls] || CLASS_PARAMS.polar;
@@ -366,7 +366,7 @@
     idx, inBounds, tileAt, terrainById, depositById, buildable, clamp,
     /* exposed for the harness (checking each class actually differs, and
        that omitting opts matches passing polar's own values explicitly)
-       and for sites.js, which needs the same slope-per-latitude concept
+       and for colony-sites.js, which needs the same slope-per-latitude concept
        to live somewhere other than here (see classify()/slopeFor()) */
     CLASS_PARAMS
   };
