@@ -1309,6 +1309,41 @@ td.mark{width:34px;text-align:center}
         ];
       } },
 
+    { name: 'The director walks a corridor out to ice it cannot otherwise reach',
+      why: 'refusing to strand a bore is only half an answer — a shadowed crater floor is worth nothing to zone, so the lattice never grows onto one on its own and the director would simply never build one. Reaching for it deliberately is the other half',
+      run() {
+        const s = grantEra(city(4711));
+        s.credits = 1e7;
+        /* generation and a conduit stub in the middle of the working area */
+        for (let x = 58; x <= 62; x++) {
+          const g = T.tileAt(s, x, 60); g.sun = 1; S.place(s, g, 'solar');
+          S.place(s, T.tileAt(s, x, 61), 'conduit');
+          S.place(s, T.tileAt(s, x, 61), 'main');
+        }
+        S.place(s, T.tileAt(s, 57, 61), 'o2');
+        /* and the only ice a long way off, with nothing running to it */
+        iceField(s, 74, 76, 5);
+        const a = AI.ensureSeed(s);
+        a.ox = 60; a.oy = 60;
+
+        const pick = AI.chooseBore(s);
+        const before = window.LM_DEEP.serviced(s, T.tileAt(s, pick.x, pick.y), G.services(s));
+        /* a few hundred tiles of corridor, four a day as the ladder runs it */
+        for (let i = 0; i < 90; i++) AI.reachForIce(s, a, 4);
+        const t = T.tileAt(s, pick.x, pick.y);
+        const after = window.LM_DEEP.serviced(s, t, G.services(s));
+        for (let i = 0; i < 8 && AI.ensureWonders(s, a); i++);
+        const bore = s.map.find(q => q.b && window.LM_DEEP.isDeep(q.b.type));
+        return [
+          ['it picks a bore worth reaching for', !!pick && pick.yield > 0, true],
+          ['which is nowhere near the grid to begin with', before, false],
+          ['it commits to a route', !!s.ai.spur && s.ai.spur.route.length, '>=8'],
+          ['and the corridor eventually reaches it', after, true],
+          ['so a bore actually gets built', !!bore, true],
+          ['on the site it chose', bore && bore.x === pick.x && bore.y === pick.y, true]
+        ];
+      } },
+
     { name: 'The director never strands a bore out in the dark',
       why: 'a deep arcology is the only wonder that does nothing until the networks reach it, and the ground it qualifies on is exactly where the lattice is not — left to the ordinary rule the director bought two, stranded both, and left them at one level for the rest of the run',
       run() {
