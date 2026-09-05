@@ -501,11 +501,28 @@
       (!t.b || t.b.type === 'tube' || t.b.type === 'conduit');
     const prev = new Map(), q = [[target.x, target.y]];
     prev.set(key(target.x, target.y), null);
-    let head = 0, goal = null;
+    let head = 0, goal = null, powerOnly = null;
     while (head < q.length && !goal) {
       const [x, y] = q[head++];
-      if (!(x === target.x && y === target.y) && G.served(s, nets.power, x, y)) {
-        goal = [x, y]; break;
+      /* Anchored on a tile that is genuinely ON both networks — not merely
+         served by them.
+
+         served() counts adjacency, which is the right question for "can this
+         ground develop" and the wrong one entirely for "can I extend from
+         here". A tube sitting next to a conduit is served by power and does
+         not conduct a volt: anchor a corridor on it and the chain dead-ends
+         one tile short, leaving a bore with transit, atmosphere, and no
+         current. That is what kept the director re-laying the same two-tile
+         corridor to the same site every hundred and twenty days for the rest
+         of a run, and it is invisible from the outside because every tile
+         involved reports itself served.
+
+         Both networks, because the conduit and the main follow the same
+         route; the power-only tile is kept as a fallback. */
+      const here = !(x === target.x && y === target.y);
+      if (here && nets.power.has(G.idx(x, y))) {
+        if (nets.air.has(G.idx(x, y))) { goal = [x, y]; break; }
+        if (!powerOnly) powerOnly = [x, y];
       }
       for (const [dx, dy] of G.DIRS) {
         const nx = x + dx, ny = y + dy, k = key(nx, ny);
@@ -513,6 +530,7 @@
         prev.set(k, [x, y]); q.push([nx, ny]);
       }
     }
+    if (!goal) goal = powerOnly;
     if (!goal) return null;
     const route = [];
     for (let cur = goal; cur; cur = prev.get(key(cur[0], cur[1]))) route.push(cur);
@@ -545,10 +563,25 @@
       return true;
     }
 
-    /* Done with this one: ensureWonders has bored it, or something else has
-       taken the ground. Either way stop paying for the corridor. */
-    if (S.count(s, spur.id) >= 1 || spur.i >= spur.route.length) {
-      if (S.count(s, spur.id) >= 1) s.ai.spur = null;
+    /* Bored. Drop the corridor AND the throttle, so the next one is chosen on
+       the next tick rather than up to a hundred and twenty days later — a
+       colony that has just proved it can reach the ice should keep going. */
+    if (S.count(s, spur.id) >= 1) {
+      s.ai.spur = null;
+      s.ai.spurAsked = 0;
+      return false;
+    }
+
+    /* Corridor laid, and still no bore. Previously this branch simply
+       returned false while leaving the spur in place, which meant the
+       director could never choose another target for the rest of the run —
+       one corridor that failed to pay off froze the whole mechanism. Give
+       ensureWonders a few days to afford it, then let go. Nothing is wasted
+       by letting go: the corridor stays built, so if the site was the problem
+       only in the treasury, ensureWonders will still take it later on its own. */
+    if (spur.i >= spur.route.length) {
+      spur.idle = (spur.idle || 0) + 1;
+      if (spur.idle > 20) s.ai.spur = null;
       return false;
     }
 
@@ -568,8 +601,20 @@
       /* The bore's own tile is left clear of surface structures — it is about
          to have an arcology on it, and canPlace refuses ground that is
          already built on. */
-      if (!atBore && !t.b && afford(s, buildCost('conduit'))) {
-        if (!S.place(s, t, 'conduit')) laid++;
+      if (!atBore && afford(s, buildCost('conduit'))) {
+        /* A tube sitting on the route is replaced rather than worked around.
+           Excluding route tiles from the tube-alongside pass stops a corridor
+           blocking ITSELF, but it cannot stop an EARLIER corridor from having
+           left a tube exactly where this one now needs to run — and a tube
+           conducts nothing, so the chain dead-ends there and the bore is left
+           with transit and atmosphere and no current. Observed on a real map:
+           the site ended up ringed by tubes from its own abandoned attempts
+           and could never be powered, so the director re-laid the same
+           two-tile corridor to it every hundred and twenty days forever.
+           Transit is pure adjacency, so swapping one tube for a conduit costs
+           the ground around it nothing. */
+        if (t.b && t.b.type === 'tube') S.bulldoze(s, t);
+        if (!t.b && !S.place(s, t, 'conduit')) laid++;
       }
       /* and a tube alongside, so the corridor reads as a route people use
          rather than a bare power line.

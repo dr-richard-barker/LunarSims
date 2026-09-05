@@ -1328,8 +1328,15 @@ td.mark{width:34px;text-align:center}
 
         const pick = AI.chooseBore(s);
         const before = window.LM_DEEP.serviced(s, T.tileAt(s, pick.x, pick.y), G.services(s));
-        /* a few hundred tiles of corridor, four a day as the ladder runs it */
-        for (let i = 0; i < 90; i++) AI.reachForIce(s, a, 4);
+        /* a few hundred tiles of corridor, four a day as the ladder runs it.
+           The route length is read as soon as it commits rather than at the
+           end: a corridor that finishes without a bore is deliberately let go
+           of, so by the last call there may be no spur left to inspect. */
+        let routeLen = 0;
+        for (let i = 0; i < 90; i++) {
+          AI.reachForIce(s, a, 4);
+          if (s.ai.spur && !routeLen) routeLen = s.ai.spur.route.length;
+        }
         const t = T.tileAt(s, pick.x, pick.y);
         const after = window.LM_DEEP.serviced(s, t, G.services(s));
         for (let i = 0; i < 8 && AI.ensureWonders(s, a); i++);
@@ -1337,10 +1344,48 @@ td.mark{width:34px;text-align:center}
         return [
           ['it picks a bore worth reaching for', !!pick && pick.yield > 0, true],
           ['which is nowhere near the grid to begin with', before, false],
-          ['it commits to a route', !!s.ai.spur && s.ai.spur.route.length, '>=8'],
+          ['it commits to a route', routeLen, '>=8'],
           ['and the corridor eventually reaches it', after, true],
           ['so a bore actually gets built', !!bore, true],
           ['on the site it chose', bore && bore.x === pick.x && bore.y === pick.y, true]
+        ];
+      } },
+
+    { name: 'A corridor that pays off nothing is let go of rather than held forever',
+      why: 'the spur is a single slot on the lattice, so a corridor that finishes without producing a bore used to freeze the whole mechanism — the director could never choose another target for the rest of the run, and one unlucky site cost it every arcology after it',
+      run() {
+        const s = grantEra(city(5150));
+        s.credits = 1e7;
+        for (let x = 58; x <= 62; x++) {
+          const g = T.tileAt(s, x, 60); g.sun = 1; S.place(s, g, 'solar');
+          S.place(s, T.tileAt(s, x, 61), 'conduit');
+          S.place(s, T.tileAt(s, x, 61), 'main');
+        }
+        S.place(s, T.tileAt(s, 57, 61), 'o2');
+        iceField(s, 72, 74, 5);
+        const a = AI.ensureSeed(s); a.ox = 60; a.oy = 60;
+
+        /* run only until the corridor is complete, so the completion itself
+           can be observed before the release logic gets to it */
+        let laidOut = false;
+        for (let i = 0; i < 90 && !laidOut; i++) {
+          AI.reachForIce(s, a, 4);
+          laidOut = !!(s.ai.spur && s.ai.spur.i >= s.ai.spur.route.length);
+        }
+        /* ensureWonders is never called here, so the corridor buys nothing —
+           the exact case that used to freeze the mechanism for good */
+        let released = false;
+        for (let i = 0; i < 40 && !released; i++) {
+          AI.reachForIce(s, a, 4);
+          released = s.ai.spur === null;
+        }
+        /* and once time has passed it commits to something rather than sulking */
+        s.day += 200;
+        AI.reachForIce(s, a, 4);
+        return [
+          ['the corridor does get fully laid', laidOut, true],
+          ['a corridor that buys nothing is eventually released', released, true],
+          ['and the director commits to another once time has passed', !!s.ai.spur, true]
         ];
       } },
 
