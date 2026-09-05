@@ -1,0 +1,3 @@
+# macOS writes one of these into every directory Finder has opened.
+# No leading slash, so this matches at any depth, not just the repo root.
+.DS_Store
