@@ -1,0 +1,178 @@
+{
+  "experiment": "e4-habitat-economics",
+  "generatedAt": "2026-09-05T19:48:35.314Z",
+  "gitRev": "705fd35",
+  "cost": {
+    "ticks": 0,
+    "worlds": 8
+  },
+  "data": {
+    "rows": [
+      {
+        "strategy": "surface",
+        "unit": "high-density habitation tile at final stage",
+        "residents": 62,
+        "credits": 150,
+        "kW": 2,
+        "surfaceTiles": 1,
+        "upkeep": 21,
+        "airMade": 0,
+        "ceiling": "land value and era; unbounded in area",
+        "creditsPerResident": 2.4,
+        "residentsPerKW": 31,
+        "residentsPerSurfaceTile": 62
+      },
+      {
+        "strategy": "bored",
+        "unit": "Sinkwell Arcology",
+        "residents": 1100,
+        "credits": 64000,
+        "kW": 34,
+        "surfaceTiles": 9,
+        "upkeep": 0,
+        "airMadeAtUnitYield": 80,
+        "ceiling": "10 levels, fixed in data",
+        "creditsPerResident": 58.2,
+        "residentsPerKW": 32.4,
+        "residentsPerSurfaceTile": 122.2
+      },
+      {
+        "strategy": "bored",
+        "unit": "Cistern Arcology",
+        "residents": 480,
+        "credits": 82000,
+        "kW": 40,
+        "surfaceTiles": 9,
+        "upkeep": 0,
+        "airMadeAtUnitYield": 272,
+        "ceiling": "8 levels, fixed in data",
+        "creditsPerResident": 170.8,
+        "residentsPerKW": 12,
+        "residentsPerSurfaceTile": 53.3
+      },
+      {
+        "strategy": "bored",
+        "unit": "Foundry Arcology",
+        "residents": 405,
+        "credits": 74000,
+        "kW": 52,
+        "surfaceTiles": 9,
+        "upkeep": 0,
+        "airMadeAtUnitYield": 0,
+        "ceiling": "9 levels, fixed in data",
+        "creditsPerResident": 182.7,
+        "residentsPerKW": 7.8,
+        "residentsPerSurfaceTile": 45
+      },
+      {
+        "strategy": "bored",
+        "unit": "Core Arcology",
+        "residents": 2450,
+        "credits": 245000,
+        "kW": 96,
+        "surfaceTiles": 25,
+        "upkeep": 0,
+        "airMadeAtUnitYield": 252,
+        "ceiling": "14 levels, fixed in data",
+        "creditsPerResident": 100,
+        "residentsPerKW": 25.5,
+        "residentsPerSurfaceTile": 98
+      },
+      {
+        "strategy": "tube",
+        "unit": "Tube Arcology",
+        "residents": 2295,
+        "residentsMin": 861,
+        "residentsMax": 2520,
+        "credits": 96000,
+        "kW": 44,
+        "surfaceTiles": 1,
+        "upkeep": 0,
+        "airMade": 0,
+        "ceiling": "the length of the tube the map generated",
+        "creditsPerResident": 41.8,
+        "residentsPerKW": 52.2,
+        "residentsPerSurfaceTile": 2295
+      }
+    ],
+    "tubeRuns": [
+      {
+        "seed": 7,
+        "tubeLength": 41,
+        "span": 1.78,
+        "cap": 41,
+        "boundBy": "geology",
+        "residents": 1606,
+        "jobs": 584
+      },
+      {
+        "seed": 99,
+        "tubeLength": 35,
+        "span": 1.63,
+        "cap": 35,
+        "boundBy": "geology",
+        "residents": 1255,
+        "jobs": 456
+      },
+      {
+        "seed": 555,
+        "tubeLength": 80,
+        "span": 1.79,
+        "cap": 64,
+        "boundBy": "structure",
+        "residents": 2520,
+        "jobs": 916
+      },
+      {
+        "seed": 2026,
+        "tubeLength": 81,
+        "span": 1.63,
+        "cap": 64,
+        "boundBy": "structure",
+        "residents": 2295,
+        "jobs": 835
+      },
+      {
+        "seed": 4242,
+        "tubeLength": 24,
+        "span": 1.63,
+        "cap": 24,
+        "boundBy": "geology",
+        "residents": 861,
+        "jobs": 313
+      },
+      {
+        "seed": 12345,
+        "tubeLength": 81,
+        "span": 1.79,
+        "cap": 64,
+        "boundBy": "structure",
+        "residents": 2520,
+        "jobs": 916
+      },
+      {
+        "seed": 31337,
+        "tubeLength": 79,
+        "span": 1.72,
+        "cap": 64,
+        "boundBy": "structure",
+        "residents": 2422,
+        "jobs": 881
+      },
+      {
+        "seed": 88,
+        "tubeLength": 24,
+        "span": 1.67,
+        "cap": 24,
+        "boundBy": "geology",
+        "residents": 882,
+        "jobs": 321
+      }
+    ],
+    "latticeOverhead": {
+      "streetEveryRows": 3,
+      "conduitEveryCols": 4,
+      "note": "surface habitation additionally needs transit and power within one tile; mains are subsurface and consume no surface area"
+    }
+  }
+}

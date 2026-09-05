@@ -1,0 +1,22 @@
+{
+  "title": "LunarSims: browser simulations of lunar settlement",
+  "description": "<p>Original browser simulation games set on the lunar surface, including <strong>Lunar Metropolis</strong>, an executable model of lunar settlement growth.</p><p>The model couples an elevation field to a solar-exposure raycast and derives from that single coupling the distribution of water ice, photovoltaic output, and the economic value of ground. Three habitat strategies are represented and costed against each other: surface construction, arcologies bored downward into permanently shadowed ice deposits, and arcologies extending along pre-existing lava tubes.</p><p>The deposit includes the accompanying modelling report, the verification suite (130 scenarios; 12,322 simulated days and 265 generated worlds per pass), and the experiment scripts that regenerate every figure and table in that report.</p>",
+  "upload_type": "software",
+  "license": "mit",
+  "access_right": "open",
+  "creators": [
+    {
+      "name": "Barker, Richard"
+    }
+  ],
+  "keywords": [
+    "lunar settlement", "simulation", "agent-based model", "lava tubes",
+    "in-situ resource utilisation", "habitat design", "permanently shadowed regions"
+  ],
+  "_TODO_beforeDeposit": [
+    "creators[0].orcid — add ORCID (digits only, e.g. 0000-0000-0000-0000)",
+    "creators[0].affiliation — add affiliation",
+    "version — add and match the archived git tag",
+    "Zenodo assigns the DOI on deposit; do not set it here"
+  ]
+}

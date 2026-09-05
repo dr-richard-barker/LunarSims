@@ -1,0 +1,71 @@
+\section{Three ways to house a colony}
+\label{sec:habitats}
+
+The model represents three habitat strategies. They differ in where the
+volume comes from, and it is that difference --- rather than any difference in
+comfort or technology --- that the model is built to price.
+
+\subsection{Surface construction}
+
+Ground is zoned and the settlement raises buildings on it as demand and land
+value allow, to a density ceiling set by the current era. A high-density
+habitation tile at its final stage houses 62 residents. Surface construction
+is available essentially everywhere: across all site classes tested, around
+$16{,}100$ of the $16{,}384$ tiles are buildable. It is constrained not by
+where it may go but by land value, by the era, and by the fact that every
+zoned tile must be within one tile of all three networks.
+
+\subsection{Bored arcologies}
+
+Four structures excavate downward into permanently shadowed ice. They may only
+be sited on an ice deposit, which --- because of the coupling described in
+Section~\ref{sec:model} --- confines them to shadowed crater floors, and they
+require a level pad of $3\times3$ or $5\times5$ tiles.
+
+Each opens as a single gallery and sinks one level at a time, but only while
+all three networks reach it and the colony is neither short of generating
+capacity nor of pressurisation. This is the same condition under which zoned
+ground develops, applied to a structure. A bore that loses its utilities stops
+where it is and keeps what it has already opened.
+
+Their yield depends on the ice within reach, summed over a radius of three
+tiles and \emph{shared} with any other bore whose radius overlaps. Two bores
+placed close together therefore make each other worse, which makes the
+distribution of the deposit --- not merely the presence of one tile of it ---
+the object of the siting decision.
+
+The four differ in what they return. One is a pure housing structure; one
+melts its ice and returns a large part of its own pressurisation; one refines
+and exports, employing more people than it houses and venting dust that
+degrades the ground downwind; and one, gated behind the final era, is the
+largest structure in the model.
+
+\subsection{Lava tube arcologies}
+
+The third strategy takes a void that already exists. Where the terrain
+generator carves a sinuous rille, the model records the intact tube continuing
+beneath it: a course of tiles, a width, and a roof depth. A tube arcology is
+sunk onto that course and then extends \emph{along} it, one tile at a time,
+under the same utility condition as a bore.
+
+Three properties distinguish it, and together they are the reason it is
+modelled as its own family rather than as a fifth bore:
+
+\begin{enumerate}
+\item \textbf{The volume is free.} Nothing is excavated, only sealed, lit and
+  pressurised. It is accordingly the cheapest arcology per resident in the
+  model.
+\item \textbf{The ceiling belongs to the map.} A bore descends to a depth fixed
+  in its own data; a tube arcology stops when it runs out of tube. Across
+  generated polar worlds the usable tube runs from 24 to 81 tiles against a
+  structural reach limit of 64, so on some maps the structure binds and on
+  others the geology does. The player cannot lengthen a tube.
+\item \textbf{It returns no atmosphere.} It has no ice to crack, so every one
+  of its residents breathes oxygen produced elsewhere in the colony. The
+  cheapest volume in the model is the only one that gives the pressurisation
+  budget nothing back.
+\end{enumerate}
+
+Only one class of site in the model generates a rille, and therefore a tube.
+This is a strong constraint and an intentional one; its consequences are
+reported in Section~\ref{sec:results}.

@@ -181,10 +181,14 @@
        nothing back. */
     if (isTube(t.b.type)) {
       const span = spanOf(s, t);
+      /* Rounded, because span is fractional and a fraction of a resident is
+         not a thing. Everything downstream — the housing cap, migration, the
+         population readout — is a count of people, and letting a tube's width
+         leak a decimal into it put "13,998.56" in the HUD. */
       return {
         levels: lv, maxLevels: cap, yield: span, tube: true,
-        housing: (B.housingPerReach || 0) * lv * span,
-        jobs: (B.jobsPerReach || 0) * lv * span,
+        housing: Math.round((B.housingPerReach || 0) * lv * span),
+        jobs: Math.round((B.jobsPerReach || 0) * lv * span),
         air: 0, export: 0, dust: 0
       };
     }

@@ -1,0 +1,175 @@
+{
+  "experiment": "e5-director-ab",
+  "generatedAt": "2026-09-05T19:51:32.795Z",
+  "gitRev": "705fd35",
+  "cost": {
+    "ticks": 8100,
+    "worlds": 9
+  },
+  "data": {
+    "revisions": [
+      "naive",
+      "serviced",
+      "reaching"
+    ],
+    "seeds": [
+      7,
+      99,
+      555
+    ],
+    "ticksPerRun": 900,
+    "rows": [
+      {
+        "revision": "naive",
+        "gitRev": "f2141a6",
+        "seed": 7,
+        "ticks": 900,
+        "ms": 10255,
+        "population": 22237,
+        "built": 4,
+        "growing": 0,
+        "stalled": 4,
+        "detail": [
+          "cistern:1",
+          "core:1",
+          "foundry:1",
+          "sinkwell:1"
+        ]
+      },
+      {
+        "revision": "naive",
+        "gitRev": "f2141a6",
+        "seed": 99,
+        "ticks": 900,
+        "ms": 9271,
+        "population": 18143,
+        "built": 4,
+        "growing": 0,
+        "stalled": 4,
+        "detail": [
+          "cistern:1",
+          "core:1",
+          "foundry:1",
+          "sinkwell:1"
+        ]
+      },
+      {
+        "revision": "naive",
+        "gitRev": "f2141a6",
+        "seed": 555,
+        "ticks": 900,
+        "ms": 9194,
+        "population": 28849,
+        "built": 4,
+        "growing": 1,
+        "stalled": 3,
+        "detail": [
+          "cistern:1",
+          "core:9",
+          "foundry:1",
+          "sinkwell:1"
+        ]
+      },
+      {
+        "revision": "serviced",
+        "gitRev": "bae50d4",
+        "seed": 7,
+        "ticks": 900,
+        "ms": 28110,
+        "population": 15605,
+        "built": 3,
+        "growing": 3,
+        "stalled": 0,
+        "detail": [
+          "cistern:8",
+          "foundry:9",
+          "sinkwell:10"
+        ]
+      },
+      {
+        "revision": "serviced",
+        "gitRev": "bae50d4",
+        "seed": 99,
+        "ticks": 900,
+        "ms": 64814,
+        "population": 27459,
+        "built": 1,
+        "growing": 1,
+        "stalled": 0,
+        "detail": [
+          "sinkwell:10"
+        ]
+      },
+      {
+        "revision": "serviced",
+        "gitRev": "bae50d4",
+        "seed": 555,
+        "ticks": 900,
+        "ms": 10482,
+        "population": 23590,
+        "built": 4,
+        "growing": 4,
+        "stalled": 0,
+        "detail": [
+          "cistern:8",
+          "core:8",
+          "foundry:9",
+          "sinkwell:10"
+        ]
+      },
+      {
+        "revision": "reaching",
+        "gitRev": "working-tree",
+        "seed": 7,
+        "ticks": 900,
+        "ms": 24638,
+        "population": 28925,
+        "built": 4,
+        "growing": 4,
+        "stalled": 0,
+        "detail": [
+          "cistern:8",
+          "foundry:9",
+          "sinkwell:10",
+          "tubeway:41"
+        ]
+      },
+      {
+        "revision": "reaching",
+        "gitRev": "working-tree",
+        "seed": 99,
+        "ticks": 900,
+        "ms": 10080,
+        "population": 16610,
+        "built": 5,
+        "growing": 5,
+        "stalled": 0,
+        "detail": [
+          "cistern:8",
+          "core:14",
+          "foundry:9",
+          "sinkwell:10",
+          "tubeway:35"
+        ]
+      },
+      {
+        "revision": "reaching",
+        "gitRev": "working-tree",
+        "seed": 555,
+        "ticks": 900,
+        "ms": 10250,
+        "population": 33622,
+        "built": 5,
+        "growing": 5,
+        "stalled": 0,
+        "detail": [
+          "cistern:8",
+          "core:10",
+          "foundry:9",
+          "sinkwell:10",
+          "tubeway:38"
+        ]
+      }
+    ]
+  }
+}

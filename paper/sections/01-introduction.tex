@@ -1,0 +1,49 @@
+\section{Introduction}
+
+Most models of lunar settlement are written to answer a question that has
+already been posed. A structural analysis asks whether a given span will
+stand \citep{blair2017stability}; a thermal model asks what a given shell
+costs to keep warm. Such models are precise about a narrow thing.
+
+This work takes the opposite approach. \emph{Lunar Metropolis} is an
+executable model of a settlement as a whole --- terrain, illumination,
+volatiles, three utility networks, an economy, and a population that responds
+to all of them --- built as a playable simulation and then interrogated as a
+model. It is deliberately imprecise about every individual mechanism, and in
+exchange it can be run end to end, tens of thousands of simulated days at a
+time, across hundreds of independently generated worlds. What such a model is
+good for is not predicting a number but exposing a \emph{structure}: which
+constraints bind, which trade against which, and which supposedly free choices
+turn out to have been made by the terrain generator before the player arrived.
+
+The specific question we put to it here is the balance between building on the
+lunar surface and building underneath it. The case for going underground is
+well rehearsed --- a few metres of regolith attenuates the galactic cosmic ray
+flux \citep{jia2010radiation,crites2013proton}, and an intact lava tube offers
+a large shielded volume that nobody has to excavate
+\citep{greeley1971mariushills,kaku2017intact}. What is less often stated is
+what the choice \emph{costs}, in a currency that lets it be compared against
+simply building on the surface instead. That is the question this model is
+shaped to answer.
+
+Two features of the Moon do most of the work in the model, and both are
+consequences of illumination. Near the poles the Sun tracks close to the
+horizon, so modest relief casts enormous shadows, and crater floors that never
+see the Sun act as cold traps where water ice is stable
+\citep{paige2010diviner}; the LCROSS impact into Cabeus returned direct
+evidence of water in such a deposit \citep{colaprete2010water}. The same
+illumination geometry that puts the ice there also makes that ground worthless
+to build on: it is dark, cold, and generates no solar power. The model derives
+both facts from one raycast, and the tension between them is the engine of
+everything reported below.
+
+We make three contributions. First, we describe the model and the reasoning
+behind its structure (Sections~\ref{sec:model}--\ref{sec:habitats}). Second, we
+calibrate its resource parameters against its own generated worlds rather than
+by hand, and report the calibration
+(Section~\ref{sec:calibration}). Third, we report what the model says about the
+surface/subsurface balance, and what it says about the automated director that
+plays it (Sections~\ref{sec:results}--\ref{sec:failures}). We are explicit
+throughout about which statements are results of the model and which are
+assumptions built into it; Section~\ref{sec:limitations} is devoted to the
+difference.
