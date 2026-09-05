@@ -1442,6 +1442,97 @@
     }
   }
 
+  /* ---- lava tubes ---- */
+
+  /* The course of the tube under a tile: a dashed seam when it is only known
+     about, a lit one when it has been sealed and pressurised. Drawn per tile
+     rather than per structure so it sits in the right painter order against
+     the relief it runs under. */
+  function drawTubeSeam(ctx, s, t) {
+    const z = lift(t), c = iso(t.x + 0.5, t.y + 0.5);
+    const lit = FR.lit && FR.lit.has(t.y * K.COLS + t.x);
+    if (!lit && FR.lod === LOD_FAR) return;
+
+    /* Aligned along the tube's own course, taken from its neighbours in the
+       path, so the seam follows the tunnel rather than the tile grid. */
+    const tube = s.tubes && t.tube ? s.tubes[t.tube.id] : null;
+    if (!tube) return;
+    const prev = tube.path[t.tube.i - 1] || tube.path[t.tube.i];
+    const next = tube.path[t.tube.i + 1] || tube.path[t.tube.i];
+    const a = iso((prev[0] + t.x) / 2 + 0.5, (prev[1] + t.y) / 2 + 0.5);
+    const b = iso((next[0] + t.x) / 2 + 0.5, (next[1] + t.y) / 2 + 0.5);
+
+    if (lit) {
+      /* Light escaping from a sealed tube, seen through the roof above it. It
+         has to read at a glance against the unsealed run beyond, because the
+         boundary between the two IS the mechanic: it is the only thing on
+         screen that shows how far the arcology has actually got. So: a dark
+         trench to seat it, a warm core, and a halo, rather than one pale
+         line that dissolves into the regolith. */
+      coreGlow(ctx, c.x, c.y - z, 26, '255,186,96', 0.30 + beatPulse() * 0.10);
+      ctx.lineCap = 'round';
+      ctx.strokeStyle = 'rgba(0,0,0,0.45)'; ctx.lineWidth = 6;
+      ctx.beginPath(); ctx.moveTo(a.x, a.y - z); ctx.lineTo(b.x, b.y - z); ctx.stroke();
+      ctx.strokeStyle = 'rgba(255,166,72,' + (0.75 + beatPulse() * 0.20).toFixed(3) + ')';
+      ctx.lineWidth = 3.4;
+      ctx.beginPath(); ctx.moveTo(a.x, a.y - z); ctx.lineTo(b.x, b.y - z); ctx.stroke();
+      ctx.strokeStyle = 'rgba(255,244,214,0.92)'; ctx.lineWidth = 1.3;
+      ctx.beginPath(); ctx.moveTo(a.x, a.y - z); ctx.lineTo(b.x, b.y - z); ctx.stroke();
+      ctx.lineCap = 'butt';
+    } else {
+      /* Known about and not yet sealed. Cool and dashed on purpose — it is
+         the same tube, and it is doing nothing for you. */
+      ctx.strokeStyle = 'rgba(126,140,156,0.42)'; ctx.lineWidth = 1.8;
+      ctx.setLineDash([3, 6]);
+      ctx.beginPath(); ctx.moveTo(a.x, a.y - z); ctx.lineTo(b.x, b.y - z); ctx.stroke();
+      ctx.setLineDash([]);
+    }
+  }
+
+  /* The portal. Deliberately the lowest-profile structure of the three
+     habitat families: nothing was excavated and nothing rises, because the
+     room was already there. What you see is the shed over the shaft head and
+     the light coming back up out of it. */
+  function drawTubeway(ctx, s, t, l) {
+    const z = lift(t), p = iso(t.x + 0.5, t.y + 0.5);
+    const RX = TW * 0.5 * 1.15, RY = TH * 0.5 * 1.15;
+
+    ctx.fillStyle = regolith(132, l);
+    ring(ctx, p.x, p.y - z + TH * 0.05, RX * 1.25, RY * 1.25); ctx.fill();
+
+    ctx.save();
+    ring(ctx, p.x, p.y - z, RX, RY); ctx.clip();
+    ctx.fillStyle = '#06070b';
+    ctx.fillRect(p.x - RX - 2, p.y - z - RY - 2, RX * 2 + 4, RY * 2 + 60);
+    /* a ramp running down into the tube, and the lit floor at the bottom */
+    for (let i = 0; i < 4; i++) {
+      const f = i / 4, d = 26 * Math.pow(f, 0.7);
+      ctx.fillStyle = tone('#8d8578', Math.max(l, 0.6) * (1 - f * 0.55), 1);
+      crescent(ctx, p.x, p.y - z + d, RX * (1 - f * 0.3), RY * (1 - f * 0.3),
+               p.x, p.y - z + d + 6, RX * (1 - f * 0.3), RY * (1 - f * 0.3));
+      ctx.fill();
+    }
+    coreGlow(ctx, p.x, p.y - z + 30, 52, '255,196,120', 0.92);
+    ctx.fillStyle = 'rgba(255,226,170,0.85)';
+    ring(ctx, p.x, p.y - z + 30, RX * 0.42, RY * 0.42); ctx.fill();
+    ctx.restore();
+
+    rimCollar(ctx, p.x, p.y - z, RX, RY, l, '#b6ad9c');
+    if (FR.lod > LOD_FAR) {
+      /* the shaft head: a shed and a hoist over the mouth */
+      box(ctx, t.x + 0.62, t.y + 0.18, 0.3, 0.3, 18, '#b0a897', l, z, { noShadow: true });
+      ctx.strokeStyle = grey(150, l); ctx.lineWidth = 1.6;
+      const h1 = iso(t.x + 0.2, t.y + 0.2), h2 = iso(t.x + 0.8, t.y + 0.8);
+      ctx.beginPath();
+      ctx.moveTo(h1.x, h1.y - z - 22); ctx.lineTo(h2.x, h2.y - z - 22); ctx.stroke();
+      for (const q of [h1, h2]) {
+        ctx.beginPath(); ctx.moveTo(q.x, q.y - z); ctx.lineTo(q.x, q.y - z - 22); ctx.stroke();
+      }
+      ctx.fillStyle = 'rgba(255,206,140,' + (0.45 + beatPulse() * 0.4).toFixed(3) + ')';
+      ctx.beginPath(); ctx.arc(p.x, p.y - z - 26, 2.4, 0, TAU); ctx.fill();
+    }
+  }
+
   /* An arcology that cannot dig gets a mark on the rim rather than a silent
      stall. Every other stalled thing in this game says so somewhere; a hole
      that has quietly stopped getting deeper would be the one exception. */
@@ -1472,6 +1563,8 @@
   const isWonder = id => WONDER_IDS.has(id);
   const DEEP_IDS = new Set(BUILDINGS.filter(b => b.group === 'deep').map(b => b.id));
   const isDeepId = id => DEEP_IDS.has(id);
+  const TUBE_IDS = new Set(BUILDINGS.filter(b => b.group === 'tube').map(b => b.id));
+  const isTubeId = id => TUBE_IDS.has(id);
 
   /* Roughly how tall whatever stands on this tile is, in world units. Only
      used to decide whether it would hide a person standing behind it, so it
@@ -1485,6 +1578,8 @@
          superstructure can hide anyone, so it must not claim a tower's
          height or it would swallow every pedestrian behind it. */
       if (isDeepId(ty)) return 26;
+      /* A tube portal is a shed over a hole in the ground, not a tower. */
+      if (isTubeId(ty)) return 20;
       if (isWonder(ty)) return 120;
       return 22;
     }
@@ -1938,6 +2033,22 @@
     if (!FR.pinned) { FR.lod = lodFor(ui.cam.z); FR.az = sunAzimuth(s); }
     const traffic = bucketAgents(s, era);
 
+    /* Which tube tiles are sealed and lit this frame. Computed once here and
+       consulted per tile, because the glow belongs to the ground ABOVE the
+       tube rather than to the arcology's own tile — drawing the whole seam
+       from the portal would paint it over every tile in between and break the
+       painter's order the rest of this renderer depends on. At most a few
+       dozen tiles, so the set is cheap to rebuild each frame and can never
+       drift out of step with the simulation. */
+    FR.lit = null;
+    if (window.LM_DEEP && s.tubes && s.tubes.length) {
+      for (const t of s.map) {
+        if (!t.b || !isTubeId(t.b.type)) continue;
+        if (!FR.lit) FR.lit = new Set();
+        for (const [lx, ly] of window.LM_DEEP.reachTiles(s, t)) FR.lit.add(ly * K.COLS + lx);
+      }
+    }
+
     /* One back-to-front pass covering ground AND everything standing on it.
        Splitting structures into a later pass would let a tall tower behind a
        ridge paint over the ridge in front of it; doing both per tile in
@@ -1952,12 +2063,18 @@
         fillDiamond(ctx, tx + 0.3, ty + 0.3, 0.4, 0.4, null, ctx.strokeStyle, lift(t));
         ctx.setLineDash([]);
       }
+      /* The tube itself, showing faintly through the ground the way a buried
+         main does — you have to be able to read its course to decide where to
+         sink a portal — and burning brightly where it has been sealed. */
+      if (t.tube) drawTubeSeam(ctx, s, t);
+
       if (ui.showDeposits !== false && t.deposit && !t.b && !t.zone) depositMarker(ctx, t);
 
       if (t.b) {
         if (t.b.type === 'tube') drawTube(ctx, s, t, litness(t));
         else if (t.b.type === 'conduit') drawConduit(ctx, s, t, litness(t));
         else if (isDeepId(t.b.type)) { drawDeep(ctx, s, t, litness(t)); drawDeepStall(ctx, s, t, litness(t)); }
+        else if (isTubeId(t.b.type)) { drawTubeway(ctx, s, t, litness(t)); drawDeepStall(ctx, s, t, litness(t)); }
         else if (isWonder(t.b.type)) drawWonder(ctx, s, t, litness(t));
         else drawPlant(ctx, s, t, litness(t));
       } else if (t.zone) {

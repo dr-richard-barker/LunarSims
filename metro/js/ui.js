@@ -95,6 +95,7 @@
     { id: 'service', label: 'Civic Services' },
     { id: 'wonder', label: 'Wonders' },
     { id: 'deep', label: 'Deep Arcologies' },
+    { id: 'tube', label: 'Lava Tubes' },
     { id: 'zone', label: 'Zoning' },
     { id: 'district', label: 'Special Districts' }
   ];
@@ -133,6 +134,7 @@
              deposit map, so picking one up puts that map on screen. Nothing
              else would ever teach a player to look at it. */
           if (t.group === 'deep' && ui.view === 'terrain') setView('deposits');
+          if (t.group === 'tube' && ui.view === 'terrain') setView('deposits');
           buildPalette(); setHint();
         };
         box.appendChild(b);
@@ -356,7 +358,7 @@
        — how far it has dug, how much ice it can still reach, and what that
        is currently worth to the colony. */
     const DP = window.LM_DEEP;
-    const deep = (DP && t.b && DP.isDeep(t.b.type)) ? DP.outputOf(s, t) : null;
+    const deep = (DP && t.b && DP.isSub(t.b.type)) ? DP.outputOf(s, t) : null;
     const deepSpec = deep ? S.buildById(t.b.type) : null;
 
     let what = kind.name;
@@ -377,8 +379,8 @@
         <div class="row"><span class="k">Power</span>${yn(hasP)}</div>
         <div class="row"><span class="k">Atmosphere</span>${yn(hasA)}</div>
         ${t.pipe ? `<div class="row"><span class="k">Buried main</span><span class="v good">yes</span></div>` : ''}
-        ${deep ? `<div class="row"><span class="k">Levels opened</span><span class="v${deep.levels >= deep.maxLevels ? ' good' : ''}">${deep.levels} / ${deep.maxLevels}</span></div>
-        <div class="row"><span class="k">Ice within reach</span><span class="v${deep.yield >= 1 ? ' good' : deep.yield <= 0.4 ? ' bad' : ''}">${Math.round(deep.yield * 100)}%</span></div>
+        ${deep ? `<div class="row"><span class="k">${deep.tube ? 'Tube pressurised' : 'Levels opened'}</span><span class="v${deep.levels >= deep.maxLevels ? ' good' : ''}">${deep.levels} / ${deep.maxLevels}${deep.tube ? ' tiles' : ''}</span></div>
+        <div class="row"><span class="k">${deep.tube ? 'Tube width' : 'Ice within reach'}</span><span class="v${deep.yield >= 1 ? ' good' : deep.yield <= 0.4 ? ' bad' : ''}">${deep.tube ? deep.yield.toFixed(2) + '\u00d7' : Math.round(deep.yield * 100) + '%'}</span></div>
         <div class="row"><span class="k">Houses</span><span class="v">${Math.round(deep.housing).toLocaleString()}</span></div>
         <div class="row"><span class="k">Employs</span><span class="v">${Math.round(deep.jobs).toLocaleString()}</span></div>
         ${deep.air ? `<div class="row"><span class="k">Pressurises</span><span class="v">${Math.round(deep.air).toLocaleString()}</span></div>` : ''}
@@ -397,9 +399,11 @@
       ${dep ? `<p class="note"><b>${dep.name}</b> — richness ${Math.round(t.deposit.richness * 100)}%. ${dep.note}</p>` : ''}
       ${deep && t.b.stalled && deep.levels < deep.maxLevels ? `<p class="note warnnote">The bore has stopped sinking. It needs a transit tube, current and
         pressurisation all reaching it, and the colony to be neither browning out nor short of air. It keeps every level it has already opened.</p>` : ''}
-      ${deep && deepSpec ? `<p class="note">Each level opened adds ${deepSpec.housingPerLevel} residents and ${deepSpec.jobsPerLevel} jobs${
+      ${deep && deepSpec && !deep.tube ? `<p class="note">Each level opened adds ${deepSpec.housingPerLevel} residents and ${deepSpec.jobsPerLevel} jobs${
         deepSpec.airPerLevel ? `, and pressurises ${deepSpec.airPerLevel} more — scaled by the ice within reach` : ''}.
-        Another arcology bored nearby would draw on the same deposit and both would yield less.</p>` : ''}`;
+        Another arcology bored nearby would draw on the same deposit and both would yield less.</p>` : ''}
+      ${deep && deepSpec && deep.tube ? `<p class="note">Each tile of tube sealed adds ${deepSpec.housingPerReach} residents and ${deepSpec.jobsPerReach} jobs, multiplied by how wide the tube runs here.
+        It stops where the tube stops — ${deep.maxLevels} tiles is all this one has — and it makes no air of its own, so every resident breathes oxygen the colony produced somewhere else.</p>` : ''}`;
   }
 
   function bar(label, v) {

@@ -472,22 +472,38 @@
      unable to finish a run at all. */
   function chooseBore(s) {
     let best = null;
-    for (const id of ['sinkwell', 'cistern', 'foundry', 'core']) {
+    /* The tube goes first because it is the cheapest volume on the map and
+       the only one another colony cannot make more of — if this site has one,
+       taking it is the best deal available. */
+    for (const id of ['tubeway', 'sinkwell', 'cistern', 'foundry', 'core']) {
       if (S.count(s, id) >= 1) continue;
       if (E && !E.unlocked(s, id)) continue;
-      for (const t of s.map) {
-        if (!t.deposit || t.deposit.kind !== 'ice') continue;
-        if (t.b || t.zone) continue;
+      const tubey = window.LM_DEEP.isTube(id);
+      /* Candidates are pre-filtered to the handful of tiles that could
+         possibly qualify — ice for a bore, the tube's own course for a tube
+         arcology — because canPlace() calls count() and is therefore
+         quadratic in the map. Handing it every tile is what previously made
+         the director unable to finish a run. */
+      const candidates = tubey
+        ? ((s.tubes || []).flatMap(tb => tb.path.map(([x, y]) => T.tileAt(s, x, y))))
+        : s.map.filter(t => t.deposit && t.deposit.kind === 'ice');
+      for (const t of candidates) {
+        if (!t || t.b || t.zone) continue;
         if (S.canPlace(s, t, id)) continue;
-        /* Yield is what the bore is worth; distance is what it costs to
-           reach. Without the second term the director will happily walk the
-           width of the map for a site a few percent better. */
-        const y = window.LM_DEEP.iceYield(s, t);
+        /* What it is worth, against what it costs to reach. Without the
+           distance term the director walks the width of the map for a site a
+           few percent better. A tube arcology is scored on how much tube it
+           would actually get to use from that entry, normalised so the two
+           families are comparable. */
+        const y = tubey
+          ? window.LM_DEEP.capOf(s, { b: { type: id }, tube: t.tube }) /
+            Math.max(1, S.buildById(id).maxReach)
+          : window.LM_DEEP.iceYield(s, t);
         const d = Math.hypot(t.x - s.ai.ox, t.y - s.ai.oy);
         const score = y - d * 0.012;
         if (!best || score > best.score) best = { x: t.x, y: t.y, id, score, yield: y };
       }
-      if (best) break;          // cheapest unlocked bore first, as elsewhere
+      if (best) break;          // cheapest unlocked prize first, as elsewhere
     }
     return best;
   }
@@ -658,11 +674,13 @@
      treasury reaching a number. */
   function ensureWonders(s, a) {
     let nets = null;
-    for (const id of ['megadome', 'massdriver', 'sinkwell', 'cistern', 'foundry', 'core']) {
+    for (const id of ['megadome', 'massdriver', 'tubeway', 'sinkwell', 'cistern', 'foundry', 'core']) {
       if (S.count(s, id) >= 1) continue;
       if (E && !E.unlocked(s, id)) continue;
       if (!afford(s, buildCost(id))) continue;
-      const deep = !!(window.LM_DEEP && window.LM_DEEP.isDeep(id));
+      /* Both subsurface families need the networks before they do anything,
+         and neither will ever sit inside the lattice. */
+      const deep = !!(window.LM_DEEP && window.LM_DEEP.isSub(id));
       /* One flood fill for the whole call, and only when a bore is actually
          in the running — the other wonders never need it. */
       if (deep && !nets) nets = G.services(s);

@@ -82,7 +82,7 @@
          exactly the same field industry does, so it is fouling arrays and
          dragging land value through machinery that already exists rather
          than a penalty bolted on beside it. */
-      if (t.b && window.LM_DEEP && window.LM_DEEP.isDeep(t.b.type)) {
+      if (t.b && window.LM_DEEP && window.LM_DEEP.isSub(t.b.type)) {
         const o = window.LM_DEEP.outputOf(s, t);
         if (o && o.dust) cur[idx(t.x, t.y)] += o.dust;
       }

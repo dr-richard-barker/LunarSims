@@ -405,7 +405,43 @@ const BUILDINGS = [
     maxLevels: 14, digDays: 30, drawKw: 96,
     housingPerLevel: 175, jobsPerLevel: 55, airPerLevel: 18,
     service: 'amenity', radius: 20,
-    desc: 'A cavern bored so deep it widens as it goes, with inverted towers hanging from its ceiling around a suspended sun-lamp. The largest structure the colony can build and the only one that houses a city rather than a district. Needs a clear five-by-five pad over the richest ice on the map.' }
+    desc: 'A cavern bored so deep it widens as it goes, with inverted towers hanging from its ceiling around a suspended sun-lamp. The largest structure the colony can build and the only one that houses a city rather than a district. Needs a clear five-by-five pad over the richest ice on the map.' },
+
+  /* ---- the lava tube ----
+
+     The third way to house people, and the only one the player cannot make
+     more of. Surface ground can be levelled and a shaft can be bored, but a
+     tube is where the geology put it — if the geology made one at all. Only
+     polar sites in this game get a rille, and only a rille has an intact tube
+     continuing under it, so on two site classes in three this structure
+     simply cannot be built. That is the point of it.
+
+     It is deliberately the CHEAPEST volume in the game per resident, because
+     the void is already there: nothing has to be excavated, only sealed,
+     lit and pressurised. What it costs instead is choice. A bore goes wherever
+     there is ice and grows straight down to a depth fixed in its own data; a
+     tube arcology grows ALONG a course it did not choose, and stops when it
+     runs out of tube. `maxReach` is therefore a ceiling that the map is
+     usually the binding half of.
+
+     And it makes no air. The Cistern cracks the ice it sits in and
+     pressurises part of its own population; a tube has no ice, so every one
+     of its residents breathes oxygen the colony had to make somewhere else.
+     Cheap volume with a running cost is a more interesting object than cheap
+     volume. */
+
+  { id: 'tubeway', name: 'Tube Arcology', cost: 96000, group: 'tube', era: 2,
+    once: true, needsTube: true,
+    /* maxReach is set ABOVE the length of a short tube and below a long one,
+       deliberately. Measured across generated polar maps the trimmed tube runs
+       roughly 40 to 80 tiles, so at 64 the structure is the binding limit on a
+       generous tube and the GEOLOGY is the binding limit on a mean one. If
+       this were set low enough to always bind, the map would stop mattering
+       and the whole point of the group would be lost. */
+    maxReach: 64, reachDays: 8, drawKw: 44,
+    housingPerReach: 22, jobsPerReach: 8,
+    service: 'amenity', radius: 12,
+    desc: 'A lava tube sealed, lit and pressurised along its length — the cheapest room on the Moon, because nothing had to be dug to make it. It grows along the tube rather than down, stops where the tube stops, and unlike a cistern it makes none of its own air. Must be built on ground with a tube running under it.' }
 ];
 
 /* The five coverage services a civic building can project. Each names the
@@ -581,6 +617,11 @@ const TOOLS = [
   { id: 'cistern',  name: 'Cistern Arcology',  glyph: '◍', key: '9', group: 'deep', build: 'cistern' },
   { id: 'foundry',  name: 'Foundry Arcology',  glyph: '◭', key: '0', group: 'deep', build: 'foundry' },
   { id: 'core',     name: 'Core Arcology',     glyph: '◎', key: '-', group: 'deep', build: 'core' },
+
+  /* Its own group rather than a fifth deep arcology: it shares their
+     lifecycle but not their siting rule, their geometry or their economics,
+     and the palette should not imply otherwise. */
+  { id: 'tubeway',  name: 'Tube Arcology',     glyph: '⌒', key: '=', group: 'tube', build: 'tubeway' },
 
   { id: 'hab_low',   name: 'Habitation · Low',  glyph: '▨', key: 'Q', group: 'zone', zone: 'hab',      density: 'low',  drag: 'rect' },
   { id: 'hab_high',  name: 'Habitation · High', glyph: '▧', key: 'W', group: 'zone', zone: 'hab',      density: 'high', drag: 'rect' },
