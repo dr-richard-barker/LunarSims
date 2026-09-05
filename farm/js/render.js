@@ -692,7 +692,8 @@
     }
 
     const Z = { solar: 26, battery: 24, hab: 30, isru: 42, composter: 32, reactor: 34, pad: 4,
-                studio: 34, vault: 27 }[type] || 26;
+                studio: 34, vault: 27,
+                worms: 30, nitrifier: 36, digester: 38, reef: 28 }[type] || 26;
     groundShadow(ctx, x + 0.1, y + 0.1, 0.8, 0.8, Z, sv);
     contact(ctx, x, y, 1, 1);
     if (site) return drawScaffold(ctx, x, y, 1, 1, Z, site, l);
@@ -955,6 +956,87 @@
           ctx.ellipse(e.x, e.y - 3, 11, 6, 0, 0, 7);
           ctx.fill();
         }
+        break;
+      }
+      case 'worms': {
+        /* a rack of stacked rearing trays, lit dimly from inside */
+        box(ctx, x + 0.16, y + 0.20, 0.68, 0.60, Z, '#8a8272', l, { stroke: grey(150, l), lw: 1.1 });
+        ctx.fillStyle = `rgba(214,186,140,${0.35 + l * 0.4})`;
+        for (let i = 0; i < 4; i++) {
+          ctx.fillRect(p.x - 12, p.y - Z + 5 + i * 6, 24, 3);
+        }
+        ctx.strokeStyle = `rgba(60,52,40,${0.5 * Math.max(l, 0.45)})`;
+        ctx.lineWidth = 1;
+        for (let i = 0; i < 4; i++) {
+          ctx.strokeRect(p.x - 12, p.y - Z + 5 + i * 6, 24, 3);
+        }
+        break;
+      }
+      case 'nitrifier': {
+        /* two packed-bed columns with an aeration line between them */
+        for (const off of [-0.17, 0.17]) {
+          box(ctx, x + 0.5 + off - 0.13, y + 0.36, 0.26, 0.28, Z, '#7d8b93', l, { stroke: grey(160, l) });
+        }
+        ctx.strokeStyle = `rgba(150,210,235,${0.5 + l * 0.4})`;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(p.x - 13, p.y - Z * 0.62); ctx.lineTo(p.x + 13, p.y - Z * 0.62);
+        ctx.stroke();
+        /* bubbles — it is an aerobic bed and it has to be kept that way */
+        ctx.fillStyle = `rgba(190,230,250,${0.45 + l * 0.3})`;
+        for (let i = 0; i < 3; i++) {
+          ctx.beginPath();
+          ctx.arc(p.x - 8 + i * 8, p.y - Z - 3 - (i % 2) * 4, 1.9, 0, 7);
+          ctx.fill();
+        }
+        break;
+      }
+      case 'digester': {
+        /* a sealed dome on a plinth, with a gas offtake to the halls */
+        box(ctx, x + 0.14, y + 0.22, 0.72, 0.56, Z * 0.45, '#6f7a72', l, { stroke: grey(150, l) });
+        ctx.fillStyle = tone('#8fa196', l, 1);
+        ctx.beginPath();
+        ctx.ellipse(p.x, p.y - Z * 0.72, 17, 11, 0, Math.PI, 2 * Math.PI);
+        ctx.fill();
+        ctx.strokeStyle = grey(165, l); ctx.lineWidth = 1.2; ctx.stroke();
+        /* the gas line leaving for the canopy */
+        ctx.strokeStyle = `rgba(140,220,170,${0.5 + l * 0.4})`;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(p.x + 10, p.y - Z * 0.78);
+        ctx.lineTo(p.x + 18, p.y - Z);
+        ctx.stroke();
+        ctx.fillStyle = 'rgba(140,220,170,0.5)';
+        ctx.beginPath(); ctx.arc(p.x + 18, p.y - Z - 2, 2.4, 0, 7); ctx.fill();
+        break;
+      }
+      case 'reef': {
+        /* a glazed tank: water, light through it, and something living in it */
+        ctx.fillStyle = `rgba(80,170,200,${0.20 + l * 0.22})`;
+        box(ctx, x + 0.14, y + 0.20, 0.72, 0.60, Z, '#3f7f96', l, { stroke: 'rgba(190,235,250,0.55)', lw: 1.2 });
+        /* waterline and the corals under it */
+        const wl = p.y - Z + 6;
+        ctx.fillStyle = `rgba(120,205,225,${0.30 + l * 0.25})`;
+        ctx.fillRect(p.x - 13, wl, 26, Z * 0.62);
+        const coral = ['#e0705f', '#e8a24b', '#9a6fc4', '#4fbfa0'];
+        for (let i = 0; i < 4; i++) {
+          ctx.fillStyle = shade(coral[i], -10 + l * 30);
+          const cx = p.x - 9 + i * 6;
+          const cy = wl + Z * 0.5;
+          ctx.beginPath();
+          ctx.ellipse(cx, cy, 2.4, 4.2 - (i % 2), 0, Math.PI, 2 * Math.PI);
+          ctx.fill();
+        }
+        /* the lamp over the tank */
+        ctx.fillStyle = `rgba(210,240,255,${0.45 + l * 0.4})`;
+        ctx.fillRect(p.x - 11, p.y - Z - 6, 22, 3);
+        ctx.fillStyle = 'rgba(180,230,255,0.16)';
+        ctx.beginPath();
+        ctx.moveTo(p.x - 11, p.y - Z - 3);
+        ctx.lineTo(p.x + 11, p.y - Z - 3);
+        ctx.lineTo(p.x + 15, wl + 4);
+        ctx.lineTo(p.x - 15, wl + 4);
+        ctx.closePath(); ctx.fill();
         break;
       }
       case 'pad': {

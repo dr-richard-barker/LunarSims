@@ -309,7 +309,7 @@ td.mark{width:34px;text-align:center}
         EV.forEach(e => e.choices.forEach(c => effects.push([e.id, c.effect])));
 
         /* declining a request is meant to leave the farm exactly as it was */
-        const DELIBERATE_NO_OPS = ['samp_keep', 'wild_decline', 'land_decline', 'comm_decline'];
+        const DELIBERATE_NO_OPS = ['samp_keep', 'wild_decline', 'land_decline', 'comm_decline', 'offtake_decline'];
 
         /* everything the effects can touch — a narrower snapshot reports real
            changes as no-ops, which is how the first cut of this test failed */
@@ -318,7 +318,8 @@ td.mark{width:34px;text-align:center}
           food: Math.round(s.food), science: s.science, morale: Math.round(s.morale),
           crew: s.crew, o2: Math.round(s.o2), co2: Math.round(s.co2),
           flags: s.flags,
-          residue: Math.round(s.residue), audience: Math.round(s.media.audience),
+          residue: Math.round(s.residue), waste: Math.round(s.waste), offtake: !!s.offtake,
+          carbonate: Math.round(s.carbonate), audience: Math.round(s.media.audience),
           accessions: Object.keys(s.vault.accessions).sort().join(','), gmo: Object.keys(s.gmo).sort().join(','),
           soil: s.fields.map(x => x.soil), crops: s.fields.map(x => x.crop),
           infected: s.fields.map(x => x.infected), feed: s.fields.map(x => +x.feed.toFixed(2)),
@@ -402,14 +403,19 @@ td.mark{width:34px;text-align:center}
             /* "cannot afford to sow another hall of anything" */
             if (s.credits < 1500) { broke++; run++; worst = Math.max(worst, run); } else run = 0;
           }
-          return { days: s.day, over: !!s.over, broke, worst, earned: s.stats.mediaTotal || 0 };
+          return { days: s.day, over: !!s.over, broke, worst, earned: s.stats.mediaTotal || 0,
+                   credits: Math.round(s.credits), service: s.stats.serviceTotal || 0 };
         }
         const without = play(false), withIt = play(true);
         return [
-          ['without a studio the farm strands itself', without.worst >= 30, true],
-          ['with one, it never goes 30 days unable to spend', withIt.worst, '<30'],
+          ['with a studio it never goes 30 days unable to spend', withIt.worst, '<30'],
           ['the studio earns while the crops are still growing', withIt.earned, '>4000'],
-          ['and the run lasts longer for it', withIt.days > without.days, true]
+          ['and it holds more cash than the same farm without one',
+            withIt.credits > without.credits, true],
+          /* the service contract is a second floor: since it pays for closure
+             rather than for produce, even a studio-less farm now earns daily */
+          ['the service contract pays a studio-less farm too', without.service, '>0'],
+          ['so neither arm is stranded for a month any more', without.worst, '<30']
         ];
       } },
 
@@ -550,6 +556,188 @@ td.mark{width:34px;text-align:center}
         ];
       } },
 
+    /* ---- the recycling compartments and what the station pays for them ---- */
+
+    { name: 'Each compartment consumes and returns what it claims',
+      why: 'the rates come from the Lunar Palace 1 element budgets, so they have to actually be applied',
+      run() {
+        function rig(types) {
+          const s = S.newGame();
+          s.credits = 400000; s.science = 300; s.offtake = true;
+          s.residue = 300; s.waste = 120;
+          const spots = [[13, 7], [14, 7], [11, 7], [10, 7]];
+          types.forEach((t, i) => S.place(s, S.tileAt(s, spots[i][0], spots[i][1]), t));
+          return s;
+        }
+        const day = s => { for (let h = 0; h < 24; h++) S.tick(s); s.pendingEvent = null; };
+
+        /* Every comparison is against an identical farm with no compartment,
+           because the canopy makes oxygen and eats nutrients and the crew make
+           waste regardless — absolute change measures the farm, not the tier. */
+        const ctrl = rig([]); day(ctrl);
+
+        const w = rig(['worms']);
+        const wRes = w.residue;
+        day(w);
+        const ate = wRes - w.residue;
+
+        const n = rig(['nitrifier']); day(n);
+        const d = rig(['digester']); day(d);
+        const r = rig(['reef']); day(r);
+
+        /* nothing may run off the track network */
+        const off = S.newGame();
+        off.credits = 400000; off.science = 300; off.residue = 300;
+        const far = off.map.find(t => !t.b && !t.f && t.t === 'flat' &&
+          t.x > 20 && t.y > 12);
+        S.place(off, far, 'worms');
+        const offRes = off.residue;
+        day(off);
+
+        return [
+          ['a mealworm tier eats residue', ate > 0, true],
+          ['and returns more food than the same farm without one', w.food > ctrl.food, true],
+          ['and frass to the nutrient tanks', w.nutrients > ctrl.nutrients, true],
+          ['larvae respire, so it holds less oxygen', w.o2 < ctrl.o2, true],
+          ['the nitrifier leaves less waste standing', n.waste < ctrl.waste, true],
+          ['and returns nitrate', n.nutrients > ctrl.nutrients, true],
+          ['the digester clears more waste and residue than no compartment',
+            d.waste < ctrl.waste && d.residue < ctrl.residue, true],
+          ['and hands carbon back to the canopy', d.co2 > ctrl.co2, true],
+          ['the reef lays down carbonate', r.carbonate > 0, true],
+          ['and banks a marine accession',
+            !!(r.vault.accessions && r.vault.accessions.reef_marine), true],
+          ['a compartment off the track network does nothing',
+            off.residue, offRes]
+        ];
+      } },
+
+    { name: 'The waste and residue budgets never go negative',
+      why: 'four compartments draw on two shared stocks, so over-drawing is the obvious failure',
+      run() {
+        const s = S.newGame();
+        s.credits = 400000; s.science = 300; s.offtake = true;
+        [['worms', 13, 7], ['nitrifier', 14, 7], ['digester', 11, 7], ['reef', 10, 7]]
+          .forEach(([t, x, y]) => S.place(s, S.tileAt(s, x, y), t));
+        /* deliberately starved: nothing in either stock, everything wants some */
+        s.residue = 0; s.waste = 0;
+        let worstRes = 0, worstWaste = 0;
+        for (let d = 0; d < 120 && !s.over; d++) {
+          for (let h = 0; h < 24; h++) S.tick(s);
+          s.pendingEvent = null;
+          worstRes = Math.min(worstRes, s.residue);
+          worstWaste = Math.min(worstWaste, s.waste);
+        }
+        return [
+          ['residue never goes negative', worstRes >= 0, true],
+          ['waste never goes negative', worstWaste >= 0, true],
+          ['a starved farm still runs', !s.over || s.day > 60, true],
+          ['crew waste accumulates when nothing eats it',
+            (() => {
+              const t = S.newGame();
+              for (let d = 0; d < 10; d++) { for (let h = 0; h < 24; h++) S.tick(t); t.pendingEvent = null; }
+              return t.waste > 0;
+            })(), true]
+        ];
+      } },
+
+    { name: 'The station pays for closure, not for produce',
+      why: 'this is the loop that makes a recycling compartment worth building at all',
+      run() {
+        /* a farm with nothing growing carries none of the life support */
+        const bare = S.newGame();
+        S.clear(bare, bare.fields[0]);
+        for (let d = 0; d < 4; d++) { for (let h = 0; h < 24; h++) S.tick(bare); bare.pendingEvent = null; }
+        /* stats.lsShare is the share the day's payment was actually made on;
+           calling lifeSupportShare() afterwards reads a counter that has already
+           begun refilling for the next day */
+        const bareShare = bare.stats.lsShare;
+        const barePay = bare.stats.serviceToday;
+
+        /* a farm with a lit canopy carries a real share of it */
+        const grown = S.newGame();
+        grown.credits = 300000;
+        for (const [x, y] of [[16, 4], [16, 10], [8, 4]]) {
+          if (!S.addField(grown, x, y, 3, 3)) {
+            S.plant(grown, grown.fields[grown.fields.length - 1], 'spirulina');
+          }
+        }
+        for (const [x, y] of [[20, 4], [20, 5], [20, 6], [20, 7], [21, 4], [21, 5]]) {
+          S.place(grown, S.tileAt(grown, x, y), 'solar');
+        }
+        for (let d = 0; d < 4; d++) { for (let h = 0; h < 24; h++) S.tick(grown); grown.pendingEvent = null; }
+        const grownShare = grown.stats.lsShare;
+
+        /* the offtake fee needs both a contract and something that processes waste */
+        const noDeal = S.newGame();
+        noDeal.credits = 400000; noDeal.science = 300; noDeal.offtake = false;
+        S.place(noDeal, S.tileAt(noDeal, 14, 7), 'nitrifier');
+        noDeal.waste = 100;
+        for (let h = 0; h < 24; h++) S.tick(noDeal); noDeal.pendingEvent = null;
+        const withDeal = S.newGame();
+        withDeal.credits = 400000; withDeal.science = 300; withDeal.offtake = true;
+        S.place(withDeal, S.tileAt(withDeal, 14, 7), 'nitrifier');
+        withDeal.waste = 100;
+        for (let h = 0; h < 24; h++) S.tick(withDeal); withDeal.pendingEvent = null;
+
+        return [
+          ['a farm growing nothing carries almost no life support', bareShare, '<0.45'],
+          ['a lit canopy carries more of it', grownShare > bareShare, true],
+          ['and is paid more for it', grown.stats.serviceToday > barePay, true],
+          ['the offtake fee needs a signed contract',
+            withDeal.stats.serviceToday > noDeal.stats.serviceToday, true],
+          ['both farms still process the waste either way',
+            noDeal.stats.wasteProcessed > 0, true]
+        ];
+      } },
+
+    { name: 'The digester is what lifts the carbon floor',
+      why: 'the whole claim for a waste compartment is that it returns the carbon the food exports',
+      run() {
+        /* Carbon isolated: a deep pantry so starvation cannot end the run first,
+           and worked beds so growth is not soil-limited. Naive comparisons of
+           this system are confounded by both. */
+        function play(types) {
+          const s = S.newGame();
+          s.credits = 400000; s.science = 300; s.food = 6e6;
+          const spots = [[13, 7], [14, 7], [11, 7], [10, 7]];
+          types.forEach((t, i) => S.place(s, S.tileAt(s, spots[i][0], spots[i][1]), t));
+          for (let i = 0; i < 8; i++) {
+            const spot = clearSpot(s, 3, 3);
+            if (spot) S.addField(s, spot[0], spot[1], 3, 3);
+          }
+          s.fields.forEach(f => { f.soil = 1; });
+          const mix = ['potato', 'romaine', 'radish', 'wheat', 'pakchoi', 'kale'];
+          let rot = 0, floor = Infinity;
+          for (let d = 0; d < 200 && !s.over; d++) {
+            for (let h = 0; h < 24; h++) S.tick(s);
+            s.pendingEvent = null;
+            for (const f of S.planted(s)) {
+              if (f.moisture < 0.4) S.water(s, f);
+              if (f.feed < 0.35) S.feed(s, f);
+              if (f.growth >= 1) S.harvest(s, f);
+            }
+            s.fields.forEach(f => { if (!f.crop && !f.dead) { S.plant(s, f, mix[rot % mix.length]); rot++; } });
+            if (s.nutrients < 200) S.trade(s, 'nutrients', 200);
+            if (s.water < 400) S.trade(s, 'water', 200);
+            floor = Math.min(floor, s.co2);
+          }
+          return { floor, end: s.co2, harvests: s.stats.harvests };
+        }
+        const none = play([]);
+        const dig = play(['digester']);
+        const worm = play(['worms']);
+
+        return [
+          ['without one, the carbon buffer bottoms out', none.floor, '<20'],
+          ['a digester lifts the floor several times over', dig.floor > none.floor * 2, true],
+          ['and holds a higher buffer at the end', dig.end > none.end, true],
+          ['a mealworm tier is a food play, not a carbon one',
+            Math.abs(worm.floor - none.floor) < 20, true],
+          ['none of them stops the farm harvesting', dig.harvests > 0 && none.harvests > 0, true]
+        ];
+      } },
+
     { name: 'An older save is carried forward, not thrown away',
       why: 'a run stored before bed conditioning must not be silently ruined by loading it',
       run() {
@@ -565,8 +753,14 @@ td.mark{width:34px;text-align:center}
         delete old.stats.totalGrown; delete old.stats.totalEaten;
         old.stats.recent = [1, 2, 3];
         delete old.auto; delete old.sandbox; delete old.history;
+        /* a real pre-v8 save has no recycling keys at all, so strip them rather
+           than leaving the values this run happened to accumulate */
+        delete old.waste; delete old.carbonate; delete old.offtake;
+        delete old.stats.recycled; delete old.stats.wasteProcessed;
 
         const res = S.migrate(old);
+        const freshDefaults = old.waste === 0 && old.carbonate === 0 && old.offtake === false
+          && !!old.stats.recycled && old.stats.wasteProcessed === 0;
         const soilAfter = old.fields[0].soil;
 
         /* and it has to keep working, not just parse */
@@ -591,6 +785,8 @@ td.mark{width:34px;text-align:center}
           ['closure totals are seeded from days already lived', old.stats.totalEaten > 0, true],
           ['missing switches come back as defaults', old.auto === false && old.sandbox === false, true],
           ['it is stamped at the current version', old.version, S.STATE_VERSION],
+          ['the v8 recycling stocks come back as defaults', freshDefaults, true],
+          ['and the crew start filling the waste stock once it runs', old.waste, '>0'],
           ['the carried run keeps growing', grew, true],
           ['a newer save is refused', futureRes.ok === false && futureRes.why, 'newer'],
           ['an early build is refused', ancientRes.ok === false && ancientRes.why, 'incompatible']

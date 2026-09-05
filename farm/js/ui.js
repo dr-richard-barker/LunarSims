@@ -30,7 +30,8 @@
   ];
   const GLYPH = {
     track: '═', rail: '╬', greenhouse: '⌂', solar: '▤', battery: '▬', hab: '◍',
-    isru: '⚗', composter: '♻', reactor: '☢', pad: '◎', studio: '◉', vault: '⌸'
+    isru: '⚗', composter: '♻', reactor: '☢', pad: '◎', studio: '◉', vault: '⌸',
+    worms: '≡', nitrifier: '⇅', digester: '◗', reef: '❋'
   };
 
   /* ---------- the catalogue's photographs ----------
@@ -451,6 +452,7 @@
       ['CO₂', s.co2.toFixed(0) + ' kg', s.co2 < 20 ? 'bad' : s.co2 < 55 ? 'warn' : ''],
       ['Nutrients', fmt(s.nutrients), s.nutrients < 40 ? 'warn' : ''],
       ['Residue', fmt(s.residue), ''],
+      ['Waste', fmt(s.waste), s.waste > 250 ? 'warn' : ''],
       ['Crew', `${s.crew}/${S.crewCapacity(s)}`, ''],
       ['Morale', Math.round(s.morale) + '%', s.morale < 35 ? 'bad' : s.morale < 55 ? 'warn' : 'good'],
       ['Science', fmt(s.science), ''],
@@ -458,6 +460,9 @@
     ];
     if (S.count(s, 'studio')) {
       chips.splice(1, 0, ['On air', '+' + fmt(s.media.today) + ' cr', s.media.today > 0 ? 'good' : 'warn']);
+    }
+    if (s.stats.serviceToday) {
+      chips.splice(1, 0, ['Service', '+' + fmt(s.stats.serviceToday) + ' cr', 'good']);
     }
     $('#chips').innerHTML = chips.map(([k, v, c]) =>
       `<div class="chip ${c}"><b>${v}</b><span>${k}</span></div>`).join('');
@@ -517,6 +522,10 @@
       studio: S.studioLive(s)
         ? `On air. Audience ${fmt(s.media.audience)}, paying ${fmt(s.media.today)} credits a day. Aired ${fmt(s.media.aired)} segments so far.`
         : 'Off air — the studio has to touch the track network before anything can be filed.',
+      worms: `Rearing on spent straw. Taking ${(s.stats.recycled.worms || 0).toFixed(2)} residue a day and returning protein and frass. Residue in store: ${fmt(s.residue)}.`,
+      nitrifier: `Oxidising crew waste to nitrate. Taking ${(s.stats.recycled.nitrifier || 0).toFixed(1)} waste a day. Waste in store: ${fmt(s.waste)}.`,
+      digester: `Degrading solid waste and residue back to carbon dioxide and minerals. Taking ${(s.stats.recycled.digester || 0).toFixed(1)} a day — this is what keeps the canopy's carbon from leaving inside the food.`,
+      reef: `A closed marine microcosm. Laying down ${(s.stats.recycled.reef || 0).toFixed(2)} carbonate a day; ${fmt(s.carbonate)} in the stockpile, discounting construction. Speculative: no reef has been flown, and calcification is a carbon dioxide source rather than a sink.`,
       vault: `Sealed into the tube. ${S.accessions(s).length} of ${S.vaultTarget()} lines held, returning ${(S.accessions(s).length * 0.04).toFixed(2)} science a day.`,
       track: 'Graded surface road. Halls and modules touching the network are serviced by the crew.'
     }[t.b.type] || '';
@@ -847,6 +856,7 @@
         ${row('Harvests', s.stats.harvests)}
       </div>
 
+      ${recyclingHTML()}
       ${S.count(s, 'studio') ? broadcastHTML() : ''}
 
       <h3 class="sec">Resupply</h3>
@@ -878,6 +888,60 @@
       else if (w === 'nutrients') act(S.trade(s, 'nutrients', 200));
       else act(S.trade(s, 'spares', 4));
     });
+  }
+
+  /* ---------- recycling ----------
+
+     Two currencies drive the compartments: residue, which only a photosynthetic
+     harvest makes, and waste, which the crew make whether or not anything is
+     there to take it. The panel shows both stocks and what is eating them. */
+  const COMPARTMENTS = [
+    ['worms', 'Mealworm tiers', 'residue'],
+    ['nitrifier', 'Nitrifying bioreactor', 'waste'],
+    ['digester', 'Anaerobic digester', 'waste + residue'],
+    ['reef', 'Reef microcosm', 'power']
+  ];
+
+  function recyclingHTML() {
+    const anyBuilt = COMPARTMENTS.some(([id]) => S.count(s, id));
+    if (!anyBuilt && !s.offtake) return '';
+    const row = (k, v, cls) => `<div class="row"><span class="k">${k}</span><span class="v ${cls || ''}">${v}</span></div>`;
+    const rec = s.stats.recycled || {};
+    const share = s.stats.lsShare || 0;
+
+    const rows = COMPARTMENTS.filter(([id]) => S.count(s, id)).map(([id, name, feed]) => {
+      const n = S.count(s, id);
+      const rate = rec[id] || 0;
+      const idle = rate <= 0;
+      return row(name + (n > 1 ? ' ×' + n : ''),
+        idle ? 'IDLE — no ' + feed : rate.toFixed(2) + '/day',
+        idle ? 'warn' : 'good');
+    }).join('');
+
+    return `
+      <h3 class="sec">Recycling</h3>
+      <div class="rows">
+        ${row('Residue in store', fmt(s.residue) + ' — from harvests')}
+        ${row('Station waste', fmt(s.waste), s.waste > 250 ? 'warn' : '')}
+        ${s.carbonate ? row('Carbonate stockpile', fmt(s.carbonate) + ' — discounts construction') : ''}
+        ${rows || row('Compartments', 'none built', 'warn')}
+      </div>
+
+      <h3 class="sec">What the station pays</h3>
+      <div class="rows">
+        ${row('Life support supplied by the farm', pct(share), share >= 0.5 ? 'good' : 'warn')}
+        ${row('Service contract', '+' + fmt(Math.round(s.crew * S.SERVICE_RATE * share)) + ' cr/day', 'good')}
+        ${row('Waste offtake', s.offtake
+            ? '+' + fmt(Math.round((s.stats.wasteToday || 0) * S.WASTE_FEE)) + ' cr/day'
+            : 'no contract', s.offtake ? 'good' : 'warn')}
+        ${row('Paid today', '+' + fmt(s.stats.serviceToday || 0) + ' cr', 'good')}
+        ${row('Earned to date', fmt(s.stats.serviceTotal || 0) + ' cr')}
+        ${row('Waste processed', fmt(s.stats.wasteProcessed || 0))}
+      </div>
+      <p style="font-size:11px;color:var(--ink-soft);margin:9px 0 0;line-height:1.55">
+        The station pays for the share of its life support the farm actually carries — oxygen made,
+        carbon dioxide taken up, water recovered — rather than for what you ship it. Closing a loop
+        is the income.${s.offtake ? '' : ' It will also pay you to take its waste, if you sign for it.'}</p>`;
   }
 
   /* ---------- broadcast ----------
