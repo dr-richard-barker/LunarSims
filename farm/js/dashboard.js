@@ -29,7 +29,17 @@
     { key: 'tiles', title: 'Ground under glass', unit: 'tiles',
       good: () => true, warn: () => true },
     { key: 'credits', title: 'Credits', unit: '',
-      good: v => v >= 4000, warn: v => v >= 800 }
+      good: v => v >= 4000, warn: v => v >= 800 },
+    { key: 'lsShare', title: 'Life support carried by the farm', unit: '× crew need',
+      good: v => v >= 0.5, warn: v => v >= 0.25, fmt: v => v.toFixed(2) },
+    { key: 'residue', title: 'Residue for the recyclers', unit: 'units',
+      good: v => v >= 20, warn: v => v >= 5 },
+    { key: 'waste', title: 'Station waste awaiting processing', unit: 'units',
+      good: v => v <= 60, warn: v => v <= 200 },
+    { key: 'audience', title: 'Broadcast audience', unit: 'viewers',
+      good: v => v >= 400, warn: v => v >= 120 },
+    { key: 'accessions', title: 'Lines banked in the vault', unit: 'accessions',
+      good: v => v >= 20, warn: v => v >= 8 }
   ];
 
   const fmtNum = v => Math.round(v).toLocaleString();

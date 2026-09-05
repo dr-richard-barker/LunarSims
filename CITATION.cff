@@ -1,0 +1,32 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "LunarSims: browser simulations of lunar settlement"
+abstract: >-
+  Original browser simulation games set on the lunar surface, including
+  Lunar Metropolis, an executable model of lunar settlement growth that
+  couples an elevation field to a solar-exposure raycast and derives from
+  it the distribution of water ice, the availability of solar power, and
+  the economic value of ground. Three habitat strategies are represented:
+  surface construction, arcologies bored into permanently shadowed ice,
+  and arcologies extending along pre-existing lava tubes.
+type: software
+authors:
+  - family-names: Barker
+    given-names: Richard
+    # TODO before deposit: add ORCID as a full URL, e.g.
+    # orcid: "https://orcid.org/0000-0000-0000-0000"
+    # TODO before deposit: add affiliation, e.g.
+    # affiliation: "..."
+license: MIT
+repository-code: "https://github.com/dr-richard-barker/LunarSims"
+url: "https://dr-richard-barker.github.io/LunarSims/"
+keywords:
+  - lunar settlement
+  - simulation
+  - agent-based model
+  - lava tubes
+  - in-situ resource utilisation
+  - habitat design
+# TODO before deposit: set to the tag being archived, and its date.
+version: "0.1.0"
+date-released: "2026-09-05"

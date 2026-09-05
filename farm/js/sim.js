@@ -34,6 +34,44 @@
      cultures live on it. */
   const RESIDUE_PER_TILE = 2.2;
 
+  /* ---------- the recycling compartments ----------
+
+     Rates below are taken from the Lunar Palace 1 ("Yuegong-1") 105-day multi-crew
+     closed bioregenerative run of February–May 2014, which is the only integrated
+     experiment of its kind with published element budgets:
+
+       Li et al. 2015, Life Sci Space Res 7:9-14   doi:10.1016/j.lssr.2015.08.002
+         Tenebrio molitor: 8.13% of feed recovered as larval mass, 78.43% as frass,
+         eight essential amino acids 41.30% of total. Larvae reared inside the
+         closed system grew measurably slower than the open-air controls.
+       Fu et al. 2016, Astrobiology 16(12):925-936 doi:10.1089/ast.2016.1477
+         21 plant species coexisting, 20.5% nitrogen recovered from urine,
+         41% solid waste degraded, 55% of the food regenerated.
+       Dong et al. 2017, Astrobiology 17(1):78-86 doi:10.1089/ast.2016.1466
+         247 g/d carbon imported inside stored food; >99% of water lost through
+         leaf transpiration; 20.5% of nitrogen reused, 5.35 g/d to the solution.
+
+     The ratios are theirs. The throughputs are scaled for play — a farm here is
+     not three volunteers in a Beijing basement. */
+  const WASTE_PER_CREW = 1.1;      // units a crew member sheds per day
+  const WORM_FEED = 0.9;           // residue one mealworm tier eats per day
+  const WORM_BIOCONV = 0.0813;     // Li et al. — feed to larval mass
+  const WORM_FRASS = 0.7843;       // Li et al. — feed excreted as frass
+  const WORM_KCAL = 16000;         // kcal per unit of larval mass, scaled for play
+  const WORM_SLOWDOWN = 0.86;      // closed-system rearing is slower than open air
+  const NITRO_FEED = 4.0;          // waste one bioreactor can oxidise per day
+  const NITRO_RECOVERY = 0.205;    // Fu et al. — nitrogen recovered from urine
+  const DIGEST_FEED = 3.2;         // residue + waste one digester takes per day
+  const DIGEST_DEGRADE = 0.41;     // Fu et al. — solid waste degraded
+  const REEF_KW = 0.6;
+  const REEF_CARBONATE = 0.7;      // units of aragonite laid down per day
+
+  /* What the station pays the farm. Selling food and oxygen was the only income
+     the farm had; neither pays it for closing a loop, which is why every
+     recycling compartment used to be a pure cost. */
+  const SERVICE_RATE = 62;         // credits per crew per day at full life support
+  const WASTE_FEE = 34;            // credits per unit of station waste processed
+
   /* The studio. Audience is the stock, revenue is the flow off it, and novelty is
      what stops a monoculture farming the camera as easily as it farms potatoes. */
   const AUD_PER_SEGMENT = 44;      // audience gained by one aired segment at full novelty
@@ -154,7 +192,7 @@
 
   /* Bump when the stored shape changes. Anything older is brought forward by
      migrate() rather than thrown away. */
-  const STATE_VERSION = 7;
+  const STATE_VERSION = 8;
 
   /* Bring a stored run up to the shape this code expects.
 
@@ -192,6 +230,10 @@
        has already harvested twenty crops has plainly sown them, and starting its
        biotech gate from zero would be taking work away from somebody who did it. */
     def(o, 'residue', 0);
+    /* v8 — the recycling compartments and what the station pays for them */
+    def(o, 'waste', 0);
+    def(o, 'carbonate', 0);
+    def(o, 'offtake', false);
     def(o, 'gmo', {});
     def(o, 'media', null);
     if (!o.media) {
@@ -211,6 +253,9 @@
     def(st, 'closureStreak', 0); def(st, 'harvestedToday', 0);
     def(st, 'lastClosure', 0); def(st, 'brownouts', 0); def(st, 'seenNight', false);
     def(st, 'sown', {}); def(st, 'mediaTotal', 0); def(st, 'ateRecently', 0); def(st, 'lastEaten', '');
+    def(st, 'lsShare', 0); def(st, 'wasteProcessed', 0); def(st, 'serviceTotal', 0);
+    def(st, 'wasteToday', 0); def(st, 'serviceToday', 0);
+    def(st, 'o2Today', 0); def(st, 'co2Today', 0); def(st, 'recycled', {});
     /* closure used to be a rolling window; it is now measured over the whole
        mission, so seed the totals from what the run has actually done */
     if (st.totalGrown === undefined) {
@@ -240,6 +285,7 @@
       hour: 6, day: 1,
       credits: 12000, water: 900, o2: 240, co2: 200, nutrients: 400,
       food: 600000, science: 0, spares: 6, pressure: 100, stored: 120, residue: 0,
+      waste: 0, carbonate: 0, offtake: false,
       crew: 3, morale: 72, photoperiod: 16, isruOn: true,
       auto: false, sandbox: false, history: [],
       map: makeMap(41), fields: [], nextField: 1,
@@ -248,7 +294,9 @@
                seed: 0, railout: 0, mppt: 0 },
       stats: { harvests: 0, kinds: {}, sown: {}, nightsSurvived: 0, closureStreak: 0,
                harvestedToday: 0, totalGrown: 0, totalEaten: 0, lastClosure: 0, brownouts: 0,
-               seenNight: false, mediaTotal: 0, ateRecently: 0, lastEaten: '' },
+               seenNight: false, mediaTotal: 0, ateRecently: 0, lastEaten: '',
+               lsShare: 0, wasteProcessed: 0, serviceTotal: 0, wasteToday: 0, serviceToday: 0,
+               o2Today: 0, co2Today: 0, recycled: {} },
       gmo: {},
       media: { audience: 0, novelty: {}, aired: 0, revenue: 0, today: 0, reel: [], last: [] },
       vault: { accessions: {}, lost: 0, secured: false },
@@ -401,7 +449,8 @@
   }
 
   function demand(s) {
-    const ls = K.BASE_LIFE_SUPPORT + s.crew * K.LS_PER_CREW;
+    const ls = K.BASE_LIFE_SUPPORT + s.crew * K.LS_PER_CREW
+      + count(s, 'nitrifier') * 0.30 + count(s, 'reef') * REEF_KW;
     const lit = lightsOn(s) ? planted(s).reduce((a, f) => a + lampNeed(s, f), 0) : 0;
     const isru = (count(s, 'isru') && s.isruOn) ? K.ISRU_KW : 0;
     return { ls, lit, isru, total: ls + lit + isru };
@@ -579,6 +628,10 @@
     }
 
     /* --- gases --- */
+    /* what the canopy did for life support today, which is what the station pays on */
+    if (s.hour === 0) { s.stats.o2Today = 0; s.stats.co2Today = 0; }
+    s.stats.o2Today = (s.stats.o2Today || 0) + Math.max(0, o2Made);
+    s.stats.co2Today = (s.stats.co2Today || 0) + Math.max(0, co2Used);
     s.o2 += o2Made - s.crew * K.CREW_O2 / 24;
     s.co2 += (s.crew * K.CREW_CO2 + STATION_CO2) / 24 - co2Used;
     s.o2 = clamp(s.o2, 0, 400 + (s.up.composter ? 200 : 0));
@@ -636,6 +689,9 @@
       plant(s, f, 'potato');
     });
     if (s.flags.leak && s.spares >= 2) patchLeak(s);
+    /* a farm running itself takes the waste contract — it is free money for
+       work the compartments were going to do anyway */
+    if (!s.offtake && count(s, 'nitrifier') + count(s, 'digester') > 0) s.offtake = true;
 
     /* restock, leaving a working float so the player still has money to build */
     const float = 2500;
@@ -646,6 +702,113 @@
     if (s.co2 < 25 && s.credits > float) trade(s, 'co2', 40);
     if (s.o2 > 330) sellO2(s, 60);
     if (s.food > dailyNeed(s) * 80) sellFood(s, 60000);
+  }
+
+  /* ---------- the recycling compartments ----------
+
+     Each takes a waste stream nobody wants and returns something the farm can
+     use. They are the difference between a farm that exports its carbon inside
+     the food it sells and one that gets it back.
+
+     A compartment only runs if it is on the track network — the crew have to
+     reach it — and only to the extent its feedstock exists. Everything returns
+     how much it actually processed, because that is what the station pays on. */
+
+  function servedCount(s, type, touching) {
+    return built(s, type).filter(t => touching.has(idx(t.x, t.y))).length;
+  }
+
+  function runCompartments(s, log) {
+    const touching = serviceSet(s);
+    const rec = s.stats.recycled = { worms: 0, nitrifier: 0, digester: 0, reef: 0 };
+    let wasteDone = 0;
+
+    /* --- mealworm tiers: residue -> protein + frass, in the dark --- */
+    const worms = servedCount(s, 'worms', touching);
+    if (worms > 0 && s.residue > 0) {
+      const eaten = Math.min(s.residue, WORM_FEED * worms);
+      s.residue -= eaten;
+      const mass = eaten * WORM_BIOCONV * WORM_SLOWDOWN;
+      const kcal = mass * WORM_KCAL;
+      s.food += kcal;
+      s.nutrients += eaten * WORM_FRASS * 3;
+      /* larvae respire: they burn oxygen and hand back carbon dioxide */
+      s.o2 = clamp(s.o2 - eaten * 0.30, 0, 400 + (s.up.composter ? 200 : 0));
+      s.co2 = clamp(s.co2 + eaten * 0.41, 0, co2Cap(s));
+      s.stats.harvestedToday += kcal;
+      s.morale = clamp(s.morale + 0.35 * worms, 0, 100);
+      rec.worms = eaten;
+      queueSegment(s, 'standing', 'worms');
+    }
+
+    /* --- nitrifying bioreactor: crew waste -> nitrate --- */
+    if (servedCount(s, 'nitrifier', touching) > 0 && s.waste > 0) {
+      const took = Math.min(s.waste, NITRO_FEED);
+      s.waste -= took;
+      s.nutrients += took * NITRO_RECOVERY * 5;
+      rec.nitrifier = took;
+      wasteDone += took;
+    }
+
+    /* --- anaerobic digester: residue and waste -> carbon and minerals --- */
+    if (servedCount(s, 'digester', touching) > 0) {
+      const fromWaste = Math.min(s.waste, DIGEST_FEED * 0.5);
+      const fromResidue = Math.min(s.residue, DIGEST_FEED - fromWaste);
+      const took = fromWaste + fromResidue;
+      if (took > 0) {
+        s.waste -= fromWaste;
+        s.residue -= fromResidue;
+        const degraded = took * DIGEST_DEGRADE;
+        /* biogas back to the canopy as carbon dioxide — the loop closing */
+        s.co2 = clamp(s.co2 + degraded * 4.4, 0, co2Cap(s));
+        s.nutrients += degraded * 2.4;
+        rec.digester = took;
+        wasteDone += fromWaste;
+      }
+    }
+
+    /* --- reef microcosm: carbonate, morale, and something to film --- */
+    if (servedCount(s, 'reef', touching) > 0) {
+      s.carbonate += REEF_CARBONATE;
+      s.morale = clamp(s.morale + 0.5, 0, 100);
+      s.science += 0.05;
+      rec.reef = REEF_CARBONATE;
+      /* calcification is a local carbon dioxide source; the symbionts take some
+         of it back. Net, a reef is close to neutral and is not a carbon fix. */
+      s.co2 = clamp(s.co2 + 0.20, 0, co2Cap(s));
+      s.o2 = clamp(s.o2 + 0.15, 0, 400 + (s.up.composter ? 200 : 0));
+      queueSegment(s, 'standing', 'reef');
+      bankAccession(s, 'reef_marine');
+    }
+
+    s.stats.wasteProcessed = (s.stats.wasteProcessed || 0) + wasteDone;
+    s.stats.wasteToday = wasteDone;
+    return wasteDone;
+  }
+
+  /* ---------- what the station pays ----------
+
+     The farm used to be paid only for what it shipped out. Neither food nor
+     oxygen sales reward closing a loop, so a recycling compartment could only
+     ever be a cost. These two pay for the service instead of the product. */
+
+  function lifeSupportShare(s) {
+    const o2Need = s.crew * K.CREW_O2;
+    const co2Made = s.crew * K.CREW_CO2;
+    const o2 = o2Need > 0 ? clamp((s.stats.o2Today || 0) / o2Need, 0, 1) : 0;
+    const co2 = co2Made > 0 ? clamp((s.stats.co2Today || 0) / co2Made, 0, 1) : 0;
+    return (o2 + co2 + recoveryRate(s)) / 3;
+  }
+
+  function payStation(s, wasteDone) {
+    const share = lifeSupportShare(s);
+    s.stats.lsShare = share;
+    let paid = Math.round(s.crew * SERVICE_RATE * share);
+    if (s.offtake) paid += Math.round(wasteDone * WASTE_FEE);
+    s.credits += paid;
+    s.stats.serviceTotal = (s.stats.serviceTotal || 0) + paid;
+    s.stats.serviceToday = paid;
+    return paid;
   }
 
   /* ---------- the studio ----------
@@ -786,6 +949,10 @@
 
   function endOfDay(s, log) {
     if (s.auto) autoManage(s, log);
+    /* the crew shed waste whether or not anything is there to take it */
+    s.waste = Math.min(400, s.waste + s.crew * WASTE_PER_CREW);
+    const wasteDone = runCompartments(s, log);
+    payStation(s, wasteDone);
     runStudio(s);
     /* a finished vault pays a slow dividend in data on everything it holds */
     if (vaultBuilt(s)) s.science += accessions(s).length * 0.04;
@@ -853,6 +1020,11 @@
       water: Math.round(s.water), power: Math.round(s.stored),
       credits: Math.round(s.credits), crew: s.crew,
       morale: Math.round(s.morale), tiles: totalTiles(s),
+      residue: Math.round(s.residue), waste: Math.round(s.waste),
+      audience: Math.round(s.media.audience),
+      accessions: Object.keys(s.vault.accessions || {}).length,
+      lsShare: Math.round(lifeSupportShare(s) * 100) / 100,
+      service: s.stats.serviceToday || 0,
       sun: isSunlit(s) ? 1 : 0
     });
     if (s.history.length > 400) s.history.shift();
@@ -908,6 +1080,13 @@
     if (err) return err;
     const B = buildById(type);
     if (!s.sandbox) {
+      /* aragonite off the reef goes into the regolith mix, so construction is
+         cheaper while the stockpile lasts */
+      if (s.carbonate > 0) {
+        const spend = Math.min(s.carbonate, B.cost / 900);
+        s.carbonate -= spend;
+        s.credits += Math.round(spend * 900 * 0.18);
+      }
       s.credits -= B.cost;
       if (B.science) s.science -= B.science;
     }
@@ -1227,6 +1406,12 @@
         break;
       case 'samp_keep': L('Request declined. The colony eats first.'); break;
 
+      case 'offtake_take':
+        s.offtake = true;
+        L('Waste offtake contract signed. The station pays for every unit you actually process — now you need something that eats it.');
+        break;
+      case 'offtake_decline': L('The station will keep storing it. For now.'); break;
+
       case 'wild_bank':
         if (s.credits < 2400) L('No budget for the grow-out. The crate flies home.');
         else {
@@ -1314,6 +1499,7 @@
     newGame, migrate, STATE_VERSION,
     /* studio, biotechnology and the vault */
     studioLive, runStudio, queueSegment, novelty, developGmo, sowable, gmoById, SEGMENT_FEE,
+    runCompartments, lifeSupportShare, payStation, servedCount, WASTE_PER_CREW, SERVICE_RATE, WASTE_FEE,
     biotechOpen, conventionalSown, accessions, vaultBuilt, vaultTarget, bankAccession,
     lampNeed, deriveCrop, RESIDUE_PER_TILE, MEDIA_RATE, AUD_PER_SEGMENT, AUD_CAP,
     tick, place, bulldoze, plant, water, feed, treat, harvest, clear, autoManage,

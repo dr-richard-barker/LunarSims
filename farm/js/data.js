@@ -358,6 +358,15 @@ const BUILDINGS = [
     desc: 'Cuts resupply prices by 15% and gets you a better rate on produce.' },
   { id: 'studio', name: 'Broadcast Studio', cost: 4200, science: 0, once: true, key: 'V',
     desc: 'Earth will pay to watch this farm work. Films the harvest, the mess table and the flowers being arranged, and pays every day from the audience it builds. Repeat the same subject and the audience tires of it — the studio pays for variety, not volume.' },
+  { id: 'worms', name: 'Mealworm Tier', cost: 5800, science: 15, key: 'W',
+    desc: 'Yellow mealworm reared on spent straw and stover. Turns residue nobody can eat into animal protein and a fertiliser frass, in the dark, without a lamp. Reared through a 105-day closed life-support experiment at Lunar Palace 1, where 8.13% of the feed came back as larval mass and 78.43% left as frass. Build more than one if the residue can feed them.' },
+  { id: 'nitrifier', name: 'Nitrifying Bioreactor', cost: 4600, science: 18, once: true, key: 'K',
+    desc: 'The compartment the loop was missing: nitrifying bacteria oxidising crew waste ammonia to nitrate the crop can actually take up. Lunar Palace 1 recovered 20.5% of its nitrogen from urine this way. Draws 0.3 kW and pays for itself in nutrients you stop importing.' },
+  { id: 'digester', name: 'Anaerobic Digester', cost: 5400, science: 16, once: true, key: 'D',
+    desc: 'Thermophilic digestion of solid waste and crop residue into biogas and mineralised nutrients — 41% of the solid waste degraded, in the Lunar Palace 1 run. The carbon comes back to the hall as carbon dioxide instead of leaving inside the food, which is the one thing that stops an exporting farm starving its own canopy.' },
+  { id: 'reef', name: 'Reef Microcosm', cost: 9800, science: 30, once: true, key: 'F',
+    speculative: true,
+    desc: 'A closed marine microcosm: calcifying corals, their algal symbionts and the invertebrates that live in them. SPECULATIVE — no reef has been flown, and calcification is a local carbon dioxide source, not a sink. It earns its floor on the carbonate it lays down for construction, on holding marine lines the vault could not otherwise take, and on being the most watchable thing on the station.' },
   { id: 'vault', name: 'Lunar Seed Vault', cost: 18000, science: 40, once: true, key: 'N',
     desc: 'Sunk into the lava tube through the skylight, where the rock holds one temperature and metres of basalt stop what the surface cannot. Banks a living accession of every line you have grown. Needs the oxidation loop and regolith overburden before anyone will sign it off.' }
 ];
@@ -559,6 +568,17 @@ const EVENTS = [
     ]
   },
   {
+    id: 'offtake', weight: 8, minDay: 16,
+    title: 'The Station Wants Rid of Its Waste',
+    text: 'Life support is storing more greywater sludge and solid waste than it has room for, and venting it means venting the nitrogen with it. The station would rather pay somebody to take the problem away.',
+    choices: [
+      { label: 'Take the contract', effect: 'offtake_take',
+        hint: 'The station pays daily for every unit of waste you actually process. You need something that eats it.' },
+      { label: 'The farm has enough to do', effect: 'offtake_decline',
+        hint: 'No fee, and no waste stream to build on.' }
+    ]
+  },
+  {
     id: 'wildrel', weight: 7, minDay: 34,
     title: 'Crop Wild Relatives',
     text: 'A crate of wild relatives has come up on the lander — the scruffy, unproductive ancestors of half the roster, carrying the drought and disease alleles that were bred out of the crops on the way to being useful. Nobody wants to eat them. Somebody will want them later.',
@@ -655,6 +675,16 @@ const MILESTONES = [
     done: s => Object.keys((s.vault && s.vault.accessions) || {}).length >= 25 },
   { id: 'vaultbuilt', text: 'Commission the seed vault in the tube',
     done: s => s.map.some(t => t.b && t.b.type === 'vault') },
+  { id: 'recycler', text: 'Put a recycling compartment to work',
+    done: s => ['worms', 'nitrifier', 'digester', 'reef']
+      .some(t => s.map.some(x => x.b && x.b.type === t)) },
+  { id: 'fullloop', text: 'Run every recycling compartment at once',
+    done: s => ['worms', 'nitrifier', 'digester', 'reef']
+      .every(t => s.map.some(x => x.b && x.b.type === t)) },
+  { id: 'serviced', text: 'Supply half the colony’s life support from the farm',
+    done: s => (s.stats.lsShare || 0) >= 0.5 },
+  { id: 'nowaste', text: 'Process a thousand units of station waste',
+    done: s => (s.stats.wasteProcessed || 0) >= 1000 },
   { id: 'ark', text: 'Bank every line the farm can grow',
     done: s => Object.keys((s.vault && s.vault.accessions) || {}).length >= CROPS.length + GMO.length }
 ];

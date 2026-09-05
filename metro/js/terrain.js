@@ -196,12 +196,20 @@
 
   /* A sinuous collapsed lava channel. Real rilles wander, so the centreline
      is walked with a slowly-turning heading rather than drawn straight. */
+  /* Returns the centreline it walked, as tile coordinates. The rille is the
+     COLLAPSED length of a lava tube; the intact tube continues underneath the
+     same course, which is why the two share a path rather than being
+     generated independently. Nothing about the carving changed when this
+     started returning a value — the surface a rille produces is exactly what
+     it always was. */
   function stampRille(s, seed, x0, y0, len) {
     let x = x0, y = y0, a = rnd(seed) * Math.PI * 2;
+    const spine = [];
     for (let i = 0; i < len; i++) {
       a += (rnd(seed + i * 3.7) - 0.5) * 0.5;
       x += Math.cos(a); y += Math.sin(a);
       const w = 1 + Math.round(rnd(seed + i * 9.1) * 1.6);
+      spine.push([Math.round(x), Math.round(y), w]);
       for (let dy = -w; dy <= w; dy++) {
         for (let dx = -w; dx <= w; dx++) {
           const t = tileAt(s, Math.round(x + dx), Math.round(y + dy));
@@ -211,6 +219,52 @@
           t.t = 'rough';
         }
       }
+    }
+    return spine;
+  }
+
+  /* ---------- lava tubes ----------
+
+     The third way to house people, and the only one the player cannot make
+     more of. Surface ground can be levelled and a shaft can be bored, but a
+     tube is where the geology put it, as long as the geology made it, and no
+     amount of money extends it by a metre.
+
+     A tube is recorded as METADATA over ground that already exists: the rille
+     carved the surface exactly as it always did, and this only writes down
+     where the intact continuation of it runs. Generation output — every
+     height, every terrain type, the single skylight — is unchanged by any of
+     this, which is what lets it be added without altering a colony anyone has
+     already founded. See the CLASS_PARAMS note below for why that invariant
+     is taken seriously here.
+
+     `span` is the tube's width in tiles at that point, carried from the
+     rille's own width, and it is what makes one tube worth more per metre
+     than another. */
+  function recordTube(s, spine, seed) {
+    if (!spine || spine.length < 8) return;
+    /* Trimmed at both ends: the mouth of a rille is where the roof has fallen
+       in completely, and a collapsed end is not habitable volume. */
+    const path = [], mid = spine.slice(4, spine.length - 4);
+    let span = 0;
+    for (const [x, y, w] of mid) {
+      if (!inBounds(x, y)) continue;
+      const last = path[path.length - 1];
+      if (last && last[0] === x && last[1] === y) continue;   // the walk repeats tiles
+      path.push([x, y]);
+      span += w;
+    }
+    if (path.length < 6) return;
+    const tube = {
+      id: 0,
+      path,
+      span: +(span / path.length).toFixed(2),
+      roofDepth: 3 + Math.round(rnd(seed + 61.3) * 4)
+    };
+    s.tubes = [tube];
+    for (let i = 0; i < path.length; i++) {
+      const t = tileAt(s, path[i][0], path[i][1]);
+      if (t) t.tube = { id: 0, i };
     }
   }
 
@@ -300,7 +354,7 @@
     /* the rille, and the massif that gives a polar map a guaranteed peak of
        eternal light — see the CLASS_PARAMS comment for why only polar gets
        one */
-    if (P.rille) stampRille(s, seed + 77, K.COLS * 0.2, K.ROWS * 0.7, 90);
+    const spine = P.rille ? stampRille(s, seed + 77, K.COLS * 0.2, K.ROWS * 0.7, 90) : null;
     if (P.massif) {
       const px = Math.floor(K.COLS * 0.68), py = Math.floor(K.ROWS * 0.28);
       for (let y = py - 7; y <= py + 7; y++) {
@@ -324,6 +378,11 @@
     const sky = P.rille ? Math.floor(K.ROWS * 0.74) : Math.floor(K.ROWS * 0.36);
     const sk = tileAt(s, skx, sky);
     if (sk) { sk.t = 'skylight'; for (const [dx, dy] of DIRS) { const n = tileAt(s, sk.x + dx, sk.y + dy); if (n) n.t = 'rough'; } }
+
+    /* The intact tube under the rille, if this class of site has one. Written
+       down after the skylight so the skylight can be tied to it. */
+    s.tubes = [];
+    if (spine) recordTube(s, spine, seed);
 
     /* boulders, avoiding anything already special */
     for (let i = 0; i < P.boulders; i++) {
@@ -356,6 +415,30 @@
     }
   }
 
+  /* The tube under a tile, or null. Tubes are recorded on the tiles above
+     them at generation, so this is a field read rather than a search. */
+  const tubeAt = (s, x, y) => {
+    const t = tileAt(s, x, y);
+    return (t && t.tube && s.tubes) ? s.tubes[t.tube.id] || null : null;
+  };
+  const tubeOf = (s, t) => (t && t.tube && s.tubes) ? s.tubes[t.tube.id] || null : null;
+
+  /* Where a tube arcology can be driven in from: the point on the tube's own
+     course nearest the given tile. A skylight is a hole in the roof, so the
+     ground beside one is the natural portal. */
+  function nearestTubeEntry(s, x, y, maxD) {
+    if (!s.tubes || !s.tubes.length) return null;
+    let best = null;
+    for (const tube of s.tubes) {
+      for (let i = 0; i < tube.path.length; i++) {
+        const d = Math.hypot(tube.path[i][0] - x, tube.path[i][1] - y);
+        if (maxD !== undefined && d > maxD) continue;
+        if (!best || d < best.d) best = { tube, i, d, x: tube.path[i][0], y: tube.path[i][1] };
+      }
+    }
+    return best;
+  }
+
   const terrainById = id => TERRAIN.find(t => t.id === id);
   const depositById = id => DEPOSITS.find(d => d.id === id);
   const buildable = t => !!t && !!terrainById(t.t) && terrainById(t.t).build;
@@ -364,6 +447,7 @@
     makeMap, raise, lower, levelTo, clearBoulders,
     computeSun, computeSunNear, relax, stepRuleHolds,
     idx, inBounds, tileAt, terrainById, depositById, buildable, clamp,
+    tubeAt, tubeOf, nearestTubeEntry,
     /* exposed for the harness (checking each class actually differs, and
        that omitting opts matches passing polar's own values explicitly)
        and for colony-sites.js, which needs the same slope-per-latitude concept

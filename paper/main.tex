@@ -1,0 +1,69 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[margin=2.6cm]{geometry}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{amsmath}
+\usepackage{microtype}
+\usepackage[hidelinks]{hyperref}
+\usepackage[numbers,sort&compress]{natbib}
+\usepackage{caption}
+\captionsetup{font=small,labelfont=bf}
+\usepackage{parskip}
+
+\title{\textbf{Lunar Metropolis}: an agent-driven simulation of lunar city
+growth, and what it says about the balance between surface settlement and
+subsurface arcologies}
+
+\author{Richard Barker\thanks{%
+  \textbf{TODO before deposit:} affiliation. \\
+  \textbf{TODO before deposit:} ORCID. \\
+  Correspondence via the repository:
+  \url{https://github.com/dr-richard-barker/LunarSims}}}
+
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\noindent
+We describe \emph{Lunar Metropolis}, an executable model of lunar settlement
+growth built as a playable simulation, and report what the model says about
+where people can be housed on the Moon. The model couples an elevation field
+to a solar-exposure raycast, and from that single coupling derives both the
+distribution of water ice and the economic value of ground. Three habitat
+strategies are represented: surface construction, arcologies bored downward
+into permanently shadowed ice deposits, and arcologies extending along
+pre-existing lava tubes. We calibrate the model's resource parameters against
+its own generated worlds, verify its behaviour with a suite of 130 scenarios
+performing 12{,}322 simulated days across 265 generated worlds per pass, and
+compare the three strategies on a common footing. The central result is that
+subsurface habitation in this model does not save money --- it costs between
+17 and 76 times more per resident than surface construction --- but buys
+surface area, at up to 2{,}295 residents per occupied surface tile against 62
+for the best surface alternative. A second result is that the three strategies
+are not equally available: at realistic latitudes, subsurface habitation is
+effectively a polar privilege, with equatorial mare sites offering a median of
+2 ice tiles and no lava tubes at all. We describe the model, its calibration,
+its verification methodology, and four classes of failure that were detectable
+only by running it. Everything reported is regenerable from the accompanying
+software.
+\end{abstract}
+
+\input{sections/01-introduction}
+\input{sections/02-model}
+\input{sections/03-habitats}
+\input{sections/04-calibration}
+\input{sections/05-verification}
+\input{sections/06-results}
+\input{sections/07-failures}
+\input{sections/08-limitations}
+\input{sections/09-fair}
+
+\bibliographystyle{plainnat}
+\bibliography{refs}
+
+\end{document}

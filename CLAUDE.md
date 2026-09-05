@@ -34,9 +34,18 @@ anywhere in this repo.
 ## Verifying metro
 
 `metro/harness.html` is a self-contained scenario harness — open it and it runs
-on load. It should report **all 557 checks passed across 124 scenarios**, with
+on load. It should report **all 594 checks passed across 130 scenarios**, with
 no scenario marked ERROR or FAIL. Run it after any change to the `metro/js/`
 modules.
+
+There is also a headless runner, which is what to use when the preview pane is
+unavailable or the browser wedges on the harness page (it does, occasionally —
+the suite performs over twelve thousand simulated days):
+
+    node paper/experiments/run-harness.mjs
+
+It runs the identical scenarios, prints per-scenario timings, and exits
+non-zero on failure.
 
 Note that the Claude Code preview server cannot read `~/Documents` (no TCC
 access), so serving this repo for the preview pane requires staging a copy

@@ -574,6 +574,32 @@ metro/
   js/ui.js                            tools, camera, panels, colonies, main loop, saving
 ```
 
+## The model as a research instrument
+
+Lunar Farm is a closed-loop model with coupled carbon, oxygen, water and nitrogen budgets, a power
+budget with load shedding, and a fully specified economy — which makes it usable as a
+bioregenerative life support (BLSS) model with a human in the loop.
+
+**[LunarFarm-BLSS](https://github.com/dr-richard-barker/LunarFarm-BLSS)** is the study repository.
+It drives *this* `farm/js/sim.js` headlessly with a seeded generator, so the analysis measures the
+code that ships and cannot drift from it. Four findings so far:
+
+- **Only an anaerobic digester lifts the carbon floor** — from a mean minimum of 5.1 kg to 79.4 kg
+  across eight seeded runs per arm. Mealworm tiers, nitrifying bioreactors and fungal crops raise
+  the *mean* buffer while leaving the *minimum* untouched, so they still spend part of every lunar
+  cycle in carbon limitation.
+- **The broadcast studio's diversity incentive works and is separable.** Revenue scales with
+  rotation breadth (r = 0.989, p = 7.4 × 10⁻⁸, 2.94× from one crop to ten) while the life-support
+  contract stays flat against it.
+- **The two waste compartments compete.** A nitrifying bioreactor *costs* the system 60.6 kg of
+  mean carbon buffer when a digester is present, while earning more than twice as much — so
+  optimising income alone degrades the loop.
+- **There is an optimum dark-grown fraction near 20%.** Above 60%, every run fails on oxygen, not
+  food: heterotrophs are a supplement, never a substitute.
+
+The repository also documents a comparison we got wrong first, and why controlling for starvation
+timing and raw-regolith growth reversed it.
+
 ## On the crop list
 
 Twenty-nine conventional lines and sixteen engineered ones. The conventional crops

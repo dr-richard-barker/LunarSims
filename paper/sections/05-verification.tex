@@ -1,0 +1,52 @@
+\section{Verification methodology}
+\label{sec:verification}
+
+\subsection{What one verification pass costs}
+
+The model is verified by a suite of scenarios, each of which constructs a
+world, drives the simulation, and asserts on the outcome. At the revision
+described here the suite comprises \textbf{130 scenarios} making \textbf{594
+assertions}. Executing it performs \textbf{12{,}322 simulated days} --- about
+34 simulated years --- and generates \textbf{265 independent worlds}, each a
+$128\times128$ field with a full solar raycast.
+
+These figures are counted, not estimated: \texttt{e1-model-scale.mjs} wraps the
+simulation's tick and world-generation entry points and runs the real suite.
+We report them because they are the honest unit of reproducibility for a model
+of this kind. A statement that the model "passes its tests" means little; a
+statement that it survives twelve thousand simulated days across two hundred
+and sixty-five independently generated worlds is a claim a reader can weigh.
+
+\subsection{Scenarios as executable claims}
+
+Each scenario carries a machine-readable statement of \emph{why} it exists
+alongside its assertions. This is not documentation but a design constraint: a
+scenario whose rationale cannot be written down is usually asserting an
+implementation detail rather than a property of the model, and several were
+deleted on those grounds during development.
+
+\subsection{On counting simulation runs}
+
+A reader may reasonably ask how many times the simulation was run in the course
+of building the model. We can answer that in three parts, and only two of them
+honestly.
+
+\begin{enumerate}
+\item \textbf{The cost of one pass} is exact and reproducible, and is given
+  above.
+\item \textbf{Runs from the point of instrumentation onward} are recorded.
+  Every experiment appends to \texttt{results/ledger.json} a record of what it
+  executed --- simulated days, worlds generated, and the source revision --- so
+  the cost of reproducing any figure in this paper is itself a committed
+  artefact.
+\item \textbf{Runs before instrumentation are not recoverable.} The model was
+  developed over roughly six weeks and 31 commits touching its directory,
+  during which the suite was executed many times, but no count was kept and we
+  decline to estimate one. Reconstructing it from commit timestamps would
+  produce a number with the shape of evidence and none of the substance.
+\end{enumerate}
+
+We state this plainly because provenance is exactly the kind of claim that
+invites a plausible fabrication, and because the fix --- instrument first --- is
+cheap and was applied here only in retrospect. The ledger closes the gap
+prospectively, not retrospectively.

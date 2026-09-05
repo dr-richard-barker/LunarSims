@@ -1309,6 +1309,191 @@ td.mark{width:34px;text-align:center}
         ];
       } },
 
+    { name: 'A lava tube is recorded without changing the ground above it',
+      why: 'the tube had to be added to worlds that already exist, so generation output must be byte-identical — every height, every terrain type, the single skylight. A tube that moved the ground would silently alter every colony already founded',
+      run() {
+        const w = T.makeMap(2026);
+        const skylights = w.map.filter(t => t.t === 'skylight').length;
+        const tube = w.tubes && w.tubes[0];
+        const onCourse = tube ? tube.path.every(([x, y]) => {
+          const t = T.tileAt(w, x, y);
+          return t && t.tube && t.tube.id === 0;
+        }) : false;
+        /* the classes without a rille have no tube, and that is the point */
+        const highland = T.makeMap(99, { class: 'highland' });
+        return [
+          ['a polar world records a tube', !!tube, true],
+          ['long enough to be worth moving into', tube && tube.path.length, '>=20'],
+          ['with a width carried from the rille that made it', tube && tube.span, '>0'],
+          ['every tile of the course knows it is over the tube', onCourse, true],
+          ['the skylight count is untouched', skylights, 1],
+          ['the step rule still holds', T.stepRuleHolds(w), true],
+          ['a highland site has no tube at all, because it has no rille',
+            (T.makeMap(99, { class: 'highland' }).tubes || []).length, 0],
+          ['and still generates a perfectly good world', highland.map.length, K.COLS * K.ROWS]
+        ];
+      } },
+
+    { name: 'A tube arcology grows along the tube and stops where the tube does',
+      why: 'this is the third habitat strategy and the only one whose ceiling the player cannot raise — a bore sinks to a depth its own data fixes, but a tube arcology runs out of tube',
+      run() {
+        const s = grantEra(city(555));
+        s.credits = 1e7;
+        const tube = s.tubes[0];
+        const [tx, ty] = tube.path[Math.floor(tube.path.length / 2)];
+        const t = T.tileAt(s, tx, ty);
+        if (t.t !== 'flat') t.t = 'flat';
+
+        const offTube = S.canPlace(s, T.tileAt(s, 64, 64), 'tubeway');
+        const ok = S.place(s, t, 'tubeway');
+        const opened = window.LM_DEEP.outputOf(s, t);
+        const cap = window.LM_DEEP.capOf(s, t);
+
+        t.b.levels = cap;
+        const full = window.LM_DEEP.outputOf(s, t);
+        const tiles = window.LM_DEEP.reachTiles(s, t);
+
+        /* a portal at the very end of the tube seals in one direction only —
+           it reaches just as far in total, but along a different stretch */
+        const endS = grantEra(city(555)); endS.credits = 1e7;
+        const [ex, ey] = endS.tubes[0].path[0];
+        const et = T.tileAt(endS, ex, ey);
+        if (et.t !== 'flat') et.t = 'flat';
+        S.place(endS, et, 'tubeway');
+        endS.map[T.idx(ex, ey)].b.levels = window.LM_DEEP.capOf(endS, et);
+        const endTiles = window.LM_DEEP.reachTiles(endS, et);
+        const endIdx = endTiles.map(([x, y]) => T.tileAt(endS, x, y).tube.i);
+        return [
+          ['it is refused on ground with no tube under it', offTube !== null, true],
+          ['the refusal names the requirement', /tube/i.test(offTube || ''), true],
+          ['it is allowed on the course', ok, null],
+          ['it opens as a single sealed tile', opened.levels, 1],
+          ['capacity grows with the length sealed', full.housing > opened.housing, true],
+          ['the sealed run never exceeds the cap', tiles.length <= cap, true],
+          ['every sealed tile is genuinely on the tube',
+            tiles.every(([x, y]) => T.tileAt(s, x, y).tube), true],
+          ['it makes no air of its own, unlike a cistern', full.air, 0],
+          ['a portal at the end reaches just as far in total', endTiles.length, tiles.length],
+          ['but seals a different stretch, running one way only',
+            Math.min(...endIdx), 0],
+          ['while one in the middle seals tube on both sides of itself',
+            Math.min(...tiles.map(([x, y]) => T.tileAt(s, x, y).tube.i)) < t.tube.i, true]
+        ];
+      } },
+
+    { name: 'The tube caps capacity where the map is meaner than the machine',
+      why: 'if the structure always bound first the map would stop mattering and the whole point of the group — that geology fixes this ceiling and nothing else can raise it — would be lost',
+      run() {
+        const B = S.buildById('tubeway');
+        const out = [];
+        for (const seed of [555, 7, 101]) {
+          const s = grantEra(city(seed)); s.credits = 1e7;
+          const tube = s.tubes[0];
+          if (!tube) continue;
+          const [x, y] = tube.path[Math.floor(tube.path.length / 2)];
+          const t = T.tileAt(s, x, y);
+          if (t.t !== 'flat') t.t = 'flat';
+          if (S.place(s, t, 'tubeway')) continue;
+          out.push({ len: tube.path.length, cap: window.LM_DEEP.capOf(s, t) });
+        }
+        const anyGeology = out.some(o => o.cap < B.maxReach);
+        const anyStructure = out.some(o => o.cap === B.maxReach);
+        return [
+          ['several seeds were sampled', out.length, '>=3'],
+          ['no cap ever exceeds the reach the structure itself allows',
+            out.every(o => o.cap <= B.maxReach), true],
+          ['nor the tube it was sunk into', out.every(o => o.cap <= o.len), true],
+          ['on a mean tube the GEOLOGY is what binds', anyGeology, true],
+          ['on a generous one the structure is', anyStructure, true]
+        ];
+      } },
+
+    { name: 'The director walks a corridor out to ice it cannot otherwise reach',
+      why: 'refusing to strand a bore is only half an answer — a shadowed crater floor is worth nothing to zone, so the lattice never grows onto one on its own and the director would simply never build one. Reaching for it deliberately is the other half',
+      run() {
+        const s = grantEra(city(4711));
+        s.credits = 1e7;
+        /* No tube on this map: chooseBore prefers a tube arcology over a bore
+           wherever one exists, and this scenario is about reaching ICE. */
+        s.tubes = [];
+        /* generation and a conduit stub in the middle of the working area */
+        for (let x = 58; x <= 62; x++) {
+          const g = T.tileAt(s, x, 60); g.sun = 1; S.place(s, g, 'solar');
+          S.place(s, T.tileAt(s, x, 61), 'conduit');
+          S.place(s, T.tileAt(s, x, 61), 'main');
+        }
+        S.place(s, T.tileAt(s, 57, 61), 'o2');
+        /* and the only ice a long way off, with nothing running to it */
+        iceField(s, 74, 76, 5);
+        const a = AI.ensureSeed(s);
+        a.ox = 60; a.oy = 60;
+
+        const pick = AI.chooseBore(s);
+        const before = window.LM_DEEP.serviced(s, T.tileAt(s, pick.x, pick.y), G.services(s));
+        /* a few hundred tiles of corridor, four a day as the ladder runs it.
+           The route length is read as soon as it commits rather than at the
+           end: a corridor that finishes without a bore is deliberately let go
+           of, so by the last call there may be no spur left to inspect. */
+        let routeLen = 0;
+        for (let i = 0; i < 90; i++) {
+          AI.reachForIce(s, a, 4);
+          if (s.ai.spur && !routeLen) routeLen = s.ai.spur.route.length;
+        }
+        const t = T.tileAt(s, pick.x, pick.y);
+        const after = window.LM_DEEP.serviced(s, t, G.services(s));
+        for (let i = 0; i < 8 && AI.ensureWonders(s, a); i++);
+        const bore = s.map.find(q => q.b && window.LM_DEEP.isDeep(q.b.type));
+        return [
+          ['it picks a bore worth reaching for', !!pick && pick.yield > 0, true],
+          ['which is nowhere near the grid to begin with', before, false],
+          ['it commits to a route', routeLen, '>=8'],
+          ['and the corridor eventually reaches it', after, true],
+          ['so a bore actually gets built', !!bore, true],
+          ['on the site it chose', bore && bore.x === pick.x && bore.y === pick.y, true]
+        ];
+      } },
+
+    { name: 'A corridor that pays off nothing is let go of rather than held forever',
+      why: 'the spur is a single slot on the lattice, so a corridor that finishes without producing a bore used to freeze the whole mechanism — the director could never choose another target for the rest of the run, and one unlucky site cost it every arcology after it',
+      run() {
+        const s = grantEra(city(5150));
+        s.credits = 1e7;
+        /* No tube on this map: chooseBore prefers a tube arcology over a bore
+           wherever one exists, and this scenario is about reaching ICE. */
+        s.tubes = [];
+        for (let x = 58; x <= 62; x++) {
+          const g = T.tileAt(s, x, 60); g.sun = 1; S.place(s, g, 'solar');
+          S.place(s, T.tileAt(s, x, 61), 'conduit');
+          S.place(s, T.tileAt(s, x, 61), 'main');
+        }
+        S.place(s, T.tileAt(s, 57, 61), 'o2');
+        iceField(s, 72, 74, 5);
+        const a = AI.ensureSeed(s); a.ox = 60; a.oy = 60;
+
+        /* run only until the corridor is complete, so the completion itself
+           can be observed before the release logic gets to it */
+        let laidOut = false;
+        for (let i = 0; i < 90 && !laidOut; i++) {
+          AI.reachForIce(s, a, 4);
+          laidOut = !!(s.ai.spur && s.ai.spur.i >= s.ai.spur.route.length);
+        }
+        /* ensureWonders is never called here, so the corridor buys nothing —
+           the exact case that used to freeze the mechanism for good */
+        let released = false;
+        for (let i = 0; i < 40 && !released; i++) {
+          AI.reachForIce(s, a, 4);
+          released = s.ai.spur === null;
+        }
+        /* and once time has passed it commits to something rather than sulking */
+        s.day += 200;
+        AI.reachForIce(s, a, 4);
+        return [
+          ['the corridor does get fully laid', laidOut, true],
+          ['a corridor that buys nothing is eventually released', released, true],
+          ['and the director commits to another once time has passed', !!s.ai.spur, true]
+        ];
+      } },
+
     { name: 'The director never strands a bore out in the dark',
       why: 'a deep arcology is the only wonder that does nothing until the networks reach it, and the ground it qualifies on is exactly where the lattice is not — left to the ordinary rule the director bought two, stranded both, and left them at one level for the rest of the run',
       run() {
@@ -1316,6 +1501,9 @@ td.mark{width:34px;text-align:center}
            no conduit, no main anywhere near it. */
         const s = grantEra(city(9001));
         s.credits = 1e7;
+        /* No tube on this map: chooseBore prefers a tube arcology over a bore
+           wherever one exists, and this scenario is about reaching ICE. */
+        s.tubes = [];
         iceField(s, 20, 20, 6);
         AI.ensureWonders(s, AI.ensureSeed(s));
         const stranded = s.map.filter(t => t.b && window.LM_DEEP.isDeep(t.b.type));

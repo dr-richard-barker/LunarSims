@@ -1,0 +1,64 @@
+\section{Limitations}
+\label{sec:limitations}
+
+This is a model of a settlement's \emph{structure}, not a prediction of any
+real one. The following limitations are material to how its results should be
+read.
+
+\paragraph{Parameters are chosen for legibility, not measured.}
+Costs, capacities, growth rates and power draws were selected so that the
+trade-offs between strategies are visible over a few hundred simulated days.
+They are not derived from engineering estimates, and the absolute numbers in
+Table~\ref{tab:econ} carry no physical meaning. What is meaningful is the
+\emph{ordering} and the approximate ratios between strategies, since those
+follow from the model's structure rather than from any single constant.
+
+\paragraph{The physical grounding is qualitative.}
+The model reproduces the qualitative structure of polar cold traps --- ice
+where illumination never reaches, richer where it reaches least --- consistent
+with observations of the lunar south polar region
+\citep{paige2010diviner,colaprete2010water}. It does not attempt the actual
+distribution, and its ice is far more abundant and more regular than any
+measurement supports. Likewise, the case for subsurface habitation rests on
+regolith shielding \citep{jia2010radiation,naito2020radiation} and on the
+existence and stability of intact tubes
+\citep{kaku2017intact,blair2017stability}, but the model represents neither
+radiation dose nor structural stability at all. A tube
+in this model cannot collapse, and its roof depth is recorded but unused. Any
+statement here about the desirability of going underground is a statement about
+\emph{land economics under the model's assumptions}, not about safety.
+
+\paragraph{Illumination is static in time, but not in terrain.}
+Solar exposure is an eight-direction average computed at generation and never
+recomputed as the Sun moves; only the shading direction is animated. This is
+defensible at polar latitudes, where the point is precisely that exposure
+barely changes over a cycle, and progressively less defensible toward the
+equator --- which is where the model's finding that mare sites cannot support
+subsurface habitation is least trustworthy.
+
+Exposure \emph{is} recomputed locally whenever the terrain changes, whether by
+the player sculpting or by a meteor strike. Deposits, however, are seeded once
+at generation and never re-seeded. The asymmetry is deliberate but has a
+consequence worth stating: a player can manufacture shadow and cannot
+manufacture ice, so excavating a crater produces ground that looks like an ice
+site by every visible criterion and holds none. Whether that is the right
+model of a cold trap is arguable --- ice accumulates in shadow over geological
+time, not over a season --- but it is an assumption, not a derivation.
+
+\paragraph{One tube per world.}
+The model generates at most one lava tube, on one class of site, along the path
+of a single rille. Real tube systems are networks. The strong result in
+Section~\ref{sec:results} that tubes are polar-only is therefore a property of
+this generator, not an inference about the Moon; what the model supports is the
+narrower claim that a habitat strategy whose ceiling is set by geology behaves
+differently from one whose ceiling is set by budget.
+
+\paragraph{Provenance before instrumentation is lost.}
+As set out in Section~\ref{sec:verification}, the number of simulation runs
+performed during development was not recorded until late, and we decline to
+reconstruct it.
+
+\paragraph{The agent is one agent.}
+The director results in Section~\ref{sec:failures} describe the behaviour of a
+single heuristic policy. They are evidence about what that policy does, and
+only suggestive about settlement dynamics in general.

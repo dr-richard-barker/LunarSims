@@ -35,6 +35,12 @@
          serialises with everything else and a save is self-contained. */
       sunSlope: w.sunSlope,
       map: w.map,
+      /* Carried across from generation like sunSlope is, and for the same
+         reason: it is a property of the world that has to serialise with the
+         city rather than be re-derived. An older save without it reads as a
+         site that simply has no tube, which is also what two of the three
+         site classes genuinely are. */
+      tubes: w.tubes || [],
       day: 1,
       credits: K.START_CREDITS,
       pop: 0, peakPop: 0, housingCap: 0, jobs: 0,
@@ -210,6 +216,16 @@
           `${B.name.toLowerCase()} needs at least ${Math.round(B.needsIceRichness * 100)}%.`;
       }
     }
+    /* A tube arcology is sited on the tube, not beside a skylight. The
+       skylight is where the roof happened to fall in; the tube is what you
+       are actually moving into, and you can sink an access shaft to it
+       anywhere along its course. Siting on the course also means the CHOICE
+       is which stretch of tube to take, which is the only choice this
+       structure offers — it cannot be lengthened. */
+    if (B.needsTube && !(t.tube && s.tubes && s.tubes[t.tube.id])) {
+      return 'A tube arcology has to be sunk onto a lava tube — only the ' +
+        'rilles have one running under them, and not every landing site has a rille.';
+    }
     if (B.needsLevel && !isLevel(s, t, B.needsLevel)) {
       return 'That needs level ground — flatten the site first.';
     }
@@ -249,10 +265,12 @@
     const B = buildById(type);
     s.credits -= cost(s, B.cost);
     if (B.subsurface) t.pipe = true;
-    else if (B.maxLevels) {
+    else if (B.maxLevels || B.maxReach) {
       /* A deep arcology opens as a collar and one gallery and sinks from
-         there — see deep.js. Everything else is finished the day it is paid
-         for, which is why only this branch carries state. */
+         there; a tube arcology opens as a portal and one sealed tile and
+         creeps along — see deep.js, which drives both from one frontier.
+         Everything else in the game is finished the day it is paid for,
+         which is why only this branch carries state. */
       t.b = { type, built: s.day, levels: 1, dig: 0, stalled: false };
     } else t.b = { type };
     return null;

@@ -31,16 +31,58 @@
 
 (function () {
   const { K, BUILDINGS } = window.LM_DATA;
-  const G = window.LM_GRID;
+  const G = window.LM_GRID, T = window.LM_TERRAIN;
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
   const buildById = id => BUILDINGS.find(b => b.id === id);
 
   /* Read from the data rather than named one by one, exactly as render.js
-     derives its wonder set — adding a fifth arcology stays a data change. */
+     derives its wonder set — adding a fifth arcology stays a data change.
+
+     Two groups share this module because they share a LIFECYCLE, not a shape.
+     Both open as a single unit and grow one unit at a time while the three
+     networks reach them and the colony can carry them; what differs is the
+     direction of growth and what stops it. A bore grows down and stops at a
+     depth its own data fixes. A tube arcology grows along a course it did not
+     choose and stops when the tube does — a ceiling the MAP owns, not the
+     designer. Everything below is written in terms of a "frontier" so that
+     one implementation serves both. */
   const DEEP_IDS = new Set(BUILDINGS.filter(b => b.group === 'deep').map(b => b.id));
+  const TUBE_IDS = new Set(BUILDINGS.filter(b => b.group === 'tube').map(b => b.id));
   const isDeep = id => DEEP_IDS.has(id);
-  const specOf = t => (t && t.b && isDeep(t.b.type)) ? buildById(t.b.type) : null;
+  const isTube = id => TUBE_IDS.has(id);
+  const isSub = id => isDeep(id) || isTube(id);
+  const specOf = t => (t && t.b && isSub(t.b.type)) ? buildById(t.b.type) : null;
+
+  /* How far this structure can grow, and how fast.
+
+     For a bore both come straight from its data. For a tube arcology the cap
+     is whichever runs out first, the structure's own reach or the tube itself
+     — and on most maps it is the tube, which is exactly the constraint this
+     group exists to express. */
+  function capOf(s, t) {
+    const B = specOf(t);
+    if (!B) return 0;
+    if (isTube(t.b.type)) {
+      const tube = T.tubeOf(s, t);
+      if (!tube) return 1;
+      return Math.max(1, Math.min(B.maxReach, tube.path.length));
+    }
+    return B.maxLevels;
+  }
+  const stepDays = t => {
+    const B = specOf(t);
+    return B ? (B.digDays || B.reachDays || 20) : 20;
+  };
+
+  /* A tube's width where the structure sits, as a multiplier on everything it
+     delivers. A fat tube is worth more per tile of reach than a thin one, so
+     two tubes of equal length are not equal prizes. */
+  function spanOf(s, t) {
+    if (!t || !t.b || !isTube(t.b.type)) return 1;
+    const tube = T.tubeOf(s, t);
+    return tube ? tube.span : 1;
+  }
 
   /* How far a shaft reaches for ice, and how much of it counts as a good site.
 
@@ -65,6 +107,14 @@
   function allDeep(s) {
     const out = [];
     for (const t of s.map) if (t.b && isDeep(t.b.type)) out.push(t);
+    return out;
+  }
+
+  /* Both groups, for the tally and the tick. allDeep stays bore-only because
+     iceYield's sharing rule is about ice, and a tube arcology draws on none. */
+  function allSub(s) {
+    const out = [];
+    for (const t of s.map) if (t.b && isSub(t.b.type)) out.push(t);
     return out;
   }
 
@@ -106,10 +156,10 @@
 
   /* Levels opened so far. Defensive about a building that predates the field
      for the same reason launchColonyShips is about `built` — one is enough. */
-  const levelsOf = t => {
+  const levelsOf = (t, cap) => {
     const B = specOf(t);
     if (!B) return 0;
-    return clamp(t.b.levels || 1, 1, B.maxLevels);
+    return clamp(t.b.levels || 1, 1, cap === undefined ? (B.maxLevels || 1) : cap);
   };
 
   /* What one arcology currently contributes.
@@ -121,10 +171,31 @@
   function outputOf(s, t, others) {
     const B = specOf(t);
     if (!B) return null;
-    const lv = levelsOf(t);
+    const cap = capOf(s, t);
+    const lv = levelsOf(t, cap);
+
+    /* A tube arcology delivers per tile of reach, multiplied by how wide the
+       tube is there, and it makes no air and no export — it has no ice to
+       make them from. That asymmetry is the whole trade: the cheapest volume
+       in the game is also the only one that gives the atmosphere budget
+       nothing back. */
+    if (isTube(t.b.type)) {
+      const span = spanOf(s, t);
+      /* Rounded, because span is fractional and a fraction of a resident is
+         not a thing. Everything downstream — the housing cap, migration, the
+         population readout — is a count of people, and letting a tube's width
+         leak a decimal into it put "13,998.56" in the HUD. */
+      return {
+        levels: lv, maxLevels: cap, yield: span, tube: true,
+        housing: Math.round((B.housingPerReach || 0) * lv * span),
+        jobs: Math.round((B.jobsPerReach || 0) * lv * span),
+        air: 0, export: 0, dust: 0
+      };
+    }
+
     const y = (B.airPerLevel || B.exportPerLevel) ? iceYield(s, t, others) : 1;
     return {
-      levels: lv, maxLevels: B.maxLevels, yield: y,
+      levels: lv, maxLevels: cap, yield: y, tube: false,
       housing: (B.housingPerLevel || 0) * lv,
       jobs: (B.jobsPerLevel || 0) * lv,
       air: (B.airPerLevel || 0) * lv * y,
@@ -137,9 +208,11 @@
      zones.js folds this into the same tally the zone tables feed. */
   function totals(s) {
     const out = { housing: 0, jobs: 0, air: 0, export: 0, count: 0 };
-    const list = allDeep(s);
-    for (const t of list) {
-      const o = outputOf(s, t, list);
+    /* Bores are passed the bore list so iceYield can share a deposit between
+       them; tube arcologies are in the tally but never in that list. */
+    const bores = allDeep(s);
+    for (const t of allSub(s)) {
+      const o = outputOf(s, t, bores);
       if (!o) continue;
       out.count++;
       out.housing += o.housing;
@@ -148,6 +221,31 @@
       out.export += o.export;
     }
     return out;
+  }
+
+  /* Which tiles of the tube this arcology has actually sealed.
+
+     It grows outward from its portal in both directions at once, falling back
+     to one direction when it reaches an end. Note what this does NOT do: it
+     does not make the entry point affect total capacity. The cap is
+     min(maxReach, tube length) wherever the portal is sunk, so a portal at
+     the mouth of a tube simply seals in one direction until it has as much as
+     one sunk in the middle. What the entry point does change is WHICH stretch
+     gets sealed — and therefore where the lit run appears and which ground
+     falls inside the arcology's amenity radius. That is a real effect but a
+     modest one, and it is worth being plain about rather than dressing up. */
+  function reachTiles(s, t) {
+    if (!t || !t.b || !isTube(t.b.type) || !t.tube) return [];
+    const tube = T.tubeOf(s, t);
+    if (!tube) return [];
+    const at = t.tube.i, want = levelsOf(t, capOf(s, t));
+    const out = [tube.path[at]];
+    let lo = at, hi = at;
+    while (out.length < want && (lo > 0 || hi < tube.path.length - 1)) {
+      if (lo > 0) { lo--; out.push(tube.path[lo]); }
+      if (out.length < want && hi < tube.path.length - 1) { hi++; out.push(tube.path[hi]); }
+    }
+    return out.filter(Boolean);
   }
 
   /* ---------- excavation ---------- */
@@ -177,24 +275,25 @@
       if (!t.b.levels) t.b.levels = 1;
       if (t.b.dig === undefined) t.b.dig = 0;
 
+      const cap = capOf(s, t);
       const ok = !stalled && serviced(s, t, nets);
       t.b.stalled = !ok;
-      if (!ok || t.b.levels >= B.maxLevels) continue;
+      if (!ok || t.b.levels >= cap) continue;
 
-      t.b.dig += 1 / B.digDays;
-      while (t.b.dig >= 1 && t.b.levels < B.maxLevels) {
+      t.b.dig += 1 / stepDays(t);
+      while (t.b.dig >= 1 && t.b.levels < cap) {
         t.b.dig -= 1;
         t.b.levels++;
         opened.push(t);
       }
-      if (t.b.levels >= B.maxLevels) t.b.dig = 0;
+      if (t.b.levels >= cap) t.b.dig = 0;
     }
     return opened;
   }
 
   window.LM_DEEP = {
-    isDeep, specOf, allDeep, iceYield, iceAt, levelsOf,
-    outputOf, totals, excavate, serviced,
+    isDeep, isTube, isSub, specOf, allDeep, allSub, iceYield, iceAt, levelsOf,
+    capOf, spanOf, reachTiles, outputOf, totals, excavate, serviced,
     ICE_RADIUS, ICE_REFERENCE, YIELD_MIN, YIELD_MAX
   };
 })();

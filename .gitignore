@@ -1,3 +1,9 @@
-# macOS writes one of these into every directory Finder has opened.
-# No leading slash, so this matches at any depth, not just the repo root.
+paper/main.aux
+paper/main.log
+paper/main.out
+paper/main.fls
+paper/main.fdb_latexmk
+paper/main.bbl
+paper/main.blg
+paper/main.synctex.gz
 .DS_Store

@@ -1,0 +1,37 @@
+[
+  {
+    "experiment": "e1-model-scale",
+    "at": "2026-09-05T19:48:05.841Z",
+    "gitRev": "705fd35",
+    "simulatedDays": 12322,
+    "worldsGenerated": 265
+  },
+  {
+    "experiment": "e2-site-availability",
+    "at": "2026-09-05T19:48:33.071Z",
+    "gitRev": "705fd35",
+    "simulatedDays": 0,
+    "worldsGenerated": 24
+  },
+  {
+    "experiment": "e3-ice-structure",
+    "at": "2026-09-05T19:48:35.102Z",
+    "gitRev": "705fd35",
+    "simulatedDays": 0,
+    "worldsGenerated": 8
+  },
+  {
+    "experiment": "e4-habitat-economics",
+    "at": "2026-09-05T19:48:35.314Z",
+    "gitRev": "705fd35",
+    "simulatedDays": 0,
+    "worldsGenerated": 8
+  },
+  {
+    "experiment": "e5-director-ab",
+    "at": "2026-09-05T19:51:32.795Z",
+    "gitRev": "705fd35",
+    "simulatedDays": 8100,
+    "worldsGenerated": 9
+  }
+]

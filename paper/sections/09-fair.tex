@@ -1,0 +1,57 @@
+\section{Availability, reproducibility and FAIR compliance}
+\label{sec:fair}
+
+\subsection{Software}
+
+The complete model, the verification suite, the experiments behind every figure
+and table in this paper, and the source of the paper itself are in one
+repository under the MIT licence:
+\url{https://github.com/dr-richard-barker/LunarSims}. The model has no build
+step and no runtime dependencies; it is static HTML, CSS and JavaScript, and
+runs by opening a file.
+
+\subsection{Regenerating the results}
+
+Every number quoted in this paper is produced by a script in
+\texttt{paper/experiments/}, which writes a JSON record to
+\texttt{paper/results/} and appends to a run ledger. Figures are generated from
+those JSON records alone --- never from the model directly --- so a figure
+cannot silently disagree with the value quoted beside it. The whole chain
+rebuilds with:
+
+\begin{quote}\ttfamily
+make -C paper
+\end{quote}
+
+which runs the experiments, regenerates the figures, and typesets this
+document. Results are committed, so the paper builds without re-running
+anything; deleting \texttt{paper/results/} forces a full regeneration.
+
+Experiments that compare revisions of the model extract their baselines from
+version control by commit hash rather than from working copies, so an A/B
+comparison is reproducible from the repository alone.
+
+\subsection{FAIR assessment}
+
+\begin{description}
+\item[Findable] The repository carries \texttt{CITATION.cff},
+  \texttt{codemeta.json} and \texttt{.zenodo.json} at its root, in the
+  locations GitHub and Zenodo read. A DOI is minted on deposit.
+\item[Accessible] Public repository, MIT licence, no credentials, no
+  dependencies, no build step. The archived snapshot is self-contained.
+\item[Interoperable] Results are plain JSON with documented fields; the model
+  is standard JavaScript; the manuscript is \LaTeX{} with a BibTeX
+  bibliography. Nothing requires a proprietary format or tool.
+\item[Reusable] The licence permits reuse and modification. Provenance is
+  recorded per experiment (source revision and simulation cost). The
+  limitations in Section~\ref{sec:limitations} state what the model does and
+  does not support, which is a precondition for reuse that is not misuse.
+\end{description}
+
+\subsection{Fields requiring completion before deposit}
+
+The following metadata cannot be derived from the repository and are left as
+explicit placeholders rather than filled with plausible values.
+\texttt{PREDEPOSIT.md} lists them with the exact file and field to edit:
+author ORCID; author affiliation; the release version and tag to archive; and
+the DOI, which Zenodo assigns on deposit.

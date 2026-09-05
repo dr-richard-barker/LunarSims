@@ -448,6 +448,208 @@
     return false;
   }
 
+  /* ---------- reaching the ice ---------- */
+
+  /* Every other wonder is opportunistic: the director takes one if the map it
+     happened to settle on allows it, and never goes out of its way. A deep
+     arcology cannot work that way, because the ground it needs is ground the
+     lattice will never grow onto of its own accord — a permanently shadowed
+     crater floor is worth nothing to zone, generates nothing from solar, and
+     the city has no reason to expand toward it. Left opportunistic the
+     director simply never builds one: measured on a real polar map, all 24
+     legal sites sat outside a lattice that had stopped growing at radius 25.
+
+     So this is the one thing the director does DELIBERATELY. It picks the
+     best bore on the map once, then spends a few tiles a day walking transit,
+     power and atmosphere out to it, exactly as a player does — and then
+     ensureWonders, which already refuses anything unserviced, picks it up on
+     its own the tick the corridor lands. */
+
+  /* Picking the site is a map scan, and canPlace() is quadratic in the map
+     because it calls count(). So it is done ONCE, cached on the lattice, and
+     pre-filtered to tiles that actually carry ice — a few hundred rather than
+     sixteen thousand. Getting this wrong is what previously made the director
+     unable to finish a run at all. */
+  function chooseBore(s) {
+    let best = null;
+    /* The tube goes first because it is the cheapest volume on the map and
+       the only one another colony cannot make more of — if this site has one,
+       taking it is the best deal available. */
+    for (const id of ['tubeway', 'sinkwell', 'cistern', 'foundry', 'core']) {
+      if (S.count(s, id) >= 1) continue;
+      if (E && !E.unlocked(s, id)) continue;
+      const tubey = window.LM_DEEP.isTube(id);
+      /* Candidates are pre-filtered to the handful of tiles that could
+         possibly qualify — ice for a bore, the tube's own course for a tube
+         arcology — because canPlace() calls count() and is therefore
+         quadratic in the map. Handing it every tile is what previously made
+         the director unable to finish a run. */
+      const candidates = tubey
+        ? ((s.tubes || []).flatMap(tb => tb.path.map(([x, y]) => T.tileAt(s, x, y))))
+        : s.map.filter(t => t.deposit && t.deposit.kind === 'ice');
+      for (const t of candidates) {
+        if (!t || t.b || t.zone) continue;
+        if (S.canPlace(s, t, id)) continue;
+        /* What it is worth, against what it costs to reach. Without the
+           distance term the director walks the width of the map for a site a
+           few percent better. A tube arcology is scored on how much tube it
+           would actually get to use from that entry, normalised so the two
+           families are comparable. */
+        const y = tubey
+          ? window.LM_DEEP.capOf(s, { b: { type: id }, tube: t.tube }) /
+            Math.max(1, S.buildById(id).maxReach)
+          : window.LM_DEEP.iceYield(s, t);
+        const d = Math.hypot(t.x - s.ai.ox, t.y - s.ai.oy);
+        const score = y - d * 0.012;
+        if (!best || score > best.score) best = { x: t.x, y: t.y, id, score, yield: y };
+      }
+      if (best) break;          // cheapest unlocked prize first, as elsewhere
+    }
+    return best;
+  }
+
+  /* A corridor from the bore back to the nearest tile the grid already
+     reaches, routed around whatever is in the way. Breadth-first from the
+     bore outward, over ground a network can actually be laid on. */
+  function spurRoute(s, target, nets) {
+    const key = (x, y) => y * K.COLS + x;
+    const open = t => t && T.buildable(t) && !t.zone &&
+      (!t.b || t.b.type === 'tube' || t.b.type === 'conduit');
+    const prev = new Map(), q = [[target.x, target.y]];
+    prev.set(key(target.x, target.y), null);
+    let head = 0, goal = null, powerOnly = null;
+    while (head < q.length && !goal) {
+      const [x, y] = q[head++];
+      /* Anchored on a tile that is genuinely ON both networks — not merely
+         served by them.
+
+         served() counts adjacency, which is the right question for "can this
+         ground develop" and the wrong one entirely for "can I extend from
+         here". A tube sitting next to a conduit is served by power and does
+         not conduct a volt: anchor a corridor on it and the chain dead-ends
+         one tile short, leaving a bore with transit, atmosphere, and no
+         current. That is what kept the director re-laying the same two-tile
+         corridor to the same site every hundred and twenty days for the rest
+         of a run, and it is invisible from the outside because every tile
+         involved reports itself served.
+
+         Both networks, because the conduit and the main follow the same
+         route; the power-only tile is kept as a fallback. */
+      const here = !(x === target.x && y === target.y);
+      if (here && nets.power.has(G.idx(x, y))) {
+        if (nets.air.has(G.idx(x, y))) { goal = [x, y]; break; }
+        if (!powerOnly) powerOnly = [x, y];
+      }
+      for (const [dx, dy] of G.DIRS) {
+        const nx = x + dx, ny = y + dy, k = key(nx, ny);
+        if (prev.has(k) || !open(T.tileAt(s, nx, ny))) continue;
+        prev.set(k, [x, y]); q.push([nx, ny]);
+      }
+    }
+    if (!goal) goal = powerOnly;
+    if (!goal) return null;
+    const route = [];
+    for (let cur = goal; cur; cur = prev.get(key(cur[0], cur[1]))) route.push(cur);
+    /* Ordered from the grid inward to the bore, so a half-finished corridor
+       is a line growing out of the city rather than a stub in the dark. */
+    return route;
+  }
+
+  /* One day of corridor. Conduit and main go along the route itself — both
+     are flood fills and need continuity — while the tube goes beside it,
+     because transit is pure adjacency and a tube on the route would fight the
+     conduit for the same tile. */
+  function reachForIce(s, a, budgetTiles) {
+    if (!window.LM_DEEP) return false;
+    const spur = s.ai.spur;
+
+    if (!spur) {
+      /* Retried occasionally rather than every tick: the answer only changes
+         when an era turns or the treasury grows. */
+      if (s.ai.spurAsked && s.day - s.ai.spurAsked < 120) return false;
+      s.ai.spurAsked = s.day;
+      const pick = chooseBore(s);
+      if (!pick) return false;
+      /* Only commit once the bore itself is affordable — a corridor to
+         something the city cannot buy is a line to nowhere. */
+      if (!afford(s, buildCost(pick.id) * 1.15)) return false;
+      const route = spurRoute(s, pick, G.services(s));
+      if (!route) return false;
+      s.ai.spur = { x: pick.x, y: pick.y, id: pick.id, route, i: 0 };
+      return true;
+    }
+
+    /* Bored. Drop the corridor AND the throttle, so the next one is chosen on
+       the next tick rather than up to a hundred and twenty days later — a
+       colony that has just proved it can reach the ice should keep going. */
+    if (S.count(s, spur.id) >= 1) {
+      s.ai.spur = null;
+      s.ai.spurAsked = 0;
+      return false;
+    }
+
+    /* Corridor laid, and still no bore. Previously this branch simply
+       returned false while leaving the spur in place, which meant the
+       director could never choose another target for the rest of the run —
+       one corridor that failed to pay off froze the whole mechanism. Give
+       ensureWonders a few days to afford it, then let go. Nothing is wasted
+       by letting go: the corridor stays built, so if the site was the problem
+       only in the treasury, ensureWonders will still take it later on its own. */
+    if (spur.i >= spur.route.length) {
+      spur.idle = (spur.idle || 0) + 1;
+      if (spur.idle > 20) s.ai.spur = null;
+      return false;
+    }
+
+    /* Rebuilt per call rather than stored: the route is a few dozen tiles, and
+       a Set on the state would not survive a save round-trip. */
+    const onRoute = new Set(spur.route.map(([x, y]) => y * K.COLS + x));
+
+    let laid = 0;
+    while (spur.i < spur.route.length && laid < budgetTiles) {
+      const [x, y] = spur.route[spur.i++];
+      const t = T.tileAt(s, x, y);
+      if (!t) continue;
+      const atBore = x === spur.x && y === spur.y;
+      if (!t.pipe && afford(s, buildCost('main'))) {
+        if (!S.place(s, t, 'main')) laid++;
+      }
+      /* The bore's own tile is left clear of surface structures — it is about
+         to have an arcology on it, and canPlace refuses ground that is
+         already built on. */
+      if (!atBore && afford(s, buildCost('conduit'))) {
+        /* A tube sitting on the route is replaced rather than worked around.
+           Excluding route tiles from the tube-alongside pass stops a corridor
+           blocking ITSELF, but it cannot stop an EARLIER corridor from having
+           left a tube exactly where this one now needs to run — and a tube
+           conducts nothing, so the chain dead-ends there and the bore is left
+           with transit and atmosphere and no current. Observed on a real map:
+           the site ended up ringed by tubes from its own abandoned attempts
+           and could never be powered, so the director re-laid the same
+           two-tile corridor to it every hundred and twenty days forever.
+           Transit is pure adjacency, so swapping one tube for a conduit costs
+           the ground around it nothing. */
+        if (t.b && t.b.type === 'tube') S.bulldoze(s, t);
+        if (!t.b && !S.place(s, t, 'conduit')) laid++;
+      }
+      /* and a tube alongside, so the corridor reads as a route people use
+         rather than a bare power line.
+
+         Never ON the route. A tube dropped on a tile the conduit has not
+         reached yet takes that tile for good — the conduit is skipped when it
+         arrives, the flood fill finds a gap, and the corridor delivers
+         transit and atmosphere to a bore that still has no power. */
+      for (const [dx, dy] of G.DIRS) {
+        const n = T.tileAt(s, x + dx, y + dy);
+        if (!n || n.b || n.zone || !T.buildable(n)) continue;
+        if (onRoute.has(n.y * K.COLS + n.x)) continue;
+        if (afford(s, buildCost('tube')) && !S.place(s, n, 'tube')) laid++;
+        break;
+      }
+    }
+    return laid > 0;
+  }
+
   /* ---------- wonders ---------- */
 
   /* All of them are terrain-gated, so the director does not sculpt for them
@@ -472,11 +674,13 @@
      treasury reaching a number. */
   function ensureWonders(s, a) {
     let nets = null;
-    for (const id of ['megadome', 'massdriver', 'sinkwell', 'cistern', 'foundry', 'core']) {
+    for (const id of ['megadome', 'massdriver', 'tubeway', 'sinkwell', 'cistern', 'foundry', 'core']) {
       if (S.count(s, id) >= 1) continue;
       if (E && !E.unlocked(s, id)) continue;
       if (!afford(s, buildCost(id))) continue;
-      const deep = !!(window.LM_DEEP && window.LM_DEEP.isDeep(id));
+      /* Both subsurface families need the networks before they do anything,
+         and neither will ever sit inside the lattice. */
+      const deep = !!(window.LM_DEEP && window.LM_DEEP.isSub(id));
       /* One flood fill for the whole call, and only when a bore is actually
          in the running — the other wonders never need it. */
       if (deep && !nets) nets = G.services(s);
@@ -535,6 +739,9 @@
     growZoning(s, a, 4);
     ensureServices(s, a);
     ensureDistricts(s, a);
+    /* Before the wonders, so a corridor that lands today is bored today
+       rather than a day later. */
+    reachForIce(s, a, 4);
     ensureWonders(s, a);
     maybeExpand(s, a);
   }
@@ -542,6 +749,7 @@
   window.LM_AUTO = {
     step, ensureSeed, manageBudget, clearObstacles, ensurePower, ensureAir,
     growNetworks, growZoning, ensureServices, ensureDistricts, ensureWonders, maybeExpand,
+    chooseBore, spurRoute, reachForIce,
     isStreetRow, isConduitCol, isInterior, reserveFloor
   };
 })();

@@ -1,0 +1,63 @@
+\section{The model}
+\label{sec:model}
+
+\subsection{Scale and structure}
+
+The model is a discrete simulation on a $128\times128$ grid of $16{,}384$
+tiles, each carrying an integer elevation on 16 levels, a terrain type, a solar
+exposure, a dust loading, and optionally a mineral deposit. One tick is one
+simulated day. The implementation is approximately $12{,}800$ lines of
+dependency-free JavaScript across 20 modules, governed by 52 named constants
+collected in a single table so that every tunable quantity is visible in one
+place.
+
+The choice of a coarse integer grid over a continuous field is deliberate. The
+model's purpose is to expose which constraints bind against each other, and
+that structure survives discretisation; what discretisation buys is the ability
+to run a complete settlement history in a few seconds, which is what makes the
+sweeps in Section~\ref{sec:results} affordable.
+
+\subsection{Illumination, and what follows from it}
+
+Elevation is the primary field; everything else is derived. Each tile's solar
+exposure is computed by casting rays outward in eight directions and testing
+whether the local horizon occludes the Sun, with the horizon rise per unit
+distance --- the parameter \texttt{sunSlope} --- set from the site's latitude.
+Near the pole this parameter is small, so even shallow relief occludes, and
+deep crater floors receive an exposure of exactly zero.
+
+From that one field the model derives, in order:
+
+\begin{itemize}
+\item \textbf{Where ice is.} Ice is placed only where exposure falls below a
+  shadow threshold, with richness increasing as exposure falls further. This
+  reproduces the qualitative structure of polar cold traps
+  \citep{paige2010diviner} without attempting their actual distribution.
+\item \textbf{What power is available.} Photovoltaic output scales directly
+  with local exposure, so the ground that holds ice generates nothing.
+\item \textbf{What ground is worth.} Land value rises with exposure and with
+  elevation, so shadowed floors are also the least valuable ground to build
+  on.
+\end{itemize}
+
+This triple coupling is the model's central design decision. Because all three
+follow from a single raycast, the antagonism between them is structural rather
+than imposed: the most valuable resource sits on the least valuable ground, and
+is hardest to power. No parameter tunes this relationship, and none can switch
+it off.
+
+\subsection{Networks, demand and progression}
+
+Three utility networks must independently reach ground before it develops:
+surface transit tubes, which serve by adjacency; power conduits, which
+propagate a flood fill from generators and also conduct through developed
+buildings; and buried atmosphere mains, which coexist with whatever occupies
+the surface. Population and employment are driven by a three-index demand
+model in which habitation grows while jobs outrun residents, and commerce and
+industry grow while residents outrun jobs, with the two employment ratios
+summing to unity so the system has a fixed point rather than a ceiling.
+
+Colonies advance through four eras gated jointly on peak population and
+accumulated research. The gate is conjunctive on purpose: population alone
+would make research optional, and research alone would let a tiny well-funded
+outpost build a skyline.

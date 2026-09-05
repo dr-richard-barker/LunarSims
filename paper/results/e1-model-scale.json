@@ -1,0 +1,67 @@
+{
+  "experiment": "e1-model-scale",
+  "generatedAt": "2026-09-05T19:48:05.841Z",
+  "gitRev": "705fd35",
+  "cost": {
+    "ticks": 12322,
+    "worlds": 265
+  },
+  "data": {
+    "sourceLines": {
+      "byFile": {
+        "agents.js": 239,
+        "autopilot.js": 756,
+        "budget.js": 135,
+        "colony-sites.js": 376,
+        "data.js": 641,
+        "deep.js": 300,
+        "disasters.js": 208,
+        "empire.js": 116,
+        "eras.js": 59,
+        "fx.js": 63,
+        "globe.js": 377,
+        "grid.js": 98,
+        "invasion.js": 237,
+        "minimap.js": 149,
+        "render.js": 2149,
+        "services.js": 142,
+        "sim.js": 562,
+        "terrain.js": 458,
+        "ui.js": 1368,
+        "zones.js": 296,
+        "harness.html": 3455,
+        "index.html": 142,
+        "style.css": 433
+      },
+      "total": 12759
+    },
+    "constants": 52,
+    "map": {
+      "cols": 128,
+      "rows": 128,
+      "tiles": 16384,
+      "heightLevels": 16
+    },
+    "catalogue": {
+      "terrain": 4,
+      "deposits": 3,
+      "zones": 5,
+      "buildings": 24,
+      "wonders": 8,
+      "deepArcologies": 4,
+      "tubeArcologies": 1,
+      "eras": 4,
+      "services": 5,
+      "departments": 5,
+      "tools": 38,
+      "disasters": 4
+    },
+    "verification": {
+      "scenarios": 130,
+      "checks": 594,
+      "passed": 594,
+      "failed": 0,
+      "threw": 0
+    }
+  }
+}
