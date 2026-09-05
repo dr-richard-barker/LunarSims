@@ -71,12 +71,20 @@ tubes left by its own abandoned attempts, could never be powered, and the
 director re-laid the same two-tile corridor to it every 120 simulated days for
 the remainder of the run.
 
-This one is worth reporting for a methodological reason. On two of the four
-seeds tested, the same defective revision scored a perfect four structures out
-of four and looked entirely healthy. It was visible only on maps where the
-corridor had to cross awkward ground --- which is an argument for sweeping
-seeds rather than fixing one, and for reporting the spread rather than the
-best case.
+This one is worth reporting for a methodological reason. On most of the seeds
+swept during development the same defective revision built its full complement
+of structures and looked entirely healthy; the fault appeared only on maps
+where a corridor had to cross ground already occupied by an earlier attempt.
+That is an argument for sweeping seeds rather than fixing one, and for
+reporting a spread rather than a best case.
+
+We flag explicitly that this observation, unlike the comparison in
+Figure~\ref{fig:dir}, is \emph{not} among the recorded experiments. The
+defective revision existed only in a working tree and was never committed, so
+\texttt{e5-director-ab.mjs} --- which extracts its baselines by commit hash ---
+cannot reproduce it. We report it because the failure mode is instructive, and
+we mark it as unrecorded because it would otherwise carry an authority the
+other results in this section have earned and it has not.
 
 \subsection{A complexity failure hiding behind a logic failure}
 
