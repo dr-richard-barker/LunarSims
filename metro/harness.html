@@ -1309,6 +1309,38 @@ td.mark{width:34px;text-align:center}
         ];
       } },
 
+    { name: 'The director never strands a bore out in the dark',
+      why: 'a deep arcology is the only wonder that does nothing until the networks reach it, and the ground it qualifies on is exactly where the lattice is not — left to the ordinary rule the director bought two, stranded both, and left them at one level for the rest of the run',
+      run() {
+        /* An iced floor the director cannot possibly have reached: no tube,
+           no conduit, no main anywhere near it. */
+        const s = grantEra(city(9001));
+        s.credits = 1e7;
+        iceField(s, 20, 20, 6);
+        AI.ensureWonders(s, AI.ensureSeed(s));
+        const stranded = s.map.filter(t => t.b && window.LM_DEEP.isDeep(t.b.type));
+        /* the site itself is perfectly legal — the refusal has to come from
+           the director's own rule, not from the placement rules */
+        const legal = S.canPlace(s, T.tileAt(s, 20, 20), 'sinkwell');
+
+        /* and the same map with the networks actually run out to the ice */
+        const live = deepCity(null, 9002);
+        live.credits = 1e7;
+        /* ensureWonders returns after placing ONE thing, and the cheaper
+           terrain-gated wonders are ahead of the bores in its list — so it
+           has to be driven until it runs out, not called once. */
+        for (let i = 0; i < 8 && AI.ensureWonders(live, AI.ensureSeed(live)); i++);
+        const built = live.map.filter(t => t.b && window.LM_DEEP.isDeep(t.b.type));
+        const nets = G.services(live);
+        return [
+          ['nothing is bored on ground the networks never reach', stranded.length, 0],
+          ['though the ground itself would have taken one', legal, null],
+          ['a serviced site is taken', built.length, '>=1'],
+          ['and what it takes really is serviced',
+            built.every(t => window.LM_DEEP.serviced(live, t, nets)), true]
+        ];
+      } },
+
     { name: 'Wonders draw real power',
       why: 'a wonder that cost nothing to run would be strictly free once bought, and the grid is the one pressure that should still apply at the top of the game',
       run() {

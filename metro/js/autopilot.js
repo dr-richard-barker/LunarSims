@@ -454,17 +454,44 @@
      — it takes them if the map it settled on happens to allow one. The deep
      arcologies are searched last on purpose: they are the most expensive
      things on the list and they only pay off once the grid can carry them,
-     which by then the cheaper entries have already forced it to. */
+     which by then the cheaper entries have already forced it to.
+
+     A DEEP ARCOLOGY IS NOT LIKE THE OTHERS. Every other wonder works the day
+     it is paid for, so the director can drop one on whatever ground qualifies
+     and forget about it. A bore does nothing at all until transit, power and
+     atmosphere all reach it — and the ground it qualifies on is by definition
+     a permanently shadowed crater floor, which is exactly where the lattice
+     is NOT. Left to the same rule, the director bought two the moment it
+     could afford them, stranded both out in the dark, and watched them sit at
+     one level for the rest of the run: a hundred and thirty-eight thousand
+     credits of hole.
+
+     So a bore is only taken on ground the networks already reach. That turns
+     it into something the director grows into rather than something it buys,
+     and the lattice reaching the ice is a much better trigger than the
+     treasury reaching a number. */
   function ensureWonders(s, a) {
+    let nets = null;
     for (const id of ['megadome', 'massdriver', 'sinkwell', 'cistern', 'foundry', 'core']) {
       if (S.count(s, id) >= 1) continue;
       if (E && !E.unlocked(s, id)) continue;
       if (!afford(s, buildCost(id))) continue;
+      const deep = !!(window.LM_DEEP && window.LM_DEEP.isDeep(id));
+      /* One flood fill for the whole call, and only when a bore is actually
+         in the running — the other wonders never need it. */
+      if (deep && !nets) nets = G.services(s);
       let placed = false;
       /* Searched over the whole map rather than the lattice: a skylight or a
          ridge is wherever the generator put it. */
       for (const t of s.map) {
         if (t.b || t.zone) continue;
+        /* The network test comes FIRST, and that ordering is load-bearing
+           rather than tidy. canPlace() calls count(), which filters the whole
+           map — so asking it about every tile is quadratic in the map, and a
+           bore that can never be placed (because nothing is serviced yet) made
+           the director pay that on every single tick instead of once. Serviced
+           is a dozen lookups and rules out all but a few hundred tiles. */
+        if (deep && !window.LM_DEEP.serviced(s, t, nets)) continue;
         if (S.canPlace(s, t, id)) continue;
         if (!S.place(s, t, id)) { placed = true; break; }
       }
