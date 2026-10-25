@@ -35,10 +35,15 @@ Pick a tool from the palette, then click or drag on the ground:
 - **Put the farm on air.** A broadcast studio films the harvest, the mess table and
   the flowers being arranged, and pays every day — see *Earth is watching* below.
 - **Sink a seed vault into the tube** through the skylight the station was founded on.
-- **Answer the station alerts.** Eighteen of them, each a decision rather than a
+- **Run the halls the way EDEN ISS ran its greenhouse** — dim or boost each hall's lamps,
+  hold the air at a CO₂ setpoint, fit fans and radiators, refit a floor to sintered beds or
+  aeroponic racks, keep two nutrient tanks in band and raise transplants in a nursery. See
+  *EDEN ISS: light, air and roots* below.
+- **Answer the station alerts.** Twenty-six of them, each a decision rather than a
   dice roll: shelter from a flare or keep the lamps on, patch a puncture or log it,
   buy certified seed or sow the tired stock, cut a leafy crop for the mess or bank
-  the calories. Eighteen milestones mark a farm that works.
+  the calories, change the fruit recipe or spray calcium and carry on. Thirty-nine
+  milestones mark a farm that works — three of them for out-growing the real facilities.
 
 Four things drive the difficulty:
 
@@ -56,6 +61,52 @@ Four things drive the difficulty:
   and until the studio is built there is nothing coming in between harvests. The
   first serious decision of the game is whether to spend the opening capital on
   another hall or on the thing that pays you while the hall grows.
+
+### EDEN ISS: light, air and roots
+
+The EDEN ISS Mobile Test Facility grew vegetables for the overwintering crew at Neumayer
+III in Antarctica through 2018, and its data release (Zabel et al. 2020, *Front. Plant
+Sci.* 11:656; NASA OSDR OSD-895) is the most complete record there is of a space-analogue
+greenhouse actually feeding people. Three systems in the farm are built on it, with
+supporting numbers from this group's own lunar-habitat modelling. The rule throughout:
+**the ratios are theirs, the throughputs are scaled for play, and every new factor is
+exactly 1 at its default** — a farm that never touches a new dial plays as it always did,
+which the harness checks.
+
+- **Light is a curve.** Each hall has Low (200 µmol/m²/s), Standard (330 — EDEN ISS's
+  setting for leafy crops) and High (600). Growth follows a saturating curve fitted to
+  EDEN ISS's arugula trial, where 1.82× the light gave +50% fresh mass a day and 17% less
+  per mole; the fit reproduces both figures. Lamp power scales with the setting.
+  Photoperiod now matters too — a 20 h day grows about 18% faster than 16 h for 25% more
+  lamp energy. Every crop's `dli`, carried in the data since the first version, is what
+  sets where its curve bends.
+- **Measured crops and a scoreboard.** Five crops arrive with EDEN ISS's own cycle lengths
+  and yields — arugula, cucumber, Swiss chard, kohlrabi and red mustard — and romaine,
+  mizuna, basil, tomato and radish are recalibrated to the cultivars it grew. Six crops
+  are now **cut-and-come-again**: picked and left standing as long as EDEN ISS stood them.
+  Every harvest is weighed in fresh kilograms, and the farm's kg/m²/day is set against
+  EDEN ISS (0.075), Lunar Palace 1 (0.068) and, approximately, CEEF, the South Pole Food
+  Growth Chamber and NASA's Biomass Production Chamber.
+- **The air is a crop input.** Temperature, humidity and CO₂ (in ppm, read off the existing
+  carbon store) are tracked hourly against EDEN ISS's 21/19 °C, 65% and 1000 ppm setpoints.
+  High lamps at lunar noon overheat a hall without *Radiator Wings*; a lunar night with
+  the lamps shed runs cold; hours above 80% humidity grow mould, as EDEN ISS's winter did;
+  enrichment to 2,000 or 3,500 ppm buys up to a tenth more growth (from our
+  photorespiration modelling) at the cost of a leaking store and, past 2,500 ppm, crew
+  morale. Halls over twelve tiles stagnate in one-sixth gravity without canopy fans
+  (LunarLeaf-CFD), and a hall whose air handler fails is sealed and stops.
+- **Roots.** A first crop in raw regolith now yields about half as well as worked ground —
+  standing in for Arabidopsis in Apollo soil (Paul et al. 2022), whose rosettes reached a
+  tenth of their size in simulant; freshly broken crater-rim ejecta does a little better.
+  An empty hall can be refitted with **sintered beds** or **aeroponic racks**. The
+  **Nutrient Tank Room** runs EDEN ISS's two tanks — leafy at EC 2.21 / pH 6.06, fruit at
+  EC 3.49 / pH 5.91, recipes from the raw OSDR record — which drift and need replacing
+  every two to three months, and the calcium deficiency EDEN ISS met on its tomatoes is an
+  alert with its fix attached. A **Seedling Nursery** puts a hall a fortnight ahead.
+
+Where the evidence is thin the game says so: one-cycle EDEN ISS figures are labelled as
+one cycle in the catalogue, estimated yields are marked as estimates, and the benchmarks
+that come from a tabulated comparison rather than their source are marked approximate.
 
 ### Earth is watching
 
@@ -128,7 +179,7 @@ in data on everything it holds, and a line kept in the vault can be re-sown from
 secured stock when a tired-seed year would otherwise ruin it.
 
 The ledger sits at the top of the Goals tab. The target is every line the farm can
-grow — twenty-nine conventional, sixteen engineered, plant and microbe alike — plus
+grow — thirty-four conventional, sixteen engineered, plant and microbe alike — plus
 the crop wild relatives and landraces that arrive by lander and are worth taking in.
 That is the score that outlasts the run.
 
@@ -162,7 +213,7 @@ halls need no such help, because you can see straight through them.
   the studio pays for.
 - **Catalogue** opens the seed catalogue outside of sowing: every line the farm can
   grow, photographed and credited, with the engineered ones and their traits.
-- **Report** opens a telemetry dashboard — eight metrics over time with the lunar
+- **Report** opens a telemetry dashboard — seventeen metrics over time with the lunar
   nights banded behind them — written either as a situation report to Earth
   Operations or, at one click, as a note to the settlers. Same facts, different room.
 - **League** scores the run and files it against previous ones. Export writes a JSON
@@ -179,14 +230,21 @@ renderer to simulation, never back. That is what makes the balance testable, and
 simulation survived three renderer rewrites almost untouched.
 
 Open **`farm/harness.html`** in a browser. It loads only the data and the simulation, replaces
-`Math.random` with a seeded generator so runs are reproducible, and plays sixteen scenarios out
-over hundreds of simulated days — a careless farm failing, a competent one closing the food
+`Math.random` with a seeded generator so runs are reproducible, and plays thirty-nine scenarios
+out over hundreds of simulated days — a careless farm failing, a competent one closing the food
 loop, auto-manage surviving unattended, the unserviced and rail modifiers each biting by the
 amount they claim, raw regolith yielding what the constant says, a monoculture costing morale,
 the lunar night shedding load, every event choice resolving, saves carrying forward, and a run
-surviving the JSON round trip it is stored as.
+surviving the JSON round trip it is stored as. Nineteen of them cover the EDEN ISS systems: each
+reproduces the figure it was calibrated on (High light ×1.50 a day and ×0.83 a mole; a raw
+first crop at about half; transplants out of the hall in 0.63 of the time), and one asserts that
+every research factor is exactly 1 in a farm left at its defaults.
 
-Five of those scenarios exist because of the systems above, and two are worth knowing about:
+The same scenarios run headlessly from the repository root:
+
+    node paper/experiments/run-harness.mjs farm
+
+Five of the older scenarios exist because of the studio and the recyclers, and two are worth knowing about:
 
 - **An expanding farm is never stranded** is the regression test for the reported fault —
   that money arrived only at harvest, so expanding left the player with nothing to spend for
@@ -582,7 +640,9 @@ bioregenerative life support (BLSS) model with a human in the loop.
 
 **[LunarFarm-BLSS](https://github.com/dr-richard-barker/LunarFarm-BLSS)** is the study repository.
 It drives *this* `farm/js/sim.js` headlessly with a seeded generator, so the analysis measures the
-code that ships and cannot drift from it. Four findings so far:
+code that ships and cannot drift from it. Its committed data were generated against LunarSims
+commit `a04b81b`, before the EDEN ISS systems; a sweep against the current code will measure the
+new light, climate and root model and give different numbers. Four findings so far:
 
 - **Only an anaerobic digester lifts the carbon floor** — from a mean minimum of 5.1 kg to 79.4 kg
   across eight seeded runs per arm. Mealworm tiers, nitrifying bioreactors and fungal crops raise
@@ -602,14 +662,17 @@ timing and raw-regolith growth reversed it.
 
 ## On the crop list
 
-Twenty-nine conventional lines and sixteen engineered ones. The conventional crops
+Thirty-four conventional lines and sixteen engineered ones. The conventional crops
 are real, and so is the reason each is in the game:
 
 - **From the ISS Veggie and Advanced Plant Habitat programmes** — `'Outredgeous'` red
   romaine, mizuna, Tokyo Bekana, `'Extra Dwarf'` pak choi and Red Russian kale (the
   last two both VEG-04 crops); the `'Red Robin'` dwarf tomato of VEG-05; the
-  `'Española Improved'` chile and the radishes of Plant Habitat-04; the zinnia that
-  flowered in 2016.
+  `'Española Improved'` chile of Plant Habitat-04 and the radishes of Plant Habitat-02;
+  the zinnia that flowered in 2016.
+- **From the EDEN ISS greenhouse in Antarctica** — arugula, `'Picowell'` cucumber,
+  Swiss chard, kohlrabi and `'Red Giant'` red mustard, with the cycle lengths and
+  yields measured there in 2018.
 - **From the Chinese programme** — dwarf rice, taken from seed to seed aboard the
   Wentian module in 2022, the first crop to complete a full life cycle in orbit; and
   cotton, rapeseed and yeast, all of which flew in the Chang'e-4 biosphere canister,
@@ -623,9 +686,12 @@ are real, and so is the reason each is in the game:
   spirulina, the photosynthetic compartment of the MELiSSA loop.
 - **Because it pays in data** — Arabidopsis.
 
-The **numbers attached to them are balanced for play, not measured.** Days to
+Most of the **numbers attached to them are balanced for play, not measured.** Days to
 maturity are in the right region for each crop, and the gas, water and energy
 relationships behave qualitatively as they should, but nothing here should be cited.
+The exceptions carry their source: any crop with an EDEN ISS block in the catalogue
+uses the cycle length and fresh yield measured there (with the number of cycles it
+rests on), and the fresh yields of the rest are marked as estimates.
 The engineered lines are extrapolations from real lines of plant biotechnology; the
 traits are described by what they do to a plant, not attributed to any publication.
 

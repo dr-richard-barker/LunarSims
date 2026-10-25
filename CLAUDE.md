@@ -47,6 +47,22 @@ the suite performs over twelve thousand simulated days):
 It runs the identical scenarios, prints per-scenario timings, and exits
 non-zero on failure.
 
+## Verifying farm
+
+`farm/harness.html` is the farm's scenario harness, and the same headless
+runner plays it when given the folder:
+
+    node paper/experiments/run-harness.mjs farm
+
+Run it after any change to `farm/js/data.js` or `farm/js/sim.js`. Set
+`DUMP=out.json` to keep every check's value, so a change can be diffed against
+the revision before it — several checks sit close to their thresholds, and the
+new research systems are built to be exactly neutral at their defaults.
+
+`farm/js/data.js` and `farm/js/sim.js` are also evaluated directly by the
+sibling repo `../LunarFarm-BLSS/code/01_sweep.js`. Keep every `LF_SIM` export
+and the state fields it reads backward compatible; new parameters are optional.
+
 Note that the Claude Code preview server cannot read `~/Documents` (no TCC
 access), so serving this repo for the preview pane requires staging a copy
 outside it — see `../.claude/sync-preview.sh` for the established pattern.

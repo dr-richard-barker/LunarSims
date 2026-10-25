@@ -143,6 +143,64 @@ td.mark{width:34px;text-align:center}
     return f;
   }
 
+  /* ---------- research-module helpers ----------
+
+     A hall the crew can reach: the first spot whose outline touches the track
+     network, so a scenario measuring an absolute rate is not measuring the
+     unserviced penalty as well. */
+  function servedHall(s, w, h, crop) {
+    const K = window.LF_DATA.K;
+    const net = t => t && t.b && (t.b.type === 'track' || t.b.type === 'hab' || t.b.type === 'rail');
+    for (let y = 0; y <= K.ROWS - h; y++) {
+      for (let x = 0; x <= K.COLS - w; x++) {
+        if (S.checkField(s, x, y, w, h)) continue;
+        let touches = false;
+        for (let yy = y - 1; yy <= y + h && !touches; yy++)
+          for (let xx = x - 1; xx <= x + w && !touches; xx++) {
+            const inside = xx >= x && xx < x + w && yy >= y && yy < y + h;
+            const edge = (xx === x - 1 || xx === x + w) !== (yy === y - 1 || yy === y + h);
+            if (!inside && edge && net(S.tileAt(s, xx, yy))) touches = true;
+          }
+        if (!touches) continue;
+        if (S.addField(s, x, y, w, h)) continue;
+        const f = s.fields[s.fields.length - 1];
+        if (crop) S.plant(s, f, crop);
+        return f;
+      }
+    }
+    return null;
+  }
+
+  /* A farm with power and cooling to spare: a reactor, two radiator wings, money,
+     science, and the inherited potato hall cleared out so the hall under test is
+     the whole story. */
+  function powered() {
+    const s = S.newGame();
+    s.credits = 400000; s.science = 999;
+    s.up.radiator = 2;
+    S.place(s, S.tileAt(s, 19, 10), 'reactor');
+    S.clear(s, s.fields[0]);
+    S.removeField(s, s.fields[0]);
+    return s;
+  }
+
+  /* Two farms alike in every way but `tweak`, run for `n` days; returns both
+     test halls. The seed is reset between them so the deck cannot differ. */
+  function twin(crop, w, h, n, tweak, opt) {
+    const make = (apply) => {
+      const s = powered();
+      const f = servedHall(s, w, h, crop);
+      f.soil = 1;
+      if (apply) apply(s, f);
+      days(s, n, opt);
+      return { s, f };
+    };
+    const seedNow = Math.floor(Math.random() * 1e9);
+    seed(seedNow); const a = make(null);
+    seed(seedNow); const b = make(tweak);
+    return [a, b];
+  }
+
   /* ---------- scenarios ---------- */
 
   const SCENARIOS = [
@@ -322,6 +380,8 @@ td.mark{width:34px;text-align:center}
           carbonate: Math.round(s.carbonate), audience: Math.round(s.media.audience),
           accessions: Object.keys(s.vault.accessions).sort().join(','), gmo: Object.keys(s.gmo).sort().join(','),
           soil: s.fields.map(x => x.soil), crops: s.fields.map(x => x.crop),
+          halls: s.fields.map(x => [x.ppfd, x.fans, x.sealed, x.substrate]), co2Set: s.co2Set,
+          tanks: JSON.stringify(s.tanks || null),
           infected: s.fields.map(x => x.infected), feed: s.fields.map(x => +x.feed.toFixed(2)),
           health: s.fields.map(x => +x.health.toFixed(2))
         });
@@ -809,6 +869,530 @@ td.mark{width:34px;text-align:center}
           ['fields survive the round trip', copy && copy.fields.length === s.fields.length, true],
           ['the restored run keeps ticking', copy && copy.day > s.day, true],
           ['history is retained for the report', copy && copy.history.length > 20, true]
+        ];
+      } },
+
+    /* ---- EDEN ISS: light and yield ---- */
+
+    { name: 'Light is a curve, not a switch (EDEN ISS arugula)',
+      why: '330 → 600 µmol gave EDEN ISS +50% fresh mass a day and 17% less per mole',
+      run() {
+        const P = S.PPFD;
+        const [std, high] = twin('arugula', 2, 2, 6, (s, f) => S.setIntensity(s, f, P.high));
+        const [, low] = twin('arugula', 2, 2, 6, (s, f) => S.setIntensity(s, f, P.low));
+        const hi = high.f.growth / std.f.growth, lo = low.f.growth / std.f.growth;
+        const c = S.cropById('arugula');
+        return [
+          ['High grows half as much again a day', +hi.toFixed(2), '~1.50'],
+          ['and gets less from each mole of light', +(hi / (P.high / P.std)).toFixed(2), '~0.83'],
+          ['Low grows about two-thirds as fast', +lo.toFixed(2), '~0.67'],
+          ['but Low gets more growth per kilowatt-hour', +(lo / (P.low / P.std)).toFixed(2), '>1'],
+          ['High draws 1.82× the lamp power', +(S.lampNeed(high.s, high.f) / S.lampNeed(std.s, std.f)).toFixed(2), '~1.82'],
+          ['Standard at 16 h is exactly the old rate', S.lightGain(c, S.DLI_STD), 1],
+          ['a dark culture ignores the dimmer', S.lightGain(S.cropById('oyster'), 99), 1]
+        ];
+      } },
+
+    { name: 'A longer day grows faster, at a price',
+      why: 'photoperiod used to cost power and buy nothing; now it buys light on the same curve',
+      run() {
+        const [d16, d20] = twin('arugula', 2, 2, 6, s => { s.photoperiod = 20; });
+        const [, d12] = twin('arugula', 2, 2, 6, s => { s.photoperiod = 12; });
+        const kwh = x => S.lampNeed(x.s, x.f) * x.s.photoperiod;
+        /* time a High-light hall from seed to harvest, and hold the panel to it */
+        const s = powered();
+        const f = servedHall(s, 2, 2, 'arugula');
+        f.soil = 1; S.setIntensity(s, f, S.PPFD.high);
+        const promised = S.cropById('arugula').days / S.growthFactors(s, f);
+        let took = 0;
+        while (f.growth < 1 && took < 40) {
+          days(s, 1);
+          if (f.moisture < 0.5) S.water(s, f);
+          if (f.feed < 0.5) S.feed(s, f);
+          took++;
+        }
+        return [
+          ['20 h grows about 18% faster than 16 h', +(d20.f.growth / d16.f.growth).toFixed(2), '~1.18'],
+          ['and costs a quarter more lamp energy', +(kwh(d20) / kwh(d16)).toFixed(2), '~1.25'],
+          ['12 h grows at about four-fifths', +(d12.f.growth / d16.f.growth).toFixed(2), '~0.80'],
+          ['High-light arugula is ready in about 16 days', took, '<=17'],
+          ['which is what the hall panel promised', Math.abs(took - promised) <= 1, true]
+        ];
+      } },
+
+    { name: 'Cut-and-come-again keeps standing (EDEN ISS mizuna)',
+      why: 'EDEN ISS cut one mizuna planting for 119 days and took 23 kg/m² off it',
+      run() {
+        const s = powered();
+        const f = servedHall(s, 2, 2, 'mizuna');
+        f.soil = 1;
+        let firstCut = null, firstPay = 0, pickPay = 0, standingAfterFirst = null;
+        days(s, 140, { tend: true, restock: true, each: (st) => {
+          if (f.picks === 1 && firstCut === null) { firstCut = st.day; standingAfterFirst = !!f.crop; }
+        } });
+        /* what one cut is worth against a picking, straight from the formula the sim uses */
+        const c = S.cropById('mizuna');
+        firstPay = c.value * S.VALUE_SCALE * 4;
+        pickPay = firstPay * S.pickShare(c);
+        const perM2 = s.stats.freshKg / (4 * S.TILE_M2);
+        return [
+          ['still planted after the first cut', standingAfterFirst, true],
+          ['picked repeatedly', s.stats.maxPicks, '>=7'],
+          ['a picking pays less than a full cut', pickPay < firstPay, true],
+          ['the planting clears once its stand is spent', f.crop, null],
+          ['fresh mass over the stand approaches EDEN ISS\'s 23 kg/m²', +perM2.toFixed(1), '>=18'],
+          ['and never exceeds it', perM2 <= 23.2, true]
+        ];
+      } },
+
+    { name: 'Fresh mass is measured against the analogues',
+      why: 'kg/m²/d is the one figure EDEN ISS, Lunar Palace 1 and the KSC chamber all publish',
+      run() {
+        const B = window.LF_DATA.BENCHMARKS;
+        const s = powered();
+        const f = servedHall(s, 2, 2, 'arugula');
+        f.soil = 1;
+        days(s, 26, { tend: true });
+        const oneHall = s.stats.freshKg;
+
+        /* a farm of three high-light arugula halls, replanted as they come in */
+        const g = powered();
+        for (let i = 0; i < 3; i++) {
+          const h = servedHall(g, 2, 2, 'arugula');
+          h.soil = 1; S.setIntensity(g, h, S.PPFD.high);
+        }
+        days(g, 90, { tend: true, replant: true, restock: true });
+        /* and a potato farm that has not lifted its first crop yet */
+        const p = powered();
+        servedHall(p, 4, 3, 'potato');
+        days(p, 90, { tend: true, replant: true, restock: true });
+        return [
+          ['EDEN ISS is on the board at 0.075', (B.find(b => b.id === 'eden') || {}).kgm2d, 0.075],
+          ['so is Lunar Palace 1 at 0.068', (B.find(b => b.id === 'lp1') || {}).kgm2d, 0.068],
+          ['a 2×2 arugula hall logs its EDEN ISS mass', Math.round(oneHall), '~244'],
+          ['the 30-day figure is in the report', typeof g.history[g.history.length - 1].kg, 'number'],
+          ['a high-light salad farm out-grows EDEN ISS', !!g.done.eden, true],
+          ['a potato farm that has not lifted a crop yet does not', !!p.done.eden, false]
+        ];
+      } },
+
+    { name: 'The lab opens for the full roster, and stays open',
+      why: 'five EDEN ISS crops joined the roster; nobody already inside the lab is locked out',
+      run() {
+        const CROPS = window.LF_DATA.CROPS;
+        const old = CROPS.filter(c => !c.since);
+        const s = S.newGame();
+        old.forEach(c => { s.stats.sown[c.id] = 1; });
+        const shutWithOld = S.biotechOpen(s);
+        CROPS.forEach(c => { s.stats.sown[c.id] = 1; });
+        const openWithAll = S.biotechOpen(s);
+
+        /* a v8 run that had sown the old roster */
+        const v8 = S.newGame();
+        old.forEach(c => { v8.stats.sown[c.id] = 1; });
+        const save = JSON.parse(JSON.stringify(v8));
+        save.version = 8; delete save.stats.labOpen; delete save.stats.freshKg; delete save.stats.rackM2Days;
+        save.fields.forEach(f => { delete f.ppfd; delete f.picks; });
+        const res = S.migrate(save);
+        return [
+          ['the new roster has five EDEN ISS crops', CROPS.length - old.length, 5],
+          ['the old 29 alone no longer open it', shutWithOld, false],
+          ['all of them do', openWithAll, true],
+          ['a carried v8 lab stays open', res.ok && S.biotechOpen(save), true],
+          ['carried halls keep Standard lamps', save.fields.every(f => f.ppfd === S.PPFD.std), true],
+          ['and the fresh-mass ledger starts at zero', save.stats.freshKg, 0]
+        ];
+      } },
+
+    /* ---- the greenhouse air ---- */
+
+    { name: 'The CO₂ store sets the halls\' ppm, and the old limit holds',
+      why: 'one carbon store, read as ppm: every 14 kg holds the halls at 1000',
+      run() {
+        const s = S.newGame();
+        s.co2 = 7; S.climateStep(s, 0, true);
+        const thin = Math.round(s.air.ppm);
+        s.co2 = 200; S.climateStep(s, 0, true);
+        const full = Math.round(s.air.ppm);
+        const [rich, poor] = twin('romaine', 2, 2, 4, null, { eachHour: x => { x.co2 = 200; } });
+        const [, starved] = twin('romaine', 2, 2, 4, null, { eachHour: x => { x.co2 = 7; } });
+        return [
+          ['7 kg in store holds the halls at 500 ppm', thin, 500],
+          ['a full store holds them at the 1000 ppm setpoint', full, 1000],
+          ['half the carbon, about half the growth', +(starved.f.growth / rich.f.growth).toFixed(2), '~0.50'],
+          ['the setpoint never enriches by itself', +(poor.f.growth / rich.f.growth).toFixed(2), 1]
+        ];
+      } },
+
+    { name: 'Enrichment pays, and the crew pay for it',
+      why: 'photorespiration all but stops at ISS-cabin CO₂; the people breathing it notice',
+      run() {
+        const [base, e2] = twin('romaine', 2, 2, 4, s => S.setCo2(s, 2000));
+        const [, e35] = twin('romaine', 2, 2, 4, s => S.setCo2(s, 3500));
+        const [m10, m35] = twin('romaine', 2, 2, 20, s => S.setCo2(s, 3500), { tend: true, replant: true, restock: true });
+        const [, m20] = twin('romaine', 2, 2, 20, s => S.setCo2(s, 2000), { tend: true, replant: true, restock: true });
+        /* what enrichment costs the store: three days from the same 100 kg */
+        const leak = sp => {
+          const s = powered(); servedHall(s, 4, 3, 'romaine'); S.setCo2(s, sp);
+          s.co2 = 100; days(s, 3);
+          return s.co2;
+        };
+        /* a mushroom bed on a lean store, at the setpoint and enriched */
+        const [o1, o2] = twin('oyster', 2, 2, 3, s => S.setCo2(s, 2000),
+          { eachHour: x => { x.co2 = 100; x.residue = 500; } });
+        return [
+          ['2000 ppm grows about 8% faster', +(e2.f.growth / base.f.growth).toFixed(2), '~1.08'],
+          ['3500 ppm about 11%', +(e35.f.growth / base.f.growth).toFixed(2), '~1.11'],
+          ['3500 ppm costs real morale over three weeks', Math.round(m10.s.morale - m35.s.morale), '>5'],
+          ['2000 ppm does not', Math.abs(Math.round(m10.s.morale - m20.s.morale)), '<=1'],
+          ['enriched air leaks out of the store', leak(3500) < leak(1000), true],
+          ['mushrooms run to stem in enriched air', +(o2.f.growth / o1.f.growth).toFixed(2), '~0.68']
+        ];
+      } },
+
+    { name: 'Wet air grows mould (the EDEN ISS winter)',
+      why: 'EDEN ISS sat at up to 86% humidity for hours through its winter',
+      run() {
+        const infections = [0, 0];
+        const watch = k => (x) => { for (const f of x.fields) if (f.infected) { infections[k]++; f.infected = false; } };
+        const [dry, wet] = twin('cucumber', 3, 3, 40, (s, f) => { S.setIntensity(s, f, S.PPFD.high); },
+          { tend: true, restock: true,
+            eachHour: x => { if (x.fields[0].ppfd === S.PPFD.high) x.flags.biofilm = 1; },
+            each: x => watch(x.fields[0].ppfd === S.PPFD.high ? 1 : 0)(x) });
+        const f = wet.f;
+        wet.s.stats.rhHours = 24;
+        const open = S.infectionRisk(wet.s, f);
+        S.setFans(wet.s, f, true);
+        const fanned = S.infectionRisk(wet.s, f);
+        wet.s.up.uvc = true;
+        const uv = S.infectionRisk(wet.s, f);
+        /* the dehumidifier boost, measured on the same wet hall */
+        const g = powered(); const h = servedHall(g, 3, 3, 'cucumber'); S.setIntensity(g, h, S.PPFD.high);
+        g.hour = 12; S.tick(g); const rhOff = g.air.rh;
+        S.setDehum(g, true); S.tick(g); const rhOn = g.air.rh;
+        return [
+          ['a dry Standard hall never goes over 80%', dry.s.history.every(x => x.rh <= 80), true],
+          ['and never goes mouldy', infections[0], 0],
+          ['a high-light cucumber hall with a fouled loop runs wet', wet.s.history.filter(x => x.rh > 80).length, '>=30'],
+          ['and the mould finds it', infections[1], '>=1'],
+          ['canopy fans halve the odds', +(fanned / open).toFixed(2), 0.5],
+          ['UV-C ends them', uv, 0],
+          ['boosting the dehumidifiers brings the peak down', rhOn < rhOff, true],
+          ['and costs power while it runs', S.auxLoad(g) > 0, true]
+        ];
+      } },
+
+    { name: 'Big halls need fans (LunarLeaf-CFD)',
+      why: 'still air at 1/6 g starves a leaf of CO₂; airflow, not gravity, is what fixes it',
+      run() {
+        const big = { w: 8, h: 8, fans: false }, small = { w: 3, h: 4, fans: false };
+        const s = powered();
+        const f = servedHall(s, 4, 4, 'romaine');
+        const before = S.lampNeed(s, f);
+        S.setFans(s, f, true);
+        const after = S.lampNeed(s, f);
+        const parts = [];
+        S.setFans(s, f, false); S.growthFactors(s, f, null, parts);
+        const listed = parts.some(([k, v]) => /Still air/.test(k) && v < 1);
+        return [
+          ['an eight-by-eight hall with no fans loses a fifth', +S.stillAir(big).toFixed(2), 0.8],
+          ['fans give it all back', S.stillAir(Object.assign({}, big, { fans: true })), 1],
+          ['a twelve-tile hall mixes itself', S.stillAir(small), 1],
+          ['fans draw 6 W a tile', +(after - before).toFixed(3), +(16 * S.FAN_KW).toFixed(3)],
+          ['and the hall panel names still air as the limit', listed, true]
+        ];
+      } },
+
+    { name: 'Lamps are heat, and on a lunar night the only heat',
+      why: 'radiators sized for Standard lamps cannot carry High at lunar noon',
+      run() {
+        const atNoon = (ppfd, radiators) => {
+          const s = S.newGame();
+          s.credits = 400000; s.science = 999;
+          S.place(s, S.tileAt(s, 19, 10), 'reactor');
+          s.up.radiator = radiators;
+          for (const f of s.fields) { S.clear(s, f); }
+          S.plant(s, s.fields[0], 'romaine');
+          S.setIntensity(s, s.fields[0], ppfd);
+          s.day = 7; s.hour = 9;          // the sun near its highest
+          S.tick(s);
+          return s.air.t;
+        };
+        const hot = atNoon(S.PPFD.high, 0), cool = atNoon(S.PPFD.std, 0), fitted = atNoon(S.PPFD.high, 2);
+        /* night: a farm whose lamps are almost all shed */
+        const n = powered();
+        for (let i = 0; i < 3; i++) servedHall(n, 3, 3, 'romaine');
+        n.day = 20; n.hour = 12;
+        const std = n.fields.reduce((a, f) => a + S.area(f) * window.LF_DATA.K.LED_KW, 0);
+        S.climateStep(n, std * 0.05, true); const shed = n.air.t;
+        S.climateStep(n, std, true); const lit = n.air.t;
+        return [
+          ['High light at lunar noon cooks the hall', +hot.toFixed(1), '>25'],
+          ['and the canopy slows for it', S.tempFactor(hot) < 1, true],
+          ['Standard light at noon stays at the setpoint', +cool.toFixed(1), '<=22'],
+          ['two radiator wings carry High at noon', +fitted.toFixed(1), '<=25'],
+          ['a lunar night with the lamps shed runs cold', +shed.toFixed(1), '<18'],
+          ['keep the lamps lit and the halls stay warm', +lit.toFixed(1), 21]
+        ];
+      } },
+
+    { name: 'A sealed hall stops fixing carbon',
+      why: 'a lit chamber with no air exchange draws its CO₂ to nothing in minutes',
+      run() {
+        const [open, sealed] = twin('romaine', 2, 2, 1, (s, f) => { f.sealed = 72; });
+        const fault = powered(); servedHall(fault, 3, 3, 'romaine'); servedHall(fault, 2, 2, 'radish');
+        S.resolveEvent(fault, 'airhandler', 'air_seal');
+        const biggest = fault.fields.slice().sort((a, b) => S.area(b) - S.area(a))[0];
+        /* and a scrubber fault puts the crew's breath in the halls */
+        const sc = powered(); servedHall(sc, 4, 4, 'romaine');
+        S.resolveEvent(sc, 'scrubber', 'scrub_ride');
+        days(sc, 1);
+        return [
+          ['a day sealed grows under a tenth of an open twin', +(sealed.f.growth / open.f.growth).toFixed(3), '<0.1'],
+          ['the fault seals the biggest lit hall', biggest.sealed, '>0'],
+          ['without a scrubber the crew push the halls past 2500 ppm', Math.round(sc.stats.ppmPeak), '>2500']
+        ];
+      } },
+
+    /* ---- roots: regolith, tanks and the nursery ---- */
+
+    { name: 'Aeroponics beats raw regolith (EDEN ISS racks against Apollo soil)',
+      why: 'bare roots in mist against dust that stunted Arabidopsis to a tenth of its size',
+      run() {
+        const bed = sub => {
+          seed(4242);
+          const s = powered();
+          S.place(s, S.tileAt(s, 11, 9), 'tanks');
+          const f = servedHall(s, 2, 2, null);
+          if (sub !== 'regolith') S.setSubstrate(s, f, sub);
+          S.plant(s, f, 'romaine');
+          days(s, 4);
+          return { s, f };
+        };
+        const raw = bed('regolith'), aero = bed('aero'), sint = bed('sintered');
+        const bare = powered(); const h = servedHall(bare, 2, 2, null);
+        return [
+          ['aeroponic racks grow about 1.6× raw regolith', +(aero.f.growth / raw.f.growth).toFixed(2), '~1.59'],
+          ['sintered beds about 1.4×', +(sint.f.growth / raw.f.growth).toFixed(2), '~1.38'],
+          ['misted roots stay wet without a watering can', aero.f.moisture, '>=0.9'],
+          ['aeroponics refuses a farm with no tank room', !!S.setSubstrate(bare, h, 'aero'), true],
+          ['firing beds draws stored energy', S.substrateCost(bare, h, 'sintered').kwh, 12]
+        ];
+      } },
+
+    { name: 'The first crop in raw regolith is thin (Apollo soil)',
+      why: 'Paul et al. 2022: rosettes in Apollo soil reached 2–13% of their size in simulant',
+      run() {
+        const firstCut = (prep) => {
+          const s = powered();
+          const f = servedHall(s, 2, 2, null);
+          prep(s, f);
+          S.plant(s, f, 'romaine');
+          f.growth = 1;
+          const before = s.food;
+          S.harvest(s, f);
+          return { kcal: s.food - before, f };
+        };
+        const worked = firstCut((s, f) => { f.soil = 1; });
+        const raw = firstCut(() => {});
+        const rough = firstCut((s, f) => { f.immature = 1; });
+        const sint = firstCut((s, f) => { S.setSubstrate(s, f, 'sintered'); });
+        /* crater-rim ejecta on the real map */
+        const m = S.newGame();
+        S.addField(m, 4, 1, 3, 1);
+        return [
+          ['a first crop in raw regolith yields about half', +(raw.kcal / worked.kcal).toFixed(2), '~0.51'],
+          ['immature crater-rim ejecta does a little better', +(rough.kcal / worked.kcal).toFixed(2), '~0.59'],
+          ['sintered beds yield in full from the first crop', +(sint.kcal / worked.kcal).toFixed(2), 1],
+          ['the harvest still works the beds', raw.f.soil, '>0.15'],
+          ['the map marks rough ground as immature', m.fields[m.fields.length - 1].immature, 1]
+        ];
+      } },
+
+    { name: 'The tanks drift, and EDEN ISS\'s schedule holds them',
+      why: 'two tanks, EC 2.21 and 3.49 mS/cm, emptied and refilled every two to three months',
+      run() {
+        const T = window.LF_DATA.TANKS;
+        const s = powered();
+        S.place(s, S.tileAt(s, 11, 9), 'tanks');
+        const f = servedHall(s, 2, 2, null);
+        S.setSubstrate(s, f, 'aero');
+        S.plant(s, f, 'romaine');
+        days(s, 120, { tend: true, replant: true, restock: true });
+        const k = s.tanks.leafy;
+        const ecDrift = k.ec, chem = S.chemFactor(s, 'leafy');
+        const reg = servedHall(s, 2, 2, 'romaine');
+        const aeroHit = 1 - S.hallChem(s, f, S.cropById('romaine'), true);
+        const regHit = 1 - S.hallChem(s, reg, S.cropById('romaine'), true);
+        const water0 = s.water, nut0 = s.nutrients;
+        const replaced = S.replaceTank(s, 'leafy');
+        /* with the dosing off, pH walks out of its band */
+        const d = powered();
+        S.place(d, S.tileAt(d, 11, 9), 'tanks');
+        servedHall(d, 3, 3, 'romaine');
+        S.setAutoDose(d, 'leafy', false);
+        days(d, 3, { tend: true });
+        /* raw regolith on the line costs acid */
+        const dosing = sub => {
+          seed(99);
+          const g = powered();
+          S.place(g, S.tileAt(g, 11, 9), 'tanks');
+          const h = servedHall(g, 3, 3, null);
+          if (sub) S.setSubstrate(g, h, sub);
+          S.plant(g, h, 'romaine');
+          days(g, 10, { tend: true });
+          return g.stats.dosedTotal;
+        };
+        return [
+          ['four months unreplaced, the leafy tank is past its band', +ecDrift.toFixed(2), '>2.51'],
+          ['and the crop feels it', +chem.toFixed(3), '<1'],
+          ['bare roots feel it about 3.3× more than regolith', +(aeroHit / regHit).toFixed(2), '~3.33'],
+          ['a fresh tank is back on EDEN ISS\'s setpoint', replaced === null && k.ec === T.leafy.ec && S.chemFactor(s, 'leafy') === 1, true],
+          ['and it costs water and stock', s.water < water0 && s.nutrients < nut0, true],
+          ['with the dosing off, pH leaves its band within three days', +(d.tanks.leafy.ph - T.leafy.ph).toFixed(2), '>0.3'],
+          ['raw regolith on the line costs more acid than fired beds', dosing(null) > dosing('sintered'), true]
+        ];
+      } },
+
+    { name: 'Calcium deficiency in the fruit (EDEN ISS tomato)',
+      why: 'EDEN ISS raised calcium and cut potassium in the fruit tank mid-season',
+      run() {
+        const pick = flag => {
+          const s = powered();
+          S.place(s, S.tileAt(s, 11, 9), 'tanks');
+          const f = servedHall(s, 2, 2, 'tomato');
+          f.soil = 1; f.growth = 1;
+          if (flag) S.resolveEvent(s, 'calcium', 'ca_ride');
+          const before = s.credits;
+          S.harvest(s, f);
+          return { s, paid: s.credits - before };
+        };
+        const ok = pick(false), rot = pick(true);
+        const ev = window.LF_DATA.EVENTS.find(e => e.id === 'calcium');
+        const due = ev.when(ok.s);
+        S.resolveEvent(ok.s, 'calcium', 'ca_fix');
+        return [
+          ['the alert can fire on a farm growing tomato on tanks', due, true],
+          ['blossom-end rot cuts what the fruit sells for', +(rot.paid / ok.paid).toFixed(2), '~0.70'],
+          ['EDEN ISS\'s recipe change fixes it for good', ok.s.tanks.recipeFixed, true],
+          ['and the alert does not come back', ev.when(ok.s), false],
+          ['the recipe on file is the raw OSDR one', window.LF_DATA.TANKS.fruit.adjusted['Ca²⁺'], 0.711]
+        ];
+      } },
+
+    { name: 'The nursery puts halls a fortnight ahead',
+      why: 'EDEN ISS raised every seedling 10–20 days in rockwool before it went into a rack',
+      run() {
+        const grow = transplant => {
+          seed(7);
+          const s = powered();
+          S.place(s, S.tileAt(s, 13, 9), 'nursery');
+          days(s, 15);
+          const stock = s.nursery.stock;
+          const f = servedHall(s, 2, 2, null);
+          f.soil = 1;
+          S.plant(s, f, 'romaine', transplant ? null : { transplant: false });
+          const start = f.growth, after = s.nursery.stock;
+          let took = 0;
+          while (f.growth < 1 && took < 60) {
+            days(s, 1);
+            if (f.moisture < 0.5) S.water(s, f);
+            if (f.feed < 0.5) S.feed(s, f);
+            took++;
+          }
+          return { start, took, stock, after };
+        };
+        const tp = grow(true), sown = grow(false);
+        return [
+          ['a fortnight raises a full tray', tp.stock, 12],
+          ['transplanted romaine starts 14 of its 38 days in', +tp.start.toFixed(2), '~0.37'],
+          ['and stands in the hall about 0.63 as long', +(tp.took / sown.took).toFixed(2), '~0.63'],
+          ['sowing four tiles takes four from the tray', tp.stock - tp.after, 4],
+          ['sowing direct takes none', sown.start, 0]
+        ];
+      } },
+
+    { name: 'A v8 save carries into v9',
+      why: 'everything the research modules added has to arrive as the defaults a v8 player was seeing',
+      run() {
+        const s = S.newGame();
+        s.credits = 40000;
+        addHall(s, 3, 2, 'romaine');
+        days(s, 20, { tend: true });
+        const old = JSON.parse(JSON.stringify(s));
+        old.version = 8;
+        delete old.co2Set; delete old.air; delete old.tanks; delete old.nursery; delete old.dehumBoost;
+        delete old.stats.labOpen; delete old.stats.freshKg; delete old.stats.rackM2Days;
+        delete old.flags.throttle; delete old.flags.scrubber; delete old.flags.calcium;
+        const soils = old.fields.map(f => f.soil);
+        old.fields.forEach(f => {
+          ['ppfd', 'picks', 'fans', 'sealed', 'substrate', 'transplanted', 'immature'].forEach(k => delete f[k]);
+        });
+        const res = S.migrate(old);
+        const kept = old.fields.every((f, i) => f.substrate === 'regolith' && f.soil === soils[i]);
+        const grew0 = old.fields[1].growth;
+        days(old, 5, { tend: true });
+        return [
+          ['the v8 save is accepted', res.ok && res.from === 8, true],
+          ['halls stay regolith, with the soil they had', kept, true],
+          ['lamps at Standard and fans off', old.fields.every(f => f.ppfd === S.PPFD.std && f.fans === false), true],
+          ['the air at EDEN ISS\'s setpoints', old.co2Set === 1000 && old.air.ppm === 1000, true],
+          ['fresh tanks on their setpoints', old.tanks.leafy.ec === 2.21 && old.tanks.fruit.ph === 5.91, true],
+          ['the fresh-mass ledger credits the crop standing', old.stats.rackM2Days, '>0'],
+          ['and the carried run keeps growing', old.fields[1].growth > grew0 || old.stats.harvests > 0, true]
+        ];
+      } },
+
+    { name: 'Auto-manage runs the research systems',
+      why: 'a farm left to its crew must keep tanks, air and lamps in hand without being told',
+      run() {
+        const s = powered();
+        s.credits = 80000;
+        s.auto = true;
+        S.place(s, S.tileAt(s, 11, 9), 'tanks');
+        const big = servedHall(s, 6, 6, 'potato');
+        const a = servedHall(s, 2, 2, null);
+        S.setSubstrate(s, a, 'aero');
+        S.plant(s, a, 'romaine');
+        let maxSet = 0, maxPpm = 0;
+        days(s, 240, { eachHour: x => { maxSet = Math.max(maxSet, x.co2Set); maxPpm = Math.max(maxPpm, x.air.ppm); } });
+        return [
+          ['it survives', s.over, null],
+          ['it replaces a drifting tank', s.stats.tankReplacements, '>=1'],
+          ['and ends with both tanks in band', S.inBand(s, 'leafy') && S.inBand(s, 'fruit'), true],
+          ['it puts fans on a hall big enough to stagnate', big.fans, true],
+          ['it never enriches past 2000 ppm', maxSet, '<=2000'],
+          ['and never makes the crew breathe 2500', Math.round(maxPpm), '<=2500'],
+          ['it brings in an aeroponic harvest', s.stats.aeroHarvests, '>=1']
+        ];
+      } },
+
+    { name: 'The research systems are neutral until you touch them',
+      why: 'a farm at EDEN ISS\'s defaults must play exactly as it did before them',
+      run() {
+        const s = S.newGame();
+        s.credits = 60000;
+        for (let i = 0; i < 3; i++) { const f = servedHall(s, 4, 3, 'romaine'); if (f) f.soil = 1; }
+        let off = [], wet = 0, hot = 0, thin = 0;
+        const watch = ['Light', 'CO₂ enrichment', 'Too hot', 'Too cold', 'Still air (no fans)',
+                       'Sealed — no air exchange', 'Tank chemistry', 'Aeroponic roots', 'Sintered beds'];
+        days(s, 60, { tend: true, replant: true, restock: true, eachHour: x => {
+          if (x.air.rh >= 80) wet++;
+          if (x.air.t > 21) hot++;
+          if (x.co2 >= 14 && x.air.ppm !== x.co2Set) thin++;
+          for (const f of S.planted(x)) {
+            if (!f.litNow) continue;
+            const parts = [];
+            S.growthFactors(x, f, null, parts);
+            for (const [k, v] of parts) if (watch.includes(k) && v !== 1) off.push(k);
+          }
+        } });
+        return [
+          ['every research factor is exactly 1 in a lit hall', [...new Set(off)].join(', '), ''],
+          ['humidity never reaches 80%', wet, 0],
+          ['Standard lamps never overheat a hall', hot, 0],
+          ['the halls sit at the setpoint whenever the store can hold it', thin, 0],
+          ['the run came through a lunar night', s.stats.nightsSurvived, '>=1']
         ];
       } }
   ];

@@ -1,7 +1,8 @@
 /* Lunar Farm — interface, loop and persistence. */
 
 (function () {
-  const { K, CROPS, TRAITS, GMO, BUILDINGS, UPGRADES, EVENTS, MILESTONES } = window.LF_DATA;
+  const { K, CROPS, TRAITS, GMO, BUILDINGS, UPGRADES, EVENTS, MILESTONES, BENCHMARKS, EDEN_SEASON,
+          TANKS, SUBSTRATES } = window.LF_DATA;
   const S = window.LF_SIM;
   const R = window.LF_RENDER;
   /* One stable key from now on. The versioned keys are what earlier builds
@@ -31,7 +32,7 @@
   const GLYPH = {
     track: '═', rail: '╬', greenhouse: '⌂', solar: '▤', battery: '▬', hab: '◍',
     isru: '⚗', composter: '♻', reactor: '☢', pad: '◎', studio: '◉', vault: '⌸',
-    worms: '≡', nitrifier: '⇅', digester: '◗', reef: '❋'
+    worms: '≡', nitrifier: '⇅', digester: '◗', reef: '❋', tanks: '⊚', nursery: '⁘'
   };
 
   /* ---------- the catalogue's photographs ----------
@@ -450,6 +451,9 @@
       ['Water', fmt(s.water) + ' L', s.water < 80 ? 'bad' : s.water < 200 ? 'warn' : ''],
       ['Oxygen', s.o2.toFixed(0) + ' kg', s.o2 < 40 ? 'bad' : s.o2 < 90 ? 'warn' : ''],
       ['CO₂', s.co2.toFixed(0) + ' kg', s.co2 < 20 ? 'bad' : s.co2 < 55 ? 'warn' : ''],
+      ['Air', `${s.air.t.toFixed(0)}° · ${Math.round(s.air.rh)}% · ${fmt(s.air.ppm)} ppm`,
+        (s.air.t > 28 || s.air.rh > 90 || s.air.ppm > S.CREW_PPM_SMAC) ? 'bad'
+          : (s.air.t > 25 || s.air.t < 18 || s.air.rh > S.RH_RISK || s.air.ppm > S.CREW_PPM_LIMIT) ? 'warn' : ''],
       ['Nutrients', fmt(s.nutrients), s.nutrients < 40 ? 'warn' : ''],
       ['Residue', fmt(s.residue), ''],
       ['Waste', fmt(s.waste), s.waste > 250 ? 'warn' : ''],
@@ -527,7 +531,11 @@
       digester: `Degrading solid waste and residue back to carbon dioxide and minerals. Taking ${(s.stats.recycled.digester || 0).toFixed(1)} a day — this is what keeps the canopy's carbon from leaving inside the food.`,
       reef: `A closed marine microcosm. Laying down ${(s.stats.recycled.reef || 0).toFixed(2)} carbonate a day; ${fmt(s.carbonate)} in the stockpile, discounting construction. Speculative: no reef has been flown, and calcification is a carbon dioxide source rather than a sink.`,
       vault: `Sealed into the tube. ${S.accessions(s).length} of ${S.vaultTarget()} lines held, returning ${(S.accessions(s).length * 0.04).toFixed(2)} science a day.`,
-      track: 'Graded surface road. Halls and modules touching the network are serviced by the crew.'
+      track: 'Graded surface road. Halls and modules touching the network are serviced by the crew.',
+      tanks: S.tankRoomLive(s)
+        ? `Feeding ${S.tankTiles(s, 'leafy')} tiles from the leafy tank and ${S.tankTiles(s, 'fruit')} from the fruit tank. Both are in the Systems tab.`
+        : 'Offline — the tank room has to touch the track network to feed the halls.',
+      nursery: `${Math.floor(s.nursery.stock)} tiles of transplants ready. A hall sown from them starts a fortnight ahead.`
     }[t.b.type] || '';
     box.innerHTML = `<div class="baytitle"><h2>${B.name}</h2><span class="num">${coord}</span></div>
       <p class="cultivar">Structure</p>
@@ -541,20 +549,37 @@
 
     if (!f.crop) {
       box.innerHTML = `<div class="baytitle"><h2>Grow hall</h2><span class="num">${coord}</span></div>
-        <p class="cultivar">${A} tiles under glass, beds flushed and ready.</p>
-        ${meter('Bed conditioning', f.soil,
-          f.soil > 0.66 ? '#c9a86a' : f.soil > 0.33 ? 'var(--warn)' : 'var(--bad)')}
+        <p class="cultivar">${A} tiles under glass, ${SUBSTRATES[f.substrate || 'regolith'].name.toLowerCase()}, ready to sow.</p>
+        ${floorHTML(f, null)}
+        ${lampHTML(f)}
         <div class="rows" style="margin-top:10px">
-          <div class="row"><span class="k">Lighting draw</span><span class="v">${(A * S.ledKW(s)).toFixed(2)} kW</span></div>
+          <div class="row"><span class="k">Lighting draw when sown</span><span class="v">${(A * S.ledKW(s) * (S.ppfdEff(s, f) / S.PPFD.std)).toFixed(2)} kW</span></div>
+          <div class="row"><span class="k">Rack area</span><span class="v">${fmt(A * S.TILE_M2)} m²</span></div>
           <div class="row"><span class="k">Service</span><span class="v ${f.serviced ? 'good' : 'bad'}">${f.serviced ? 'ON TRACK NETWORK' : 'NO TRACK'}</span></div>
         </div>
         ${f.serviced ? '' : '<p class="note" style="border-left-color:var(--bad)">No track connection — the crew cannot service this hall, and it grows at about three-quarters speed.</p>'}`;
-      const cond = S.conditionCost(f);
-      const cb = el('button', 'act wide',
-        `Condition beds (${fmt(cond.credits)} cr · ${Math.ceil(cond.nutrients)} nutrients)`);
-      cb.disabled = f.soil >= 0.995;
-      cb.onclick = () => act(S.condition(s, f));
-      acts.appendChild(cb);
+      wireLamp(box, f);
+      if ((f.substrate || 'regolith') !== 'aero') {
+        const cond = S.conditionCost(f);
+        const cb = el('button', 'act wide',
+          `Condition beds (${fmt(cond.credits)} cr · ${Math.ceil(cond.nutrients)} nutrients)`);
+        cb.disabled = f.soil >= 0.995;
+        cb.onclick = () => act(S.condition(s, f));
+        acts.appendChild(cb);
+      }
+      /* refit the floor — only an empty hall can be */
+      const refit = (to, label) => {
+        if ((f.substrate || 'regolith') === to) return;
+        const c = S.substrateCost(s, f, to);
+        const b = el('button', 'act', `${label} (${fmt(c.credits)} cr${c.kwh ? ' · ' + c.kwh + ' kWh' : ''})`);
+        b.disabled = to === 'aero' && !S.count(s, 'tanks');
+        b.title = SUBSTRATES[to].desc;
+        b.onclick = () => act(S.setSubstrate(s, f, to));
+        acts.appendChild(b);
+      };
+      refit('sintered', 'Sinter');
+      refit('aero', 'Fit aeroponics');
+      refit('regolith', 'Strip to regolith');
       const btn = el('button', 'act primary wide', 'Sow a crop');
       btn.onclick = openPlant;
       acts.appendChild(btn);
@@ -563,33 +588,48 @@
 
     const c = S.cropById(f.crop);
     const daysIn = s.day - f.plantedDay;
-    const remain = f.growth >= 1 ? 0 : Math.ceil((1 - f.growth) * c.days * (24 / Math.max(1, s.photoperiod)));
+    /* growth per day while the hall is lit is (growth factor) / (crop days) at any
+       photoperiod, so the estimate is read straight off the simulation's own
+       multiplier — it assumes the lamps stay on */
+    const parts = [];
+    const g = S.growthFactors(s, f, null, parts);
+    const remain = f.growth >= 1 ? 0 : (g > 0.001 ? Math.ceil((1 - f.growth) * c.days / g) : Infinity);
+    const spread = S.isSpread(c);
+    const share = f.picks > 0 ? S.pickShare(c) : 1;
+    const freshKg = S.isCulture(c) ? 0 : (c.fresh || 0) * S.TILE_M2 * A * share;
+    const limits = parts.filter(([, v]) => Math.abs(v - 1) > 0.005)
+      .sort((a, b) => a[1] - b[1])
+      .map(([k, v]) => `<div class="row"><span class="k">${k}</span><span class="v ${v < 1 ? (v < 0.6 ? 'bad' : 'warn') : 'good'}">×${v.toFixed(2)}</span></div>`)
+      .join('');
     box.innerHTML = `
       <div class="baytitle"><h2>${c.name}</h2><span class="num">${coord}</span></div>
-      <p class="cultivar">${c.cultivar || '&nbsp;'}</p>
-      ${meter('Growth', f.growth, f.growth >= 1 ? 'var(--accent)' : 'var(--accent-2)', f.growth >= 1 ? 'READY' : pct(f.growth))}
+      <p class="cultivar">${c.cultivar || '&nbsp;'}${spread ? ' · cut &amp; come again' : ''}</p>
+      ${meter('Growth', f.growth, f.growth >= 1 ? 'var(--accent)' : 'var(--accent-2)', f.growth >= 1 ? (spread && f.picks > 0 ? 'READY TO PICK' : 'READY') : pct(f.growth))}
       ${meter('Health', f.health, f.health > 0.6 ? 'var(--accent)' : f.health > 0.3 ? 'var(--warn)' : 'var(--bad)')}
       ${meter('Moisture', f.moisture, f.moisture < 0.15 ? 'var(--bad)' : '#4aa8ff')}
       ${meter('Nutrient charge', f.feed, f.feed < 0.1 ? 'var(--bad)' : '#7bd88f')}
-      ${meter('Bed conditioning', f.soil,
-        f.soil > 0.66 ? '#c9a86a' : f.soil > 0.33 ? 'var(--warn)' : 'var(--bad)')}
+      ${floorHTML(f, c)}
       <div class="rows" style="margin-top:12px">
         <div class="row"><span class="k">Hall size</span><span class="v">${A} tiles</span></div>
         <div class="row"><span class="k">Sown</span><span class="v">${daysIn} d ago</span></div>
-        <div class="row"><span class="k">Est. to harvest</span><span class="v">${f.growth >= 1 ? '—' : remain + ' d'}</span></div>
-        <div class="row"><span class="k">Yield at full health</span><span class="v">${fmt(c.kcal * S.KCAL_SCALE * A)} kcal</span></div>
-        <div class="row"><span class="k">Station pays</span><span class="v good">${fmt(c.value * S.VALUE_SCALE * A)} cr</span></div>
+        <div class="row"><span class="k">Est. to ${spread && f.picks > 0 ? 'next picking' : 'harvest'}</span><span class="v ${remain === Infinity ? 'bad' : ''}">${f.growth >= 1 ? '—' : remain === Infinity ? 'STALLED' : remain + ' d lit'}</span></div>
+        ${spread ? `<div class="row"><span class="k">Pickings</span><span class="v">${f.picks || 0} so far · stands to day ${f.plantedDay + c.stand}</span></div>` : ''}
+        <div class="row"><span class="k">${spread && f.picks > 0 ? 'This picking' : 'Yield'} at full health</span><span class="v">${fmt(c.kcal * S.KCAL_SCALE * A * share)} kcal${freshKg ? ' · ' + fmt(freshKg) + ' kg' : ''}</span></div>
+        <div class="row"><span class="k">Station pays</span><span class="v good">${fmt(c.value * S.VALUE_SCALE * A * share)} cr</span></div>
         ${c.dark
           ? `<div class="row"><span class="k">Lighting</span><span class="v good">NONE NEEDED</span></div>`
-          : `<div class="row"><span class="k">Lamps</span><span class="v ${f.litNow ? 'good' : 'warn'}">${f.litNow ? 'ON' : 'OFF'}</span></div>`}
+          : `<div class="row"><span class="k">Lamps</span><span class="v ${f.litNow ? 'good' : 'warn'}">${f.litNow ? 'ON' : 'OFF'} · ${S.lampNeed(s, f).toFixed(2)} kW</span></div>`}
         ${c.residue ? `<div class="row"><span class="k">Residue in store</span>
           <span class="v ${f.starved ? 'bad' : 'good'}">${f.starved ? 'EMPTY — STALLED' : fmt(s.residue)}</span></div>` : ''}
         ${c.respires ? '<div class="row"><span class="k">Gas exchange</span><span class="v">RESPIRES — GIVES CO₂</span></div>' : ''}
-        <div class="row"><span class="k">Beds yielding</span><span class="v ${f.soil > 0.66 ? 'good' : 'warn'}">${pct(S.RAW_SOIL + (1 - S.RAW_SOIL) * (f.soil))}</span></div>
+        ${f.transplanted ? '<div class="row"><span class="k">Started from</span><span class="v good">NURSERY TRANSPLANTS</span></div>' : ''}
         ${f.serviced ? '' : '<div class="row"><span class="k">Service</span><span class="v bad">NO TRACK</span></div>'}
         ${f.infected ? '<div class="row"><span class="k">Status</span><span class="v bad">FUNGAL INFECTION</span></div>' : ''}
         ${f.dead ? '<div class="row"><span class="k">Status</span><span class="v bad">CROP LOST</span></div>' : ''}
       </div>
+      ${c.dark ? '' : lampHTML(f, c)}
+      ${limits ? `<h3 class="sec" style="margin-top:12px">What is setting its pace</h3>
+        <div class="rows">${limits}</div>` : ''}
       <p class="note">${c.note}</p>
       ${f.starved ? '<p class="note" style="border-left-color:var(--bad)">Nothing left for it to eat. Residue only comes from harvesting something photosynthetic — a farm of nothing but cultures starves.</p>' : ''}`;
 
@@ -604,8 +644,66 @@
     mk(`Treat (${fmt(120 * A)} cr)`, '', () => act(S.treat(s, f)), !f.infected);
     mk('Clear', '', () => act(S.clear(s, f)));
     const cc = S.conditionCost(f);
-    mk(`Condition (${fmt(cc.credits)} cr)`, '', () => act(S.condition(s, f)), f.soil >= 0.995);
-    mk(f.growth >= 1 ? 'Harvest' : 'Not ready', 'primary wide', () => act(S.harvest(s, f)), f.growth < 1);
+    if (f.substrate !== 'aero') mk(`Condition (${fmt(cc.credits)} cr)`, '', () => act(S.condition(s, f)), f.soil >= 0.995);
+    if (spread && f.growth >= 1) mk('Final cut', '', () => act(S.harvest(s, f, null, true)));
+    mk(f.growth >= 1 ? (spread ? (f.picks > 0 ? 'Pick' : 'First cut') : 'Harvest') : 'Not ready',
+      'primary wide', () => act(S.harvest(s, f)), f.growth < 1);
+    wireLamp(box, f);
+  }
+
+  /* The floor of a hall: what it is, how far worked, what it yields, and which
+     tank it drinks from. Regolith is labelled with the Apollo soil it behaves
+     like — crater-rim ejecta is young and kinder, settled ground is mature. */
+  function floorHTML(f, c) {
+    const sub = f.substrate || 'regolith';
+    const row = (k, v, cls) => `<div class="row"><span class="k">${k}</span><span class="v ${cls || ''}">${v}</span></div>`;
+    const crop = c || { soilFloor: 0 };
+    let out = '';
+    if (sub !== 'aero') {
+      out += meter(sub === 'sintered' ? 'Sintered bed, worked' : 'Bed conditioning', f.soil,
+        f.soil > 0.66 ? '#c9a86a' : f.soil > 0.33 ? 'var(--warn)' : 'var(--bad)');
+    }
+    const grow = S.bedFactor(f, crop), yieldNow = S.bedYield(f, crop);
+    const apollo = sub !== 'regolith' ? SUBSTRATES[sub].short
+      : (f.immature || 0) > 0.5 ? 'Crater-rim ejecta — young, like Apollo 12' : 'Settled regolith — mature, like Apollo 11';
+    out += `<div class="rows" style="margin-top:8px">
+      ${row('Floor', apollo)}
+      ${row('Bed growth', pct(grow), grow >= 1 ? 'good' : grow > 0.8 ? '' : 'warn')}
+      ${row('Harvest yield', pct(yieldNow) + (yieldNow < 1 ? ' — thin until the beds are worked' : ''), yieldNow >= 1 ? 'good' : 'warn')}`;
+    const id = c ? S.tankFor(c) : null;
+    if (id && S.count(s, 'tanks')) {
+      const T = TANKS[id], k = s.tanks[id], ok = S.inBand(s, id);
+      out += row(T.name, `EC ${k.ec.toFixed(2)} · pH ${k.ph.toFixed(2)} · ${ok ? 'in band' : 'DRIFTED'} · roots ${pct(S.EXPOSURE[sub])} exposed`, ok ? 'good' : 'warn');
+    }
+    return out + '</div>';
+  }
+
+  /* The lamp dimmer, with what the setting buys. The light-response numbers are
+     the simulation's own: growth from lightGain, per mole as growth over the
+     light delivered relative to Standard at 16 h. */
+  const LAMP_SETTINGS = [['low', 'Low'], ['std', 'Standard · EDEN'], ['high', 'High']];
+  function lampHTML(f, c) {
+    const P = S.PPFD, now = f.ppfd || P.std;
+    const dli = S.hallDLI(s, f);
+    const gain = c ? S.lightGain(c, dli) : null;
+    const perMol = gain !== null ? gain / (dli / S.DLI_STD) : null;
+    return `<h3 class="sec" style="margin-top:12px">Lamps</h3>
+      <div class="seg lampseg">${LAMP_SETTINGS.map(([k, label]) =>
+        `<button data-ppfd="${P[k]}" class="${now === P[k] ? 'on' : ''}" title="${P[k]} µmol/m²/s">${label}<small>${P[k]} µmol</small></button>`).join('')}</div>
+      <div class="rows" style="margin-top:8px">
+        <div class="row"><span class="k">Daily light at ${s.photoperiod} h</span><span class="v">${dli.toFixed(1)} mol/m²/d${s.flags.throttle ? ' · THROTTLED' : ''}</span></div>
+        ${c ? `<div class="row"><span class="k">${c.name} is happiest near</span><span class="v">${c.dli} mol/m²/d</span></div>
+        <div class="row"><span class="k">Growth vs Standard</span><span class="v ${gain >= 1 ? 'good' : 'warn'}">${pct(gain)} · ${pct(perMol)} per mole</span></div>` : ''}
+        <div class="row"><span class="k">A real LED array would draw</span><span class="v">≈${Math.round(S.ppfdEff(s, f) / S.LED_EFFICACY)} W/m²</span></div>
+        ${f.sealed > 0 ? `<div class="row"><span class="k">Air handler</span><span class="v bad">DOWN — SEALED ${f.sealed} h</span></div>` : ''}
+      </div>
+      <div class="ctrl"><label>Canopy fans · ${(S.area(f) * S.FAN_KW).toFixed(2)} kW${S.area(f) > S.STILL_FREE_TILES ? ` · without them ×${S.stillAir(Object.assign({}, f, { fans: false })).toFixed(2)}` : ' · a hall this size mixes itself'}</label>
+        <div class="seg"><button data-fans="1" class="${f.fans ? 'on' : ''}">On</button>
+        <button data-fans="0" class="${!f.fans ? 'on' : ''}">Off</button></div></div>`;
+  }
+  function wireLamp(box, f) {
+    box.querySelectorAll('[data-ppfd]').forEach(b => b.onclick = () => act(S.setIntensity(s, f, +b.dataset.ppfd)));
+    box.querySelectorAll('[data-fans]').forEach(b => b.onclick = () => act(S.setFans(s, f, b.dataset.fans === '1')));
   }
 
   /* ---------- seed catalogue ----------
@@ -621,7 +719,8 @@
   const FILTERS = [
     ['all', 'Everything'], ['leafy', 'Leafy'], ['fruit', 'Fruit'], ['root', 'Root'],
     ['grain', 'Grain'], ['flower', 'Flower'], ['dark', 'Grows dark'],
-    ['micro', 'Microbial'], ['gmo', 'Engineered'], ['vault', 'Banked']
+    ['micro', 'Microbial'], ['eden', 'EDEN ISS'], ['spread', 'Cut & come again'],
+    ['gmo', 'Engineered'], ['vault', 'Banked']
   ];
 
   function catalogueRows() {
@@ -640,6 +739,8 @@
       case 'dark': return !!c.dark;
       case 'micro': return c.kind === 'fungal' || c.kind === 'microbe' || c.kind === 'algae';
       case 'gmo': return !!row.gmo;
+      case 'eden': return !!c.eden;
+      case 'spread': return S.isSpread(c);
       case 'vault': return !!(s.vault.accessions && s.vault.accessions[c.id]);
       default: return c.kind === catFilter;
     }
@@ -677,13 +778,24 @@
     }).join('') + '</div>';
   }
 
+  /* What EDEN ISS measured, shown as it was published: per planting, per day, and
+     how many cycles it rests on — a one-cycle figure is labelled as one. */
+  function edenHTML(c) {
+    const e = c.eden;
+    if (!e) return '';
+    const line = x => `${x.cultivar ? x.cultivar + ' · ' : ''}${x.kg.toFixed(2)} kg/m² in ${x.days} d · ${x.gpd.toFixed(0)} g/m²/d · ${x.ppfd} µmol · ${x.n === 1 ? 'one cycle' : 'n = ' + x.n}`;
+    return `<div class="edenbox"><b>EDEN ISS 2018</b> ${line(e)}${e.high ? `<br><b>High light</b> ${line(e.high)}` : ''}</div>`;
+  }
+
   function renderCatalogue() {
     const sowing = !!catField;
     const A = sowing ? S.area(catField) : 1;
 
     $('#plantTitle').textContent = sowing ? 'Sow the hall' : 'Seed catalogue';
+    const tp = sowing ? Math.min(Math.floor(s.nursery.stock), A) : 0;
     $('#plantLede').textContent = sowing
       ? `${A} tiles under glass. The whole hall takes one line, and seed, yield and water all scale with the floor.`
+        + (tp ? ` The nursery has ${Math.floor(s.nursery.stock)} tiles of transplants: ${tp} of ${A} go in a fortnight ahead.` : '')
       : `Every line the farm can grow. ${CROPS.length} conventional, ${GMO.length} engineered, ${S.accessions(s).length} banked in the vault.`;
 
     const fbox = $('#catFilter');
@@ -727,9 +839,12 @@
             ${c.morale > 10 ? '<span>+morale</span>' : ''}
             ${c.dark ? '<span>needs no lamp</span>' : ''}
             ${c.residue ? `<span>eats ${c.residue} residue</span>` : ''}
+            ${c.fresh && !S.isCulture(c) ? `<span>${c.fresh.toFixed(1)} kg/m²${c.src === 'est' ? ' (est.)' : ''}</span>` : ''}
+            ${S.isSpread(c) ? `<span>cut &amp; come again · ${c.stand} d</span>` : ''}
             ${banked ? '<span>banked</span>' : ''}
           </div>
           ${traitChips(c)}
+          ${edenHTML(c)}
           <div class="blurb">${c.note}</div>
           ${locked ? `<div class="lockmsg">${S.biotechOpen(s)
               ? 'Develop this line in the Biotech Lab, under Research.'
@@ -816,12 +931,16 @@
       </div>
 
       <h3 class="sec">Photoperiod</h3>
-      <div class="seg" id="ppSeg">
-        ${[8, 12, 16, 20].map(h => `<button data-pp="${h}" class="${s.photoperiod === h ? 'on' : ''}">${h} h</button>`).join('')}
+      <div class="seg lampseg" id="ppSeg">
+        ${[8, 12, 16, 20].map(h => `<button data-pp="${h}" class="${s.photoperiod === h ? 'on' : ''}">${h} h${h === 16 ? ' · EDEN' : ''}<small>${(S.PPFD.std * h * 0.0036).toFixed(1)} mol</small></button>`).join('')}
       </div>
       <p style="font-size:11px;color:var(--ink-soft);margin:8px 0 0;line-height:1.5">
-        Lighting is ${S.ledKW(s).toFixed(2)} kW a tile. ${plantedTiles} of ${tiles} tiles are sown,
-        so a full photoperiod costs ${(plantedTiles * S.ledKW(s) * s.photoperiod).toFixed(0)} kWh a day.</p>
+        Lighting is ${S.ledKW(s).toFixed(2)} kW a tile at Standard. ${plantedTiles} of ${tiles} tiles are sown,
+        so a full photoperiod costs ${(S.planted(s).reduce((a, f) => a + S.lampNeed(s, f), 0) * s.photoperiod).toFixed(0)} kWh a day.
+        A longer day delivers more light and grows faster, with diminishing returns — the small
+        figure is the daily light a Standard hall gets.</p>
+
+      ${productivityHTML()}
 
       <h3 class="sec">Water and nutrients</h3>
       <div class="rows">
@@ -831,6 +950,7 @@
         ${row('ISRU output', S.count(s, 'isru') ? (s.isruOn ? '+14 L/d' : 'idle') : 'not built', S.count(s, 'isru') && s.isruOn ? 'good' : '')}
         ${s.flags.biofilm ? row('Biofilm', 'recovery −10 pts', 'bad') : ''}
       </div>
+      ${tanksHTML()}
       ${S.count(s, 'isru') ? `<div class="ctrl"><label>Run the ISRU plant</label>
         <div class="seg"><button id="isruOn" class="${s.isruOn ? 'on' : ''}">On</button>
         <button id="isruOff" class="${!s.isruOn ? 'on' : ''}">Off</button></div></div>` : ''}
@@ -838,13 +958,15 @@
       <h3 class="sec">Atmosphere</h3>
       <div class="rows">
         ${row('Oxygen', s.o2.toFixed(1) + ' kg', s.o2 < 60 ? 'bad' : 'good')}
-        ${row('Carbon dioxide', s.co2.toFixed(1) + ' kg', s.co2 < 20 ? 'bad' : s.co2 < 55 ? 'warn' : 'good')}
+        ${row('Carbon dioxide', s.co2.toFixed(1) + ' kg in store → halls at ' + fmt(s.air.ppm) + ' ppm', s.co2 < 20 ? 'bad' : s.co2 < 55 ? 'warn' : 'good')}
         ${row('Pressure', s.pressure.toFixed(1) + ' %', s.pressure < 95 ? 'bad' : 'good')}
         ${row('Spares', s.spares, s.spares < 2 ? 'warn' : '')}
         ${s.flags.leak ? `<div class="row"><span class="k">Hull</span>
           <button class="ghost" data-buy="patch" ${s.spares < 2 ? 'disabled' : ''}>LEAKING — patch (2 spares)</button></div>` : ''}
-        ${s.flags.thermal ? row('Radiators', 'fouled — growth slowed', 'warn') : ''}
+        ${s.flags.thermal ? row('Radiators', 'fouled — half the heat rejection', 'warn') : ''}
       </div>
+
+      ${climateHTML()}
 
       <h3 class="sec">Colony</h3>
       <div class="rows">
@@ -873,6 +995,14 @@
 
     const p = $('#pane-systems');
     p.querySelectorAll('[data-pp]').forEach(b => b.onclick = () => { s.photoperiod = +b.dataset.pp; renderAll(); });
+    p.querySelectorAll('[data-co2]').forEach(b => b.onclick = () => act(S.setCo2(s, +b.dataset.co2)));
+    p.querySelectorAll('[data-dehum]').forEach(b => b.onclick = () => act(S.setDehum(s, b.dataset.dehum === '1')));
+    p.querySelectorAll('[data-dose]').forEach(b => b.onclick = () => act(S.doseTank(s, b.dataset.dose)));
+    p.querySelectorAll('[data-refill]').forEach(b => b.onclick = () => act(S.replaceTank(s, b.dataset.refill)));
+    p.querySelectorAll('[data-auto]').forEach(b => b.onclick = () => {
+      const [id, on] = b.dataset.auto.split(':');
+      act(S.setAutoDose(s, id, on === '1'));
+    });
     const on = p.querySelector('#isruOn'), off = p.querySelector('#isruOff');
     if (on) on.onclick = () => { s.isruOn = true; renderAll(); };
     if (off) off.onclick = () => { s.isruOn = false; renderAll(); };
@@ -888,6 +1018,126 @@
       else if (w === 'nutrients') act(S.trade(s, 'nutrients', 200));
       else act(S.trade(s, 'spares', 4));
     });
+  }
+
+  /* ---------- the nutrient tanks ----------
+
+     EDEN ISS's two tanks as an operator would read them: conductivity and pH
+     against setpoint, days since the last refill against the interval it kept,
+     and the recipe it mixed. */
+  function tanksHTML() {
+    const nurseries = S.count(s, 'nursery');
+    const nurseryRow = nurseries ? `<div class="rows" style="margin-top:8px">
+        <div class="row"><span class="k">Nursery transplants ready</span><span class="v ${s.nursery.stock >= 1 ? 'good' : ''}">${Math.floor(s.nursery.stock)} of ${nurseries * S.NURSERY_TILES} tiles</span></div></div>` : '';
+    if (!S.count(s, 'tanks')) return nurseryRow;
+    const live = S.tankRoomLive(s);
+    const recipe = r => Object.entries(r).map(([k, v]) => `${k} ${v}`).join(' · ');
+    const tank = id => {
+      const T = TANKS[id], k = s.tanks[id], ok = S.inBand(s, id);
+      const r = S.tankRefill(s, id);
+      const ec = Math.abs(k.ec - T.ec) > S.BAND_EC ? 'bad' : 'good';
+      const ph = Math.abs(k.ph - T.ph) > S.BAND_PH ? 'bad' : 'good';
+      const due = k.age > T.days;
+      return `<div class="tank ${ok ? '' : 'off'}">
+        <div class="tankhead"><b>${T.name}</b><span>${S.tankTiles(s, id)} tiles · ${Math.floor(k.age)} of ${T.days} d${due ? ' · DUE' : ''}</span></div>
+        <div class="tankread">
+          <span class="${ec}">EC ${k.ec.toFixed(2)} <em>/ ${T.ec}</em></span>
+          <span class="${ph}">pH ${k.ph.toFixed(2)} <em>/ ${T.ph}</em></span>
+        </div>
+        <div class="tankacts">
+          <button class="ghost" data-dose="${id}">Dose</button>
+          <button class="ghost" data-refill="${id}">Replace (${r.water} L · ${r.nutrients})</button>
+          <button class="ghost ${k.auto ? 'on' : ''}" data-auto="${id}:${k.auto ? 0 : 1}">Auto-dose ${k.auto ? 'on' : 'off'}</button>
+        </div>
+      </div>`;
+    };
+    return `
+      <h3 class="sec">Nutrient tanks${live ? '' : ' — NO TRACK, OFFLINE'}</h3>
+      ${tank('leafy')}${tank('fruit')}
+      ${nurseryRow}
+      <details class="recipe"><summary>EDEN ISS recipes, mol per 100 L</summary>
+        <p><b>Leafy</b> ${recipe(TANKS.leafy.recipe)}<br><em>mmol</em> ${recipe(TANKS.leafy.micro)}</p>
+        <p><b>Fruit</b> ${recipe(TANKS.fruit.recipe)}<br><em>mmol</em> ${recipe(TANKS.fruit.micro)}<br>
+        After the 2018 calcium deficiency: ${recipe(TANKS.fruit.adjusted)}${s.tanks.recipeFixed ? ' — <b>in use</b>' : ''}</p>
+      </details>
+      <p style="font-size:11px;color:var(--ink-soft);margin:6px 0 0;line-height:1.55">
+        Salts build with every lit hour and only a refill clears them; nitrate uptake pushes pH up, faster with
+        raw regolith on the line, and dosing holds it at the cost of stock. Bare aeroponic roots feel every
+        drift; sintered beds buffer some of it, regolith most.</p>`;
+  }
+
+  /* ---------- greenhouse climate ----------
+
+     Three dials EDEN ISS could not hold through its winter — heat, humidity and
+     CO₂ — with what each is costing right now. */
+  function climateHTML() {
+    const row = (k, v, cls) => `<div class="row"><span class="k">${k}</span><span class="v ${cls || ''}">${v}</span></div>`;
+    const a = s.air, st = s.stats;
+    const heat = S.heatBudget(s);
+    const load = S.lightsOn(s) ? S.demand(s).lit : 0;
+    const used = heat.reject > 0 ? load / heat.reject : 0;
+    const co2Label = { 1000: '1000 · EDEN', 2000: '2000', 3500: '3500 · ISS cabin' };
+    return `
+      <h3 class="sec">Greenhouse climate</h3>
+      <div class="rows">
+        ${row('Air temperature', a.t.toFixed(1) + ' °C · set 21 / 19',
+          a.t > 25 ? (a.t > 28 ? 'bad' : 'warn') : a.t < 18 ? 'warn' : 'good')}
+        ${st.tLow != null ? row('Range under the lamps today', st.tLow.toFixed(1) + ' – ' + st.tHigh.toFixed(1) + ' °C') : ''}
+        ${row('Relative humidity', Math.round(a.rh) + '% · set 65', a.rh > S.RH_RISK ? 'bad' : a.rh > 72 ? 'warn' : 'good')}
+        ${row('Hours above 80% today', st.rhHours || 0, (st.rhHours || 0) > 0 ? 'bad' : 'good')}
+        ${row('CO₂ in the halls', fmt(a.ppm) + ' ppm · set ' + fmt(s.co2Set),
+          a.ppm > S.CREW_PPM_SMAC ? 'bad' : a.ppm > S.CREW_PPM_LIMIT ? 'warn' : 'good')}
+        ${row('Radiator capacity in use', pct(used), used > 1 ? 'bad' : used > 0.85 ? 'warn' : 'good')}
+        ${s.flags.scrubber ? row('CO₂ scrubber', 'DOWN — ' + s.flags.scrubber + ' h', 'bad') : ''}
+        ${s.flags.throttle ? row('Lamps throttled to Low', s.flags.throttle + ' h', 'warn') : ''}
+      </div>
+      <div class="ctrl"><label>Hold the halls at</label>
+        <div class="seg lampseg">${S.CO2_SETTINGS.map(v =>
+          `<button data-co2="${v}" class="${s.co2Set === v ? 'on' : ''}">${co2Label[v]}<small>ppm</small></button>`).join('')}</div></div>
+      <div class="ctrl"><label>Dehumidifier boost (${(S.totalTiles(s) * 0.01).toFixed(2)} kW)</label>
+        <div class="seg"><button data-dehum="1" class="${s.dehumBoost ? 'on' : ''}">On</button>
+        <button data-dehum="0" class="${!s.dehumBoost ? 'on' : ''}">Off</button></div></div>
+      <p style="font-size:11px;color:var(--ink-soft);margin:6px 0 0;line-height:1.55">
+        EDEN ISS held 21 °C under the lamps, 19 °C in the dark, 65% humidity and 1000 ppm — and through the
+        Antarctic winter lost all three: 16 °C nights, hours at 86%, and 2,000–4,000 ppm from the operator's
+        own breath. Enriching the halls grows C₃ crops faster but leaks carbon out of the store, and above
+        2,500 ppm the crew feel it. High lamps put heat and water into the air; past 80% humidity, mould
+        follows. On a lunar night, the lamps are the only heaters the halls have.</p>`;
+  }
+
+  /* ---------- productivity ----------
+
+     Fresh food per square metre of rack per day, set against the facilities that
+     have actually published one. The season figure is what the milestones read;
+     the 30-day one moves with what is in the halls now. */
+  function productivityHTML() {
+    const row = (k, v, cls) => `<div class="row"><span class="k">${k}</span><span class="v ${cls || ''}">${v}</span></div>`;
+    const season = s.stats.kgm2d || 0, recent = s.stats.kg30 || 0;
+    const top = Math.max(season, recent, ...BENCHMARKS.map(b => b.kgm2d)) * 1.08;
+    const bar = (label, v, mine, approx) => `<div class="novrow bench${mine ? ' mine' : ''}">
+        <div class="nm">${label}${approx ? ' <em>approx.</em>' : ''}</div>
+        <div class="bar"><i style="width:${Math.min(100, v / top * 100).toFixed(1)}%"></i></div>
+        <div class="bv">${v.toFixed(3)}</div></div>`;
+    const recentKg = s.history.slice(-30).reduce((a, h) => a + (h.fk || 0), 0);
+    const perCrew = recentKg * 1000 / Math.max(1, Math.min(30, s.history.length)) / Math.max(1, s.crew);
+    const edenPerCrew = EDEN_SEASON.kg * 1000 / EDEN_SEASON.days / EDEN_SEASON.crew;
+    return `
+      <h3 class="sec">Productivity</h3>
+      <div class="rows">
+        ${row('Fresh produce, season', season.toFixed(3) + ' kg/m²/d', season >= 0.075 ? 'good' : '')}
+        ${row('Fresh produce, last 30 days', recent.toFixed(3) + ' kg/m²/d', recent >= 0.075 ? 'good' : '')}
+        ${row('Harvested to date', fmt(s.stats.freshKg || 0) + ' kg fresh')}
+        ${row('Per crew member, last 30 days', fmt(perCrew) + ' g/day · EDEN ISS ' + fmt(edenPerCrew))}
+      </div>
+      <div class="novlist">
+        ${bar('This farm, season', season, true)}
+        ${bar('This farm, 30 days', recent, true)}
+        ${BENCHMARKS.map(b => bar(b.name + ' ' + b.year, b.kgm2d, false, b.approx)).join('')}
+      </div>
+      <p style="font-size:11px;color:var(--ink-soft);margin:9px 0 0;line-height:1.55">
+        Kilograms of fresh edible mass per square metre of racks per day — the figure every analogue
+        reports. Fresh mass flatters watery crops: a hall of cucumbers will out-score a hall of wheat
+        that feeds three times as many people.</p>`;
   }
 
   /* ---------- recycling ----------
@@ -1302,7 +1552,8 @@
     if (!loadNote) return;
     const from = loadNote.from;
     const said = {
-      carried: `Your run was carried forward from an earlier version of the game${from ? ` (save v${from})` : ''}.`,
+      carried: `Your run was carried forward from an earlier version of the game${from ? ` (save v${from})` : ''}.`
+        + (from && from < 9 ? ` New since then: lamp dimmers, greenhouse climate, nutrient tanks and five crops from the EDEN ISS greenhouse — the vault target is now ${S.vaultTarget()}.` : ''),
       newer: 'That saved run comes from a newer version of Lunar Farm than this page. Reload to pick up the latest version — a new run has been started meanwhile.',
       incompatible: 'The saved run is from an early build whose farm was laid out differently, so it could not be carried over. Starting a new one.',
       unreadable: 'The saved run could not be read, so a new one has been started.'
