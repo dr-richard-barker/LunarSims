@@ -566,6 +566,7 @@
     const tankId = c ? S.tankFor(c) : null;
     if (tankId && S.count(s, 'tanks') && !S.inBand(s, tankId)) dot('#ff9f43');
     if (f.sealed > 0) dot('#9aa3b5');
+    if (f.radH >= 0) dot('#5ee0e6');
 
     if (selected || hovered) {
       ctx.strokeStyle = selected ? '#ffd166' : 'rgba(255,255,255,0.4)';

@@ -1394,6 +1394,156 @@ td.mark{width:34px;text-align:center}
           ['the halls sit at the setpoint whenever the store can hold it', thin, 0],
           ['the run came through a lunar night', s.stats.nightsSurvived, '>=1']
         ];
+      } },
+
+    /* ---- radiation, studies and field notes ---- */
+
+    { name: 'A flare is a dip, not a disaster (Plant_response_to_radiation)',
+      why: 'resilience index 0.79 → 0.68 at 2–6 h → 0.78 within the day; seedlings are the exception',
+      run() {
+        const flare = (prep) => {
+          seed(31);
+          const s = powered();
+          s.up.radiator = 2;
+          const f = servedHall(s, 2, 2, 'romaine');
+          f.soil = 1;
+          prep(s, f);
+          S.resolveEvent(s, 'spe', 'spe_ride');
+          const trace = [];
+          for (let h = 0; h < 32; h++) { trace.push(S.radResponse(f)); S.tick(s); s.pendingEvent = null; }
+          return { s, f, trace };
+        };
+        const grown = flare((s, f) => { f.growth = 0.5; });
+        const young = flare(() => {});
+        const shielded = flare((s, f) => { f.growth = 0.5; s.up.shield = true; });
+        const morale0 = (() => { const s = powered(); return s.morale; })();
+        const kale = S.cropById('kale'), kaleG = S.cropById('kale_g');
+        return [
+          ['recognition: barely a flicker in the first two hours', +grown.trace[1].toFixed(2), '~0.99'],
+          ['crisis: the canopy bottoms out at 2–6 h', +grown.trace[4].toFixed(3), '~0.864'],
+          ['recovery under way by 6–12 h', +grown.trace[8].toFixed(2), '~0.95'],
+          ['and over within thirty hours', grown.trace[31], 1],
+          ['an established hall keeps its health', grown.f.health, '>=0.99'],
+          ['a newly sown hall loses a quarter of its seedlings for good', +young.f.stand.toFixed(2), '~0.75'],
+          ['regolith overburden halves the dip', +shielded.trace[4].toFixed(3), '~0.932'],
+          ['a radiation-tolerant line dips less', kaleG.radSens < kale.radSens, true],
+          ['the crew takes the dose', Math.round(morale0 - grown.s.morale), '>=7']
+        ];
+      } },
+
+    { name: 'The first plant data from a solar particle event',
+      why: 'no plant has ever been studied through an SPE; a hall of Arabidopsis under the lamps is the first',
+      run() {
+        const s = powered();
+        const f = servedHall(s, 2, 2, 'arabidopsis');
+        f.soil = 1; f.growth = 0.4;
+        const sci0 = s.science;
+        S.resolveEvent(s, 'spe', 'spe_ride');
+        const opened = !!(s.flare && s.flare.open);
+        days(s, 3);
+        /* a second farm pulls its Arabidopsis before the response is over */
+        const t = powered();
+        const g = servedHall(t, 2, 2, 'arabidopsis');
+        g.growth = 0.4;
+        S.resolveEvent(t, 'spe', 'spe_ride');
+        for (let h = 0; h < 4; h++) S.tick(t);
+        S.clear(t, g);
+        days(t, 2);
+        /* and a farm with no Arabidopsis in the ground has nothing to study */
+        const u = powered(); servedHall(u, 2, 2, 'romaine');
+        S.resolveEvent(u, 'spe', 'spe_ride');
+        return [
+          ['riding out the flare opens the study', opened, true],
+          ['it completes once the response has run its course', !!s.studies.flare, true],
+          ['Arabidopsis bottoms out deeper than romaine (radSens 0.8)', +s.studies.flare.mine.toFixed(2), '~0.78'],
+          ['the first data pay', s.science - sci0, '>=30'],
+          ['and earn the milestone', !!s.done.flarestudy, true],
+          ['pulled early, the data are lost', !t.studies.flare && !!t.flare.lost, true],
+          ['no Arabidopsis, no study', u.flare, null],
+          ['the radiation field note is filed either way', !!s.notes.radiation && !!t.notes.radiation, true]
+        ];
+      } },
+
+    { name: 'Studies read the harvest records (the EDEN ISS light trial)',
+      why: 'the farm re-runs the arugula trial from its own notebook, and sets its figure beside EDEN\'s',
+      run() {
+        const s = powered();
+        const hi = servedHall(s, 2, 2, 'arugula'), lo = servedHall(s, 2, 2, 'arugula');
+        hi.soil = 1; lo.soil = 1;
+        S.setIntensity(s, hi, S.PPFD.high);
+        days(s, 30, { tend: true, restock: true });
+        const rec = s.records.find(r => r.c === 'arugula' && r.p === 600);
+        /* the same trial on mismatched beds is not a trial */
+        const m = powered();
+        const a = servedHall(m, 2, 2, null), b = servedHall(m, 2, 2, 'arugula');
+        S.setSubstrate(m, a, 'sintered'); S.plant(m, a, 'arugula');
+        S.setIntensity(m, a, S.PPFD.high); b.soil = 1;
+        days(m, 30, { tend: true, restock: true });
+        return [
+          ['every first cut is written down', !!rec && rec.n > 0 && rec.kg > 0 && rec.sub === 'regolith', true],
+          ['the study completes from a matched pair', !!s.studies.eden_light, true],
+          ['and finds what EDEN ISS found', +s.studies.eden_light.mine.toFixed(2), '~1.50'],
+          ['it pays science', s.studies.eden_light && s.science >= 15, true],
+          ['a pair on different beds does not count', !!m.studies.eden_light, false]
+        ];
+      } },
+
+    { name: 'Studies: Apollo soil, still air, transplants and enriched air',
+      why: 'each lesson the farm encodes can be watched playing out on its own records',
+      run() {
+        /* Arabidopsis in raw regolith against a worked bed */
+        const ap = powered();
+        const raw = servedHall(ap, 2, 2, 'arabidopsis'), good = servedHall(ap, 2, 2, 'arabidopsis');
+        good.soil = 1;
+        days(ap, 75, { tend: true, restock: true });
+        /* two big halls of romaine, one fanned; off the track alike */
+        const sa = powered();
+        const fan = addHall(sa, 8, 4, 'romaine'), still = addHall(sa, 8, 4, 'romaine');
+        fan.soil = 1; still.soil = 1; S.setFans(sa, fan, true);
+        days(sa, 70, { tend: true, restock: true });
+        /* transplants against direct sowing */
+        const nu = powered();
+        S.place(nu, S.tileAt(nu, 13, 9), 'nursery');
+        days(nu, 15);
+        const t1 = servedHall(nu, 2, 2, null), t2 = servedHall(nu, 2, 2, null);
+        t1.soil = 1; t2.soil = 1;
+        S.plant(nu, t1, 'romaine'); S.plant(nu, t2, 'romaine', { transplant: false });
+        days(nu, 45, { tend: true, restock: true });
+        /* one hall, a cycle at the setpoint and then a cycle enriched */
+        const en = powered();
+        const h = servedHall(en, 2, 2, 'romaine');
+        h.soil = 1;
+        days(en, 45, { tend: true, replant: true, restock: true, each: x => { if (x.records.length) S.setCo2(x, 3500); } });
+        days(en, 45, { tend: true, replant: true, restock: true });
+        return [
+          /* a little over half: the raw bed works a little in the 61 days its crop takes */
+          ['raw regolith yields a little over half a worked bed', ap.studies.apollo && +ap.studies.apollo.mine.toFixed(2), '~0.56'],
+          ['fans speed a 32-tile hall up by about 8%', sa.studies.still_air && +sa.studies.still_air.mine.toFixed(2), '~1.08'],
+          ['transplants stand in the hall about 0.63 as long', nu.studies.nursery && +nu.studies.nursery.mine.toFixed(2), '~0.63'],
+          ['enriched air grows about a tenth faster', en.studies.enrich && +en.studies.enrich.mine.toFixed(2), '~1.11']
+        ];
+      } },
+
+    { name: 'Field notes file themselves as the farm meets each source',
+      why: 'every mechanic built on a source should lead the player to it',
+      run() {
+        const N = window.LF_DATA.FIELD_NOTES;
+        const s = S.newGame();
+        days(s, 1);
+        const first = Object.keys(s.notes);
+        s.photoperiod = 20; days(s, 1);
+        const light = !!s.notes.eden_light;
+        S.resolveEvent(s, 'fusarium', 'fus_ignore'); days(s, 1);
+        const mould = !!s.notes.veg05;
+        return [
+          ['the EDEN ISS note is filed on day one', first.join(','), 'eden'],
+          ['changing the photoperiod files the light-curve note', light, true],
+          ['the first mould files the VEG-05 note', mould, true],
+          ['every note names its source and what it does here',
+            N.every(n => n.cite && n.text && n.farm && typeof n.unlock === 'function'), true],
+          ['and every study names its protocol and the published figure',
+            window.LF_DATA.STUDIES.every(t => t.protocol && t.published && t.cite && t.science > 0), true]
+        ];
       } }
   ];
 

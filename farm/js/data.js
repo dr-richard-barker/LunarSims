@@ -416,6 +416,171 @@ const GMO = [
     note: 'The model plant put to work: a pharmaceutical protein recovered from a crop that was only ever data before.' }
 ];
 
+/* ---------- studies ----------
+
+   Published trials the farm can re-run. Each watches the harvest records for a
+   matching pair — the same crop grown two ways, alike in everything else — and
+   when it finds one sets the farm's figure beside the published one. The farm's
+   figure measures this model, not plants: the point is to watch the lesson play
+   out, and to see where a game is kinder or harsher than the Moon. */
+const baseOf = id => id.replace(/_g$/, '');
+/* fresh mass per tile per day of hall occupancy; the area units cancel in a ratio */
+const perDay = r => (r.n > 0 && r.a > 0 ? r.kg / r.a / r.n : 0);
+/* two first cuts alike in every way the study is not about */
+function pairUp(s, isA, isB, ignore) {
+  const recs = s.records || [];
+  const skip = new Set(ignore || []);
+  const alike = (a, b) => baseOf(a.c) === baseOf(b.c) && Math.abs(a.d - b.d) <= 150
+    && (skip.has('sub') || a.sub === b.sub) && Math.abs(a.bf - b.bf) <= 0.03
+    && (skip.has('p') || a.p === b.p) && (skip.has('pp') || a.pp === b.pp)
+    && (skip.has('fans') || a.fans === b.fans) && (skip.has('tp') || a.tp === b.tp)
+    && (skip.has('ppm') || Math.abs(a.ppm - b.ppm) <= 300)
+    && (skip.has('a') || a.a === b.a);
+  for (const a of recs) {
+    if (!isA(a)) continue;
+    for (const b of recs) if (b !== a && isB(b) && alike(a, b)) return [a, b];
+  }
+  return null;
+}
+const x2 = v => v.toFixed(2);
+
+const STUDIES = [
+  { id: 'eden_light', name: 'The EDEN ISS light trial', science: 15,
+    cite: 'Zabel et al. 2020, Front Plant Sci 11:656',
+    protocol: 'Bring in arugula grown under High (600 µmol) and arugula grown under Standard (330), sown direct, in matching halls on matching beds.',
+    published: 'EDEN ISS: 126.0 → 189.3 g/m²/d, ×1.50 for 1.82× the light (n = 9 and 8 cycles).',
+    check: s => {
+      const p = pairUp(s, r => baseOf(r.c) === 'arugula' && r.p === 600 && !r.tp && r.q >= 0.9,
+                          r => baseOf(r.c) === 'arugula' && r.p === 330 && !r.tp && r.q >= 0.9, ['p', 'ppm', 'a']);
+      if (!p) return null;
+      const mine = perDay(p[0]) / perDay(p[1]);
+      return { mine, text: `Your arugula under 600 µmol made ×${x2(mine)} the fresh mass a day; EDEN ISS measured ×1.50.` };
+    } },
+  { id: 'apollo', name: 'Arabidopsis in Apollo soil', science: 18,
+    cite: 'Paul et al. 2022, Commun Biol 5:382',
+    protocol: 'Bring in Arabidopsis from a raw regolith bed (its first crop or two) and from a fully worked or sintered bed.',
+    published: 'In Apollo soil, rosettes reached 2–13% of their size in simulant, and leaves came 32–65% as fast; the most weathered soil grew worst.',
+    check: s => {
+      const recs = s.records || [];
+      const raw = recs.find(r => baseOf(r.c) === 'arabidopsis' && r.sub === 'regolith' && r.bed < 0.8);
+      const good = recs.find(r => baseOf(r.c) === 'arabidopsis' && r.bed >= 0.99);
+      if (!raw || !good) return null;
+      const mine = raw.q / Math.max(0.01, good.q);
+      return { mine, text: `Your first Arabidopsis in raw regolith yielded ${Math.round(mine * 100)}% of a worked bed's. In Apollo soil the rosettes reached 2–13% of their size in simulant — the farm is kinder than the Moon.` };
+    } },
+  { id: 'flare', name: 'The first plant data from a solar particle event', science: 30,
+    cite: 'Plant_response_to_radiation (this group)',
+    protocol: 'Keep the lamps on through a solar flare with Arabidopsis growing, and leave it in until its response has run its course.',
+    published: 'Resilience index at the 2–6 h nadir: cosmic rays 0.56, spaceflight 0.68, gamma 0.81, against a baseline of 0.79. Solar particle events: no plant studies at all.',
+    check: s => {
+      if (!s.flare || !s.flare.complete) return null;
+      const mine = s.flare.nadir;
+      return { mine, text: `Arabidopsis held through the flare bottomed at ×${x2(mine)} growth and recovered within the day — the first plant response ever logged through a solar particle event.` };
+    } },
+  { id: 'still_air', name: 'Still air at one-sixth g', science: 12,
+    cite: 'LunarLeaf-CFD (this group)',
+    protocol: 'Bring in the same crop from two halls of the same size, over twelve tiles, one with canopy fans and one without.',
+    published: 'Still air at lunar gravity leaves a leaf 71% of its Earth boundary-layer conductance, a dense canopy far less; fans at 2–6.5 cm/s restore it.',
+    check: s => {
+      const p = pairUp(s, r => r.a > 12 && r.fans, r => r.a > 12 && !r.fans, ['fans', 'ppm']);
+      if (!p) return null;
+      const mine = p[1].n / p[0].n;
+      return { mine, text: `Your fanned hall grew ×${x2(mine)} as fast as the still one. In the CFD, airflow — not gravity — decides how well a lunar canopy breathes.` };
+    } },
+  { id: 'nursery', name: 'Transplants against direct sowing', science: 10,
+    cite: 'Zabel et al. 2020, Front Plant Sci 11:656',
+    protocol: 'Bring in the same crop sown direct and sown from nursery transplants, in matching halls.',
+    published: 'EDEN ISS raised every seedling 10–20 days in rockwool before it went into a rack.',
+    check: s => {
+      const p = pairUp(s, r => r.tp, r => !r.tp, ['tp', 'ppm']);
+      if (!p) return null;
+      const mine = p[0].n / p[1].n;
+      return { mine, text: `Transplants stood in the hall ${Math.round(mine * 100)}% as long as direct-sown seed — the nursery's fortnight bought back.` };
+    } },
+  { id: 'enrich', name: 'Photorespiration and enriched air', science: 14,
+    cite: 'Photorespiration_multiomics_microgravity (this group)',
+    protocol: 'Bring in the same crop grown at the 1000 ppm setpoint and grown in air enriched to 1,800 ppm or more, in matching halls.',
+    published: 'At 3,500 ppm photorespiration falls to 2.6% of fixation, a twelve-fold drop; the +8–11% growth that implies is our inference.',
+    check: s => {
+      const p = pairUp(s, r => r.ppm >= 1800, r => r.ppm <= 1050, ['ppm']);
+      if (!p) return null;
+      const mine = p[1].n / p[0].n;
+      return { mine, text: `The enriched crop grew ×${x2(mine)} as fast. Most of what photorespiration throws away at 400 ppm is already saved at 1000; past that the returns are small.` };
+    } }
+];
+
+/* ---------- field notes ----------
+
+   The sources behind the farm, filed as the farm meets them. Each says what was
+   found, by whom, and what it does here. */
+const FIELD_NOTES = [
+  { id: 'eden', title: 'EDEN ISS: a greenhouse that fed a station',
+    cite: 'Zabel et al. 2020, Front Plant Sci 11:656 · doi:10.3389/fpls.2020.00656 · NASA OSDR OSD-895',
+    text: 'Through 2018 the EDEN ISS Mobile Test Facility at Neumayer III grew 268 kg of fresh food on 12.5 m² of racks for an Antarctic overwintering crew — 0.075 kg per square metre per day across the season. One operator ran it, a few hours a day.',
+    farm: 'Ten crops carry its measured cycle lengths and yields; its lamps, climate setpoints, tanks and nursery are the farm’s defaults.',
+    unlock: s => s.day >= 1 },
+  { id: 'eden_light', title: 'More light, less per mole',
+    cite: 'Zabel et al. 2020 — the arugula light trial',
+    text: 'Arugula under 600 µmol/m²/s made half as much again a day as arugula under 330, but got 17% less from every mole of light. Light is a curve that bends over.',
+    farm: 'Every lamp setting and photoperiod runs on a curve fitted to those two numbers.',
+    unlock: s => s.photoperiod !== 16 || s.fields.some(f => (f.ppfd || 330) !== 330) },
+  { id: 'benchmarks', title: 'Kilograms per square metre per day',
+    cite: 'EDEN ISS; Lunar Palace 1 (Fu et al. 2016); CEEF, the South Pole chamber and NASA’s BPC as tabulated in the ISS_EDEN comparison',
+    text: 'Every closed-agriculture facility reports fresh food per square metre per day: EDEN ISS 0.075, Lunar Palace 1 0.068, NASA’s Biomass Production Chamber about 0.17 under ideal control. Fresh mass flatters watery crops — a cucumber is 96% water.',
+    farm: 'The Systems tab and the report track your farm against them.',
+    unlock: s => s.day >= 30 },
+  { id: 'lp1', title: 'Lunar Palace 1: closing the loop with people inside',
+    cite: 'Li et al. 2015, Life Sci Space Res 7:9 · Fu et al. 2016, Astrobiology 16:925 · Dong et al. 2017, Astrobiology 17:78',
+    text: 'Three volunteers sealed in for 105 days with 21 crops, mealworms and a waste loop. 8.13% of mealworm feed came back as larval mass, 20.5% of urine nitrogen was recovered, 41% of solid waste degraded.',
+    farm: 'The recycling compartments run on those ratios.',
+    unlock: s => ['worms', 'nitrifier', 'digester'].some(t => s.map.some(x => x.b && x.b.type === t)) },
+  { id: 'apollo', title: 'Plants in Apollo soil',
+    cite: 'Paul et al. 2022, Commun Biol 5:382 · NASA OSDR OSD-476',
+    text: 'Arabidopsis grown in a gram each of Apollo 11, 12 and 17 regolith made leaves at a third to two-thirds the pace of plants in simulant, and rosettes a tenth the size. The more weathered the soil, the worse it grew.',
+    farm: 'A first crop in raw regolith yields about half; freshly broken crater-rim ejecta is younger and kinder.',
+    unlock: s => (s.stats.thinHarvest || 0) > 0 },
+  { id: 'sinter', title: 'Firing the dust',
+    cite: 'lunar-regolith-blss-review (this group), on Paul et al. 2022 and Hasenstein 2026',
+    text: 'Raw regolith holds under 12% air at the roots and runs at pH 9–11; fired into aggregate it holds 25–30%, sits near neutral and comes out of a 500 °C kiln sterile. At one-sixth g water climbs only 4.2 mm by capillarity, so the grain size matters.',
+    farm: 'Sintered beds yield nearly in full from the first crop and grow less mould. Encoded qualitatively: parts of the review’s reference list are still being checked.',
+    unlock: s => (s.stats.sinteredHalls || 0) > 0 || s.fields.some(f => f.substrate === 'aero') },
+  { id: 'tanks', title: 'Two tanks and a recipe change',
+    cite: 'Zabel et al. 2020 · NASA OSDR OSD-895 (raw record)',
+    text: 'EDEN ISS fed its racks from a leafy tank (EC 2.21, pH 6.06) and a fruit tank (EC 3.49, pH 5.91), held with nitric acid and potassium hydroxide and replaced every two to three months. When the tomatoes showed calcium deficiency the fruit recipe was changed mid-season.',
+    farm: 'The tank room runs both, recipes and all.',
+    unlock: s => s.map.some(x => x.b && x.b.type === 'tanks') },
+  { id: 'nursery', title: 'Seedlings first',
+    cite: 'Zabel et al. 2020 · deepspace-seed-stress-decoder (this group)',
+    text: 'EDEN ISS raised every seedling 10–20 days in rockwool before it went into a rack. Germination is also when a plant is most exposed: the first hours are the window in which several stresses converge on the root tip.',
+    farm: 'The nursery puts a hall a fortnight ahead, and a flare is hardest on a hall that has just been sown.',
+    unlock: s => s.map.some(x => x.b && x.b.type === 'nursery') },
+  { id: 'cfd', title: 'Still air on the Moon',
+    cite: 'LunarLeaf-CFD (this group)',
+    text: 'At one-sixth g warm air barely rises: a leaf keeps 71% of its Earth boundary-layer conductance, a dense canopy far less, and fans at 2–6.5 cm/s restore it. A sealed, lit chamber draws its CO₂ to nothing in seven minutes. The enclosure matters about 25 times more than the gravity does.',
+    farm: 'Big halls need canopy fans, and a failed air handler seals a hall.',
+    unlock: s => s.fields.some(f => f.w * f.h > 12 || f.fans || f.sealed > 0) },
+  { id: 'photoresp', title: 'What enriched air buys',
+    cite: 'Photorespiration_multiomics_microgravity (this group)',
+    text: 'At ISS-cabin CO₂ (3,500 ppm) photorespiration falls to 2.6% of fixation, a twelve-fold drop from outdoor air. Leaf photosynthesis at lunar gravity is about 98% of Earth’s — the enclosure, not the gravity, sets the carbon supply.',
+    farm: 'Enrichment buys up to a tenth more growth — our inference from those numbers, not a measured yield.',
+    unlock: s => (s.co2Set || 1000) > 1000 },
+  { id: 'habitat', title: 'The crew’s own breath',
+    cite: 'Habitat_model (this group) · Zabel et al. 2020',
+    text: 'In a 63.1 m³ module with the ventilation off, two crew take the air to 5,000 ppm in 6.3 hours and six in 2.1. EDEN ISS had no CO₂ removal at all, and spent most of its winter at 2,000–4,000 ppm because of it.',
+    farm: 'A scrubber fault puts the crew’s breath in the halls; past 2,500 ppm, morale pays.',
+    unlock: s => (s.stats.ppmPeak || 0) > 2500 || s.flags.scrubber > 0 },
+  { id: 'radiation', title: 'How a plant takes a dose',
+    cite: 'Plant_response_to_radiation (this group: 299 samples, 10 NASA OSDR studies)',
+    text: 'The response runs in three phases: recognition in the first two hours, a crisis at 2–6 h, recovery within the day. Cosmic rays disrupt the networks most, gamma least. Solar particle events — the most acute hazard on the lunar surface — have no plant studies at all.',
+    farm: 'A flare is a dip and a recovery for the canopy, real damage to a seedling, and a chance at data nobody has.',
+    unlock: s => (s.stats.flares || 0) > 0 },
+  { id: 'veg05', title: 'What flight does to a leaf’s microbes',
+    cite: 'VEG-05 dwarf tomato, ISS · veg05-integrated-omics (this group)',
+    text: 'Grown on the ISS, ‘Red Robin’ tomato leaves carried a fungal community 3.7 times as far from normal as ground controls (bacteria 2.1 times), and two Fusarium variants turned up. Under blue-rich light the leaves changed 4,716 genes in flight; under red-rich, 523.',
+    farm: 'A closed farm is a gift to opportunists. Mould follows wet air, spreads hall to hall, and UV-C is the answer.',
+    unlock: s => (s.stats.infections || 0) > 0 }
+];
+
 /* ---------- how the farm measures up ----------
 
    Fresh edible mass per square metre of growing area per day, over a whole
@@ -544,12 +709,12 @@ const EVENTS = [
   {
     id: 'spe', weight: 10, minDay: 12,
     title: 'Solar Particle Event',
-    text: 'A flare on the near limb. Particle flux at the surface climbs fast, and the trays sit closest to the skylight.',
+    text: 'A flare on the near limb. Particle flux at the surface climbs fast, and the trays sit closest to the skylight. A plant takes a dose better than a person does: its stress response peaks at two to six hours and has settled within the day. A seedling is another matter.',
     choices: [
       { label: 'Shutter the bays and shelter', effect: 'spe_shelter',
         hint: 'Lights off for 12 hours. Crops idle, crew safe.' },
       { label: 'Keep the lights on', effect: 'spe_ride',
-        hint: 'No lost growth, but radiation damage and a dose to the crew.' }
+        hint: 'The canopy dips and recovers within a day. Newly sown halls lose seedlings, and the crew takes a dose. Arabidopsis in the halls would log the first plant data from a flare.' }
     ]
   },
   {
@@ -890,8 +1055,14 @@ const MILESTONES = [
   { id: 'tanks90', text: 'Hold both nutrient tanks in band for ninety days',
     done: s => (s.stats.tanksInBand || 0) >= 90 },
   { id: 'transplant', text: 'Sow a hall from the nursery',
-    done: s => (s.stats.transplants || 0) >= 1 }
+    done: s => (s.stats.transplants || 0) >= 1 },
+  { id: 'flarestudy', text: 'Collect the first plant data from a solar particle event',
+    done: s => !!(s.studies && s.studies.flare) },
+  { id: 'studies3', text: 'Re-run three published trials on your own farm',
+    done: s => Object.keys(s.studies || {}).length >= 3 },
+  { id: 'notes', text: 'File every field note',
+    done: s => Object.keys(s.notes || {}).length >= FIELD_NOTES.length }
 ];
 
 window.LF_DATA = { K, CROPS, TRAITS, GMO, BUILDINGS, UPGRADES, EVENTS, MILESTONES, BENCHMARKS, EDEN_SEASON,
-                   TANKS, SUBSTRATES, LF_FRUIT_TANK };
+                   TANKS, SUBSTRATES, LF_FRUIT_TANK, STUDIES, FIELD_NOTES };

@@ -2,7 +2,7 @@
 
 (function () {
   const { K, CROPS, TRAITS, GMO, BUILDINGS, UPGRADES, EVENTS, MILESTONES, BENCHMARKS, EDEN_SEASON,
-          TANKS, SUBSTRATES } = window.LF_DATA;
+          TANKS, SUBSTRATES, STUDIES, FIELD_NOTES } = window.LF_DATA;
   const S = window.LF_SIM;
   const R = window.LF_RENDER;
   /* One stable key from now on. The versioned keys are what earlier builds
@@ -623,6 +623,8 @@
           <span class="v ${f.starved ? 'bad' : 'good'}">${f.starved ? 'EMPTY — STALLED' : fmt(s.residue)}</span></div>` : ''}
         ${c.respires ? '<div class="row"><span class="k">Gas exchange</span><span class="v">RESPIRES — GIVES CO₂</span></div>' : ''}
         ${f.transplanted ? '<div class="row"><span class="k">Started from</span><span class="v good">NURSERY TRANSPLANTS</span></div>' : ''}
+        ${(f.stand || 1) < 1 ? `<div class="row"><span class="k">Stand</span><span class="v warn">${pct(f.stand)} of seedlings survived the flare</span></div>` : ''}
+        ${f.radH >= 0 ? `<div class="row"><span class="k">Flare response</span><span class="v warn">hour ${f.radH} of 30 · ×${S.radResponse(f).toFixed(2)}</span></div>` : ''}
         ${f.serviced ? '' : '<div class="row"><span class="k">Service</span><span class="v bad">NO TRACK</span></div>'}
         ${f.infected ? '<div class="row"><span class="k">Status</span><span class="v bad">FUNGAL INFECTION</span></div>' : ''}
         ${f.dead ? '<div class="row"><span class="k">Status</span><span class="v bad">CROP LOST</span></div>' : ''}
@@ -1274,7 +1276,47 @@
       item.appendChild(btn);
       p.appendChild(item);
     }
+    renderStudies(p);
+    renderNotes(p);
     renderBiotech(p);
+  }
+
+  /* ---------- studies ----------
+
+     Published trials the farm can re-run. The protocol says what to grow; the
+     farm watches its own harvest records for a matching pair, and when it finds
+     one the result card sets the farm's figure beside the published one. */
+  function renderStudies(p) {
+    p.appendChild(el('h3', 'sec', 'Studies'));
+    p.appendChild(el('p', '', `<span style="font-size:11.5px;color:var(--ink-soft);line-height:1.55">
+      Re-run a published trial on your own farm. Grow what the protocol asks, harvest it, and the farm
+      reads the result off its own records — ${Object.keys(s.studies).length} of ${STUDIES.length} done.</span>`));
+    for (const st of STUDIES) {
+      const done = s.studies[st.id];
+      const live = st.id === 'flare' && s.flare && s.flare.open;
+      const item = el('div', 'item study' + (done ? ' done' : ''));
+      item.innerHTML = `
+        <h4><span>${done ? '✔ ' : ''}${st.name}</span><span class="cost">+${st.science} sci</span></h4>
+        <p>${done ? done.text : st.protocol}</p>
+        ${live ? `<p class="studylive">Logging now: the Arabidopsis has bottomed at ×${s.flare.nadir.toFixed(2)} so far.</p>` : ''}
+        <p class="studypub"><b>Published</b> ${st.published}<br><em>${st.cite}${done ? ` · completed day ${done.day}` : ''}</em></p>`;
+      p.appendChild(item);
+    }
+  }
+
+  /* ---------- field notes ----------
+
+     The sources behind the farm, filed as it meets each one. Unfiled notes show
+     only that they exist; finding them is part of farming. */
+  function renderNotes(p) {
+    const filed = FIELD_NOTES.filter(n => s.notes[n.id]);
+    p.appendChild(el('h3', 'sec', `Field notes · ${filed.length} of ${FIELD_NOTES.length}`));
+    const box = el('div', 'notes');
+    box.innerHTML = FIELD_NOTES.map(n => s.notes[n.id]
+      ? `<details class="fnote"><summary>${n.title} <span>day ${s.notes[n.id]}</span></summary>
+           <p>${n.text}</p><p class="fnfarm"><b>In the farm</b> ${n.farm}</p><p class="fncite">${n.cite}</p></details>`
+      : `<div class="fnote locked">A note not yet filed</div>`).join('');
+    p.appendChild(box);
   }
 
   /* Only what actually moved. Listing every stat with "(was the same)" beside it

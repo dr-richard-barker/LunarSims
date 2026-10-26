@@ -42,8 +42,12 @@ Pick a tool from the palette, then click or drag on the ground:
 - **Answer the station alerts.** Twenty-six of them, each a decision rather than a
   dice roll: shelter from a flare or keep the lamps on, patch a puncture or log it,
   buy certified seed or sow the tired stock, cut a leafy crop for the mess or bank
-  the calories, change the fruit recipe or spray calcium and carry on. Thirty-nine
+  the calories, change the fruit recipe or spray calcium and carry on. Forty-two
   milestones mark a farm that works — three of them for out-growing the real facilities.
+- **Re-run published trials.** Six studies — EDEN ISS's light trial, Arabidopsis in Apollo soil,
+  still air at one-sixth g, transplants, enriched air and the first plant data from a solar flare —
+  are read off the farm's own harvest records and set beside the published figure, and a codex of
+  field notes files each source as the farm meets it.
 
 Four things drive the difficulty:
 
@@ -103,6 +107,15 @@ which the harness checks.
   EC 3.49 / pH 5.91, recipes from the raw OSDR record — which drift and need replacing
   every two to three months, and the calcium deficiency EDEN ISS met on its tomatoes is an
   alert with its fix attached. A **Seedling Nursery** puts a hall a fortnight ahead.
+
+- **Flares, studies and field notes.** A solar flare ridden out with the lamps on now runs the
+  three-phase response this group measured across ten NASA plant radiation studies (resilience index
+  0.79 → 0.68 at 2–6 h → 0.78 within the day): the canopy dips and recovers, a newly sown hall loses
+  seedlings, and the crew takes the dose. Solar particle events have no plant studies at all, so
+  Arabidopsis held through one logs the first. Six **studies** re-run published trials from the
+  farm's own harvest records, and thirteen **field notes** — EDEN ISS, Lunar Palace 1, Apollo soil,
+  VEG-05's flight microbiome and this group's own models among them — file themselves as the farm
+  meets each source.
 
 Where the evidence is thin the game says so: one-cycle EDEN ISS figures are labelled as
 one cycle in the catalogue, estimated yields are marked as estimates, and the benchmarks
@@ -230,15 +243,16 @@ renderer to simulation, never back. That is what makes the balance testable, and
 simulation survived three renderer rewrites almost untouched.
 
 Open **`farm/harness.html`** in a browser. It loads only the data and the simulation, replaces
-`Math.random` with a seeded generator so runs are reproducible, and plays thirty-nine scenarios
+`Math.random` with a seeded generator so runs are reproducible, and plays forty-four scenarios
 out over hundreds of simulated days — a careless farm failing, a competent one closing the food
 loop, auto-manage surviving unattended, the unserviced and rail modifiers each biting by the
 amount they claim, raw regolith yielding what the constant says, a monoculture costing morale,
 the lunar night shedding load, every event choice resolving, saves carrying forward, and a run
-surviving the JSON round trip it is stored as. Nineteen of them cover the EDEN ISS systems: each
-reproduces the figure it was calibrated on (High light ×1.50 a day and ×0.83 a mole; a raw
-first crop at about half; transplants out of the hall in 0.63 of the time), and one asserts that
-every research factor is exactly 1 in a farm left at its defaults.
+surviving the JSON round trip it is stored as. Twenty-four of them cover the research systems:
+each reproduces the figure it was calibrated on (High light ×1.50 a day and ×0.83 a mole; a raw
+first crop at about half; transplants out of the hall in 0.63 of the time; a flare bottoming at
+2–6 h and gone in thirty), the studies recover those figures from the farm's own records, and one
+asserts that every research factor is exactly 1 in a farm left at its defaults.
 
 The same scenarios run headlessly from the repository root:
 

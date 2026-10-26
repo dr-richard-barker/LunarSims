@@ -4,7 +4,7 @@
    tile structure. One tick is one hour of station time. */
 
 (function () {
-  const { K, CROPS, TRAITS, GMO, UPGRADES, BUILDINGS, EVENTS, MILESTONES, TANKS } = window.LF_DATA;
+  const { K, CROPS, TRAITS, GMO, UPGRADES, BUILDINGS, EVENTS, MILESTONES, TANKS, STUDIES, FIELD_NOTES } = window.LF_DATA;
 
   /* Rates below are PER TILE of grow hall. One tile is a multi-tier rack of
      roughly 20 m2 of growing area. */
@@ -207,6 +207,26 @@
   const TANK_L = 6, TANK_N = 2;    // water and stock per served tile to refill a tank
   const TANK_ROOM_KW = 0.15;
   const NURSERY_TILES = 12, NURSERY_DAYS = 14, NURSERY_HEAD_MAX = 0.4, NURSERY_KW = 0.2;
+
+  /* ---------- radiation ----------
+
+     Plant_response_to_radiation (this group: 299 Arabidopsis samples from ten
+     NASA OSDR studies). The response runs in three phases — recognition in the
+     first two hours, a crisis at 2–6 h, recovery within the day — on a composite
+     resilience index of 0.79, 0.79, 0.68, 0.75 and 0.78 across 0–0.5, 0.5–2,
+     2–6, 6–12 and 12–30 h. At the 2–6 h nadir cosmic-ray samples read 0.56,
+     gamma 0.81 and low-orbit spaceflight about 0.68. Solar particle events have
+     no plant studies at all, though they are the most acute radiation hazard on
+     the lunar surface, which is what makes a flare a research opportunity.
+
+     The index measures how far the transcriptome is knocked off its networks,
+     not growth; reading it as a growth multiplier is our interpretation. That
+     a just-sown hall loses seedlings outright is a game device drawn from the
+     seed stress work (deepspace-seed-stress-decoder: germination is the most
+     vulnerable window). The crew's dose is the real cost of a flare. */
+  const RRI_BASE = 0.7927;
+  const RRI_PHASES = [[2, 0.7861], [6, 0.6848], [12, 0.7545], [30, 0.7846]];  // until hour, index
+  const RAD_SEEDLING = 0.5;        // share of a just-sown stand lost per unit radSens, unshielded
 
   const co2Cap = s => (s.up.composter ? 400 : 260);
 
@@ -511,6 +531,7 @@
       def(f, 'ppfd', PPFD.std); def(f, 'picks', 0);
       def(f, 'fans', false); def(f, 'sealed', 0);
       def(f, 'substrate', 'regolith'); def(f, 'transplanted', false);
+      def(f, 'ppmAcc', 0); def(f, 'litH', 0); def(f, 'radH', -1); def(f, 'stand', 1);
       if (f.immature === undefined) f.immature = immatureShare(o, f);
       def(f, 'serviced', true); def(f, 'railed', false);
       def(f, 'carbon', 0); def(f, 'warned', false); def(f, 'litNow', false);
@@ -535,6 +556,9 @@
     def(o, 'tanks', freshTanks()); def(o, 'nursery', { stock: 0 });
     ['tankReplacements', 'tanksInBand', 'aeroHarvests', 'sinteredHalls', 'transplants', 'dosedToday']
       .forEach(k => def(st, k, 0));
+    /* the farm's notebook, its studies and its field notes */
+    def(o, 'records', []); def(o, 'studies', {}); def(o, 'notes', {}); def(o, 'flare', null);
+    ['flares', 'infections', 'thinHarvest'].forEach(k => def(st, k, 0));
     if (st.rackM2Days === undefined) st.rackM2Days = standingM2Days(o);
     if (st.labOpen === undefined) {
       const legacy = CROPS.filter(c => !c.since).length;
@@ -556,6 +580,7 @@
       co2Set: CO2_SET, dehumBoost: false,
       air: { t: T_DAY, rh: 65, ppm: CO2_SET, excess: 0 },
       tanks: freshTanks(), nursery: { stock: 0 },
+      records: [], studies: {}, notes: {}, flare: null,
       auto: false, sandbox: false, history: [],
       map: makeMap(41), fields: [], nextField: 1,
       up: { led: 0, recovery: 0 },
@@ -570,7 +595,7 @@
                picks: 0, maxPicks: 0, highLight: 0, shedToday: 0, labOpen: false,
                ppmPeak: 0, rhHours: 0, rhPeak: 0, tLow: T_DAY, tHigh: T_DAY,
                tankReplacements: 0, tanksInBand: 0, aeroHarvests: 0, sinteredHalls: 0,
-               transplants: 0, dosedToday: 0 },
+               transplants: 0, dosedToday: 0, flares: 0, infections: 0, thinHarvest: 0 },
       gmo: {},
       media: { audience: 0, novelty: {}, aired: 0, revenue: 0, today: 0, reel: [], last: [] },
       vault: { accessions: {}, lost: 0, secured: false },
@@ -645,7 +670,7 @@
          working roots and stubble back in, harvest after harvest. */
       soil: 0.15,
       ppfd: PPFD.std, picks: 0, fans: false, sealed: 0,
-      substrate: 'regolith', transplanted: false
+      substrate: 'regolith', transplanted: false, ppmAcc: 0, litH: 0, radH: -1, stand: 1
     };
     s.fields.push(f);
     for (const t of fieldTiles(s, f)) t.f = f.id;
@@ -787,6 +812,14 @@
   /* still air in a big hall, unless its fans are running */
   const stillAir = f => (f.fans ? 1 : 1 - STILL_MAX * clamp((area(f) - STILL_FREE_TILES) / 52, 0, 1));
 
+  /* where a hall is in its response to a flare: 1 when there is none */
+  function radResponse(f) {
+    if (!(f.radH >= 0)) return 1;
+    const phase = RRI_PHASES.find(([until]) => f.radH < until);
+    if (!phase) return 1;
+    return clamp(1 - (1 - phase[1] / RRI_BASE) * (f.radK || 1), 0.3, 1);
+  }
+
   /* Everything that sets how fast a hall grows this hour, as one product. tick()
      and the hall panel both call this, so the panel can never disagree with the
      simulation. Pass an array as `parts` to get the breakdown as [label, factor]
@@ -817,6 +850,7 @@
     v = c.dark ? 1 : tempFactor(e.t); g *= v; note(e.t > 25 ? 'Too hot' : 'Too cold', v);
     v = c.dark ? 1 : stillAir(f); g *= v; note('Still air (no fans)', v);
     v = f.sealed > 0 ? 0.05 : 1; g *= v; note('Sealed — no air exchange', v);
+    v = radResponse(f); g *= v; note('Recovering from the flare', v);
     v = f.infected ? 0.5 : 1; g *= v; note('Infection', v);
     v = s.pressure < 90 ? 0.6 : 1; g *= v; note('Low pressure', v);
     return g;
@@ -972,6 +1006,8 @@
         const g = growthFactors(s, f, env);
 
         f.growth = clamp(f.growth + rate * g, 0, 1);
+        /* the air this crop grew in, for the harvest record */
+        f.ppmAcc = (f.ppmAcc || 0) + env.ppm; f.litH = (f.litH || 0) + 1;
 
         const gas = O2_PER_LIT_HOUR * c.o2 * g * A;
         if (c.respires) {
@@ -1045,11 +1081,13 @@
         }
       }
       if (f.sealed > 0) f.sealed--;
+      if (f.radH >= 0) { f.radH++; if (f.radH >= RRI_PHASES[RRI_PHASES.length - 1][0]) f.radH = -1; }
       if (s.up.uvc && f.infected) f.infected = false;
       if (s.up.harvester && f.growth >= 1) harvest(s, f, log);
     }
 
     if (env.tankLive) tankStep(s, tankServed);
+    if (s.flare && s.flare.open) watchFlare(s);
 
     /* --- gases --- */
     /* what the canopy did for life support today, which is what the station pays on */
@@ -1409,6 +1447,37 @@
     return null;
   }
 
+  /* Follow the Arabidopsis through its response. If it comes out of the hall
+     before the response has run its course, the data are incomplete. */
+  function watchFlare(s) {
+    const fl = s.flare, f = fieldById(s, fl.hall);
+    if (!f || f.crop !== fl.crop || f.dead) {
+      fl.open = false; fl.lost = true;
+      pushLog(s, 'The Arabidopsis came out before the flare response had run its course. The data are incomplete.');
+      return;
+    }
+    fl.nadir = Math.min(fl.nadir, radResponse(f));
+    if (f.radH === -1) { fl.open = false; fl.complete = s.day; }
+  }
+
+  /* Studies and field notes are read off the farm as it stands: no dice, and
+     nothing a farm that ignores them will notice. */
+  function checkStudies(s, log) {
+    for (const st of STUDIES) {
+      if (s.studies[st.id]) continue;
+      const r = st.check(s);
+      if (!r) continue;
+      s.studies[st.id] = Object.assign({ day: s.day }, r);
+      s.science += st.science;
+      log.push(`Study complete — ${st.name}. ${r.text} (+${st.science} science)`);
+    }
+    for (const n of FIELD_NOTES) {
+      if (s.notes[n.id] || !n.unlock(s)) continue;
+      s.notes[n.id] = s.day;
+      log.push(`Field note filed: ${n.title}.`);
+    }
+  }
+
   /* rack area under canopy: every hall that is not a culture vat, sown or not */
   const rackM2 = s => s.fields.reduce((a, f) => a + (isCulture(cropById(f.crop)) ? 0 : area(f) * TILE_M2), 0);
 
@@ -1491,6 +1560,7 @@
         if (f.infected || isCulture(c)) continue;
         if (Math.random() < infectionRisk(s, f)) {
           f.infected = true;
+          s.stats.infections = (s.stats.infections || 0) + 1;
           log.push(`Mould in the hall at ${f.x + 1},${f.y + 1} — the air has been too wet for too long.`);
         }
       }
@@ -1502,6 +1572,7 @@
           if (n.length) {
             const pick = n[Math.floor(Math.random() * n.length)];
             pick.infected = true;
+            s.stats.infections = (s.stats.infections || 0) + 1;
             log.push(`Infection spread to the hall at ${pick.x + 1},${pick.y + 1}.`);
           }
         }
@@ -1514,6 +1585,7 @@
       for (const e of pool) { r -= e.weight; if (r <= 0) { s.pendingEvent = e.id; break; } }
     }
 
+    checkStudies(s, log);
     for (const m of MILESTONES) {
       if (!s.done[m.id] && m.done(s)) { s.done[m.id] = s.day; log.push(`Milestone: ${m.text}.`); }
     }
@@ -1665,7 +1737,8 @@
     const secured = s.vault && s.vault.accessions[cropId] && vaultBuilt(s);
     Object.assign(f, { crop: cropId, growth: 0, health: (s.flags.seed > 0 && !secured && !c.keeps) ? 0.65 : 1,
                        infected: false, dead: false,
-                       moisture: 0.9, feed: 0.9, carbon: 0, warned: false, plantedDay: s.day, picks: 0 });
+                       moisture: 0.9, feed: 0.9, carbon: 0, warned: false, plantedDay: s.day, picks: 0,
+                       ppmAcc: 0, litH: 0, radH: -1, stand: 1 });
     /* the lab opens the day the roster is complete, and stays open — a crop
        added to the roster later does not shut it on somebody already inside */
     if (!s.stats.labOpen && conventionalSown(s) >= CROPS.length) s.stats.labOpen = true;
@@ -1713,7 +1786,8 @@
   function harvest(s, f, log, final) {
     if (!f || !f.crop || f.growth < 1) return 'Not ready yet.';
     const c = cropById(f.crop);
-    const A = area(f), q = f.health * bedYield(f, c);
+    /* stand: the share of the planting still alive — a flare can thin seedlings */
+    const A = area(f), q = f.health * bedYield(f, c) * (f.stand || 1);
     const share = f.picks > 0 ? pickShare(c) : 1;
     /* fruit from a calcium-starved tank: blossom-end rot */
     const rot = s.flags.calcium > 0 && c.kind === 'fruit' && tankFor(c) === 'fruit' && count(s, 'tanks') > 0;
@@ -1750,6 +1824,17 @@
       const msg2 = `${c.name} banked as accession ${accessions(s).length} of ${vaultTarget()}.`;
       if (log) log.push(msg2); else pushLog(s, msg2);
     }
+    /* every first cut goes in the farm's notebook: what grew, how, and how fast —
+       the studies are read straight off it */
+    if (!(f.picks > 0)) {
+      if (bedYield(f, c) < 1) s.stats.thinHarvest = (s.stats.thinHarvest || 0) + 1;
+      s.records.push({ d: s.day, c: c.id, a: A, p: f.ppfd || PPFD.std, pp: s.photoperiod,
+        sub: f.substrate || 'regolith', fans: !!f.fans, tp: !!f.transplanted,
+        n: Math.max(1, s.day - f.plantedDay), kg: Math.round(kg * 10) / 10, q: Math.round(q * 1000) / 1000,
+        bed: Math.round(bedYield(f, c) * 1000) / 1000, bf: Math.round(bedFactor(f, c) * 1000) / 1000,
+        ppm: f.litH ? Math.round(f.ppmAcc / f.litH) : CO2_SET });
+      if (s.records.length > 160) s.records.shift();
+    }
     const fresh = kg >= 1 ? `, ${Math.round(kg).toLocaleString()} kg fresh` : '';
     const msg = `${f.picks > 0 ? 'Picked' : 'Harvested'} ${c.name}: ${kcal.toLocaleString()} kcal, ${pay.toLocaleString()} cr${fresh}.`;
     if (log) log.push(msg); else pushLog(s, msg);
@@ -1770,7 +1855,7 @@
   function clearCrop(f) {
     Object.assign(f, { crop: null, growth: 0, health: 1, moisture: 0.9, feed: 0.9,
                        infected: false, dead: false, carbon: 0, litNow: false, warned: false,
-                       picks: 0, transplanted: false });
+                       picks: 0, transplanted: false, ppmAcc: 0, litH: 0, radH: -1, stand: 1 });
   }
 
   /* Set a hall's lamps. Any of the three settings, any time — it is a dimmer,
@@ -1945,12 +2030,33 @@
   function resolveEvent(s, eventId, effect) {
     const L = m => pushLog(s, m);
     switch (effect) {
-      case 'spe_shelter': s.flags.shutter = 12; L('Halls shuttered for the flare. Twelve hours of lost light.'); break;
+      case 'spe_shelter':
+        s.flags.shutter = 12; s.stats.flares = (s.stats.flares || 0) + 1;
+        L('Halls shuttered for the flare. Twelve hours of lost light.');
+        break;
       case 'spe_ride': {
+        /* the canopy dips and recovers inside a day; seedlings and the crew are
+           what a flare actually costs */
         const factor = s.up.shield ? 0.5 : 1;
-        for (const f of planted(s)) f.health = clamp(f.health - 0.22 * cropById(f.crop).radSens * factor, 0, 1);
+        let seedlings = 0;
+        for (const f of planted(s)) {
+          const c = cropById(f.crop);
+          f.radH = 0; f.radK = (c.radSens / 0.5) * factor;
+          if (f.growth < 0.1) {
+            f.stand = (f.stand || 1) * (1 - RAD_SEEDLING * c.radSens * factor);
+            seedlings++;
+          }
+        }
         s.morale -= 8 * factor;
-        L('Rode out the flare. Radiation damage across the canopy and a dose to the crew.');
+        s.stats.flares = (s.stats.flares || 0) + 1;
+        /* nobody has a plant transcriptome from a solar particle event — a hall
+           of Arabidopsis under the lamps through one is the first */
+        const arab = planted(s).find(f => cropById(f.crop).base === 'arabidopsis' || f.crop === 'arabidopsis');
+        if (arab && !(s.studies && s.studies.flare) && !(s.flare && s.flare.open)) {
+          s.flare = { hall: arab.id, crop: arab.crop, day: s.day, nadir: 1, open: true };
+        }
+        L(`Rode out the flare. The canopy will dip and recover within the day${seedlings ? `; ${seedlings} newly sown hall${seedlings === 1 ? '' : 's'} lost seedlings outright` : ''}, and the crew took a dose.`
+          + (arab && s.flare && s.flare.open ? ' The Arabidopsis is logging the first plant data ever taken through a solar particle event.' : ''));
         break;
       }
       case 'micro_patch':
@@ -2175,6 +2281,7 @@
     for (let i = 0; i < n && pool.length; i++) {
       const j = Math.floor(Math.random() * pool.length);
       pool[j].infected = true; pool.splice(j, 1);
+      s.stats.infections = (s.stats.infections || 0) + 1;
     }
   }
 
@@ -2212,6 +2319,8 @@
     hallChem, bedFactor, bedYield, inBand, tankRefill, tankTiles, freshTanks, immatureShare,
     EXPOSURE, BAND_EC, BAND_PH, NURSERY_TILES, NURSERY_DAYS, AERO_GROWTH, SINTER_FLOOR, YIELD_FLOOR,
     RAW_SOIL_IMMATURE, SOIL_FULL_YIELD,
+    /* radiation, studies and field notes */
+    radResponse, watchFlare, checkStudies, RRI_BASE, RRI_PHASES,
     tick, place, bulldoze, plant, water, feed, treat, harvest, clear, autoManage,
     research, trade, sellFood, sellO2, resolveEvent, condition, conditionCost, patchLeak, RAW_SOIL,
     addField, removeField, checkField, fieldCost, fieldAt, fieldById, fieldTiles, canPlace,
