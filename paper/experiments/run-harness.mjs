@@ -45,7 +45,12 @@ const html = fs.readFileSync(`${ROOT}/harness.html`, 'utf8');
 for (const m of html.matchAll(/<script src="([^"]+)"><\/script>/g))
   eval(fs.readFileSync(`${ROOT}/${m[1]}`, 'utf8'));
 
-const body = html.slice(html.indexOf('<script>\n(function'), html.lastIndexOf('</script>'));
+/* The scenarios are the inline block that opens with `(function`. It ends at
+   the first </script> after it — not the last in the file, since the pages now
+   carry an analytics tag below it. */
+const start = html.indexOf('<script>\n(function');
+if (start < 0) throw new Error(`run-harness: no inline scenario block in ${ROOT}/harness.html`);
+const body = html.slice(start, html.indexOf('</script>', start));
 const inner = body.slice(body.indexOf('(function'));
 
 const results = [];
