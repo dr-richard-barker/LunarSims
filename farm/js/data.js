@@ -1,7 +1,10 @@
 /* Lunar Farm — static game data.
    Crop roster is drawn from plants that have actually been flown or are
-   long-standing candidates for space life-support work. Numbers below are
-   balanced for play, not measured values. */
+   long-standing candidates for space life-support work. Most numbers below are
+   balanced for play, not measured values — the exception is any crop carrying
+   an `eden` block, whose cycle length and fresh yield are the ones measured in
+   the EDEN ISS greenhouse in Antarctica in 2018 (Zabel et al. 2020, Front Plant
+   Sci 11:656, doi:10.3389/fpls.2020.00656; NASA OSDR OSD-895). */
 
 const K = {
   COLS: 24,
@@ -26,144 +29,223 @@ const K = {
    Three optional flags change how a crop is simulated rather than drawn:
      dark      grows without lamps, so the lunar night costs it nothing
      respires  consumes oxygen and gives back carbon dioxide, the reverse of a plant
-     residue   tonnes of spent straw and stover it eats per tile-cycle */
+     residue   tonnes of spent straw and stover it eats per tile-cycle
+
+   dli is the daily light, in mol/m²/d, the crop is happy at; it sets where the
+   light-response curve bends (see sim.js). fresh is edible fresh mass in kg per
+   m² for one full cycle at Standard light. harvest: 'spread' marks a cut-and-
+   come-again crop: first cut at `days`, then a picking every `pick` days until
+   the planting has stood `stand` days. eden carries the EDEN ISS measurement
+   verbatim — cycle days, kg/m² per planting, g/m²/d, number of cycles n, and the
+   light it was grown under — for the catalogue to show. src: 'est' marks a fresh
+   yield estimated from the crop's calories rather than measured, and since: 9
+   marks a crop that joined the roster with the EDEN ISS data. */
 const CROPS = [
   {
     id: 'romaine', name: 'Red Romaine', cultivar: "'Outredgeous'", kind: 'leafy',
-    days: 28, dli: 17, water: 2.6, nutrients: 1.0, kcal: 1500, value: 190,
+    days: 38, dli: 17, water: 2.6, nutrients: 1.0, kcal: 2035, value: 258,
     o2: 1.0, morale: 6, science: 1, seed: 120, radSens: 0.5, colour: '#b8434f',
-    note: "The red lettuce grown in Veggie on the ISS and eaten in orbit in 2015."
+    fresh: 2.10,
+    eden: { cultivar: "'Outredgeous'", days: 37.9, kg: 2.10, gpd: 55.4, n: 14, ppfd: 330 },
+    note: "The red lettuce grown in Veggie on the ISS and eaten in orbit in 2015 — and grown again in EDEN ISS, where fourteen cycles averaged 2.1 kg a square metre in 38 days."
   },
   {
     id: 'mizuna', name: 'Mizuna Mustard', cultivar: '', kind: 'leafy',
     days: 22, dli: 15, water: 2.4, nutrients: 0.9, kcal: 1200, value: 155,
     o2: 0.95, morale: 5, science: 1, seed: 95, radSens: 0.45, colour: '#5faa4a',
-    note: "Fast leafy green flown on the ISS; tolerates repeated cut-and-come-again harvests."
+    fresh: 4.20, harvest: 'spread', pick: 10, stand: 119,
+    eden: { days: 119, kg: 23.11, gpd: 194.2, n: 1, ppfd: 330 },
+    note: "Fast leafy green flown on the ISS. EDEN ISS cut a single planting for 119 days and took 23 kg a square metre off it — cut-and-come-again at its best, if only from one cycle."
   },
   {
     id: 'bekana', name: 'Tokyo Bekana', cultivar: '', kind: 'leafy',
     days: 26, dli: 16, water: 2.7, nutrients: 1.0, kcal: 1350, value: 170,
     o2: 1.0, morale: 5, science: 1, seed: 105, radSens: 0.5, colour: '#8fc45a',
+    fresh: 2.4, src: 'est',
     note: "A loose-leaf Chinese cabbage selected for Veggie for its short stature."
   },
   {
     id: 'pakchoi', name: 'Pak Choi', cultivar: "'Extra Dwarf'", kind: 'leafy',
     days: 24, dli: 16, water: 2.5, nutrients: 0.95, kcal: 1300, value: 175,
     o2: 0.98, morale: 8, science: 1, seed: 100, radSens: 0.5, colour: '#7fc25e',
+    fresh: 2.4, src: 'est',
     note: "Grown in Veggie for 64 days — the longest any leafy green has stood on station. The crew ate it marinated in a tortilla pack with soy sauce and garlic."
   },
   {
     id: 'kale', name: 'Red Russian Kale', cultivar: '', kind: 'leafy',
     days: 30, dli: 17, water: 2.8, nutrients: 1.1, kcal: 1700, value: 215,
     o2: 1.05, morale: 7, science: 1, seed: 115, radSens: 0.45, colour: '#6d8f6a',
+    fresh: 2.9, src: 'est',
     note: "One of the VEG-04 salad crops, chosen for nutrient density rather than speed. Cut-and-come-again, and it keeps standing when a lettuce would bolt."
   },
   {
     id: 'basil', name: 'Sweet Basil', cultivar: "'Spicy Globe'", kind: 'leafy',
     days: 32, dli: 18, water: 2.6, nutrients: 1.0, kcal: 520, value: 265,
     o2: 0.9, morale: 15, science: 1, seed: 125, radSens: 0.5, colour: '#4e9a52',
-    note: "Herbs earn their tray on smell alone. A galley with basil in it is a different room, and the flight surgeons stopped arguing about that a long time ago."
+    fresh: 1.88, harvest: 'spread', pick: 14, stand: 121,
+    eden: { cultivar: "'Dolly'", days: 121, kg: 7.30, gpd: 60.3, n: 2, ppfd: 330 },
+    note: "Herbs earn their tray on smell alone. A galley with basil in it is a different room, and the flight surgeons stopped arguing about that a long time ago. EDEN ISS kept cutting it back from the lamps for four months a planting."
+  },
+  {
+    id: 'arugula', name: 'Arugula', cultivar: '', kind: 'leafy',
+    days: 24, dli: 17, water: 2.5, nutrients: 1.0, kcal: 1300, value: 175,
+    o2: 0.98, morale: 7, science: 1, seed: 100, radSens: 0.5, colour: '#5d9a3a',
+    fresh: 3.05, since: 9,
+    eden: { days: 24.2, kg: 3.05, gpd: 126.0, n: 9, ppfd: 330,
+            high: { days: 29, kg: 5.49, gpd: 189.3, n: 8, ppfd: 600 } },
+    note: "EDEN ISS grew it twice over: nine cycles at the standard 330 µmol and eight under 600. The bright cycles gave half as much again per day — and less from every mole of light. That pair of numbers is the curve every lamp on this farm runs on."
+  },
+  {
+    id: 'chard', name: 'Swiss Chard', cultivar: '', kind: 'leafy',
+    days: 30, dli: 16, water: 2.8, nutrients: 1.1, kcal: 1400, value: 180,
+    o2: 1.02, morale: 6, science: 1, seed: 110, radSens: 0.45, colour: '#a8323e',
+    fresh: 2.89, harvest: 'spread', pick: 12, stand: 90, since: 9,
+    eden: { days: 90, kg: 9.26, gpd: 102.9, n: 3, ppfd: 330 },
+    note: "Cut the outer leaves and the plant keeps making more from the middle. EDEN ISS stood three plantings for ninety days each and took 9.3 kg a square metre off every one."
+  },
+  {
+    id: 'mustard', name: 'Red Mustard', cultivar: "'Red Giant'", kind: 'leafy',
+    days: 26, dli: 16, water: 2.6, nutrients: 1.0, kcal: 1250, value: 170,
+    o2: 0.97, morale: 7, science: 1, seed: 100, radSens: 0.45, colour: '#7b2d43',
+    fresh: 3.46, harvest: 'spread', pick: 10, stand: 83, since: 9,
+    eden: { cultivar: "'Red Giant'", days: 82.7, kg: 10.78, gpd: 130.4, n: 3, ppfd: 330 },
+    note: "Peppery, purple and quick. EDEN ISS grew two red mustards side by side for 83 days at a time, and 'Red Giant' out-yielded 'Frizzy Lizzy' by a fifth."
   },
   {
     id: 'tomato', name: 'Dwarf Tomato', cultivar: "'Red Robin'", kind: 'fruit',
     days: 84, dli: 24, water: 4.4, nutrients: 1.9, kcal: 3400, value: 780,
     o2: 1.5, morale: 16, science: 3, seed: 340, radSens: 0.6, colour: '#e0553c',
-    note: "The dwarf tomato of the VEG-05 experiment — the first fruiting crop grown to harvest on station."
+    fresh: 4.18, harvest: 'spread', pick: 14, stand: 286,
+    eden: { cultivar: 'F1 1202', days: 286, kg: 14.90, gpd: 52.1, n: 2, ppfd: 350 },
+    note: "The dwarf tomato of the VEG-05 experiment — the first fruiting crop grown to harvest on station. EDEN ISS kept its tomatoes in for the whole 286-day season, picking as the trusses ripened."
   },
   {
     id: 'pepper', name: 'Chile Pepper', cultivar: "'Española Improved'", kind: 'fruit',
     days: 110, dli: 25, water: 4.6, nutrients: 2.0, kcal: 2600, value: 860,
     o2: 1.5, morale: 18, science: 3, seed: 380, radSens: 0.55, colour: '#d94a2b',
+    fresh: 2.9, src: 'est',
     note: "Grown in Plant Habitat-04 in 2021 — one of the longest crop runs attempted in orbit."
   },
   {
     id: 'strawberry', name: 'Strawberry', cultivar: "'Seascape'", kind: 'fruit',
     days: 92, dli: 24, water: 4.3, nutrients: 1.8, kcal: 1900, value: 980,
     o2: 1.4, morale: 24, science: 3, seed: 410, radSens: 0.6, colour: '#e0455e',
+    fresh: 2.7, src: 'est',
     note: "Day-neutral, so it fruits without waiting on a season. A long-standing candidate crop, and the single most requested thing on any closed-habitat menu."
+  },
+  {
+    id: 'cucumber', name: 'Cucumber', cultivar: "'Picowell'", kind: 'fruit',
+    days: 55, dli: 24, water: 4.6, nutrients: 1.9, kcal: 2200, value: 540,
+    o2: 1.5, morale: 14, science: 2, seed: 300, radSens: 0.55, colour: '#4f8f3a',
+    fresh: 16.4, harvest: 'spread', pick: 7, stand: 161, since: 9,
+    eden: { cultivar: "'Picowell'", days: 161, kg: 50.88, gpd: 316.0, n: 4, ppfd: 500 },
+    note: "The heaviest cropper EDEN ISS grew, by a distance: 51 kg a square metre from plants trained to two stems and picked for five months. Nearly all of it is water — 96% — which is worth remembering before reading anything into a fresh-mass league table."
   },
   {
     id: 'radish', name: 'Radish', cultivar: "'Cherry Belle'", kind: 'root',
     days: 27, dli: 18, water: 2.8, nutrients: 1.2, kcal: 1100, value: 210,
     o2: 1.0, morale: 7, science: 2, seed: 130, radSens: 0.5, colour: '#c8446a',
-    note: "Plant Habitat-04 grew radishes in 2020; quick, and the whole plant is usable."
+    fresh: 1.45,
+    eden: { cultivar: "'Raxe'", days: 22.6, kg: 1.82, gpd: 80.5, n: 10, ppfd: 600 },
+    note: "Plant Habitat-02 grew radishes on the ISS in 2020; quick, and the whole plant is usable. EDEN ISS ran its radishes under 600 µmol and pulled them in 23 days."
   },
   {
     id: 'onion', name: 'Bunching Onion', cultivar: "'Evergreen'", kind: 'root',
     days: 52, dli: 17, water: 2.9, nutrients: 1.1, kcal: 1000, value: 300,
     o2: 1.0, morale: 11, science: 1, seed: 145, radSens: 0.4, colour: '#9fc47a',
+    fresh: 2.7, src: 'est',
     note: "Cut the green and it grows back. Flavour is a life-support requirement in its own right: a crew that will not eat its calories is not fed."
+  },
+  {
+    id: 'kohlrabi', name: 'Kohlrabi', cultivar: '', kind: 'root',
+    days: 59, dli: 20, water: 3.2, nutrients: 1.3, kcal: 2700, value: 360,
+    o2: 1.2, morale: 6, science: 2, seed: 160, radSens: 0.45, colour: '#8e6bb0',
+    fresh: 8.11, since: 9,
+    eden: { days: 58.7, kg: 8.11, gpd: 138.1, n: 6, ppfd: 350 },
+    note: "A swollen stem that eats like a sweet turnip, and the best batch crop EDEN ISS grew per day of floor. Its broad leaves shade whatever stands next to it, and the operator spent hours trimming them back."
   },
   {
     id: 'wheat', name: 'Dwarf Wheat', cultivar: "'USU-Apogee'", kind: 'grain',
     days: 70, dli: 30, water: 4.0, nutrients: 1.8, kcal: 8200, value: 520,
     o2: 1.8, morale: 3, science: 2, seed: 260, radSens: 0.35, colour: '#d9b452',
+    fresh: 1.09, src: 'est',
     note: "A short-stature wheat bred at Utah State specifically for controlled-environment life support."
   },
   {
     id: 'rice', name: 'Dwarf Rice', cultivar: "'Nipponbare'", kind: 'grain',
     days: 96, dli: 29, water: 4.6, nutrients: 1.9, kcal: 9900, value: 580,
     o2: 1.8, morale: 5, science: 4, seed: 285, radSens: 0.35, colour: '#cfc27a',
+    fresh: 1.24, src: 'est',
     note: "Taken from seed to seed aboard the Wentian module in 2022 — the first crop to complete a full life cycle in orbit. Where wheat is bread, rice is the proof the loop can close."
   },
   {
     id: 'potato', name: 'Potato', cultivar: "'Norland'", kind: 'root',
     days: 95, dli: 26, water: 4.2, nutrients: 1.7, kcal: 12500, value: 610,
     o2: 1.7, morale: 6, science: 2, seed: 300, radSens: 0.4, colour: '#c9a86a',
+    fresh: 7.3, src: 'est',
     note: "The calorie workhorse of every closed life-support study since the 1980s."
   },
   {
     id: 'sweetpotato', name: 'Sweetpotato', cultivar: "'TU-82-155'", kind: 'root',
     days: 105, dli: 25, water: 4.0, nutrients: 1.6, kcal: 13800, value: 700,
     o2: 1.7, morale: 7, science: 2, seed: 330, radSens: 0.4, colour: '#d98a4a',
+    fresh: 7.2, src: 'est',
     note: "A CELSS-era candidate crop: dense calories from a plant that tolerates a low canopy."
   },
   {
     id: 'soybean', name: 'Soybean', cultivar: "'Hoyt'", kind: 'grain',
     days: 88, dli: 28, water: 3.9, nutrients: 1.9, kcal: 9600, value: 690,
     o2: 1.7, morale: 5, science: 3, seed: 320, radSens: 0.45, colour: '#a8bf5c',
+    fresh: 0.97, src: 'est',
     note: "Soybean was grown to seed on the ISS in Advanced Astroculture — protein and oil in one crop."
   },
   {
     id: 'peanut', name: 'Peanut', cultivar: "'Georgia Red'", kind: 'grain',
     days: 104, dli: 27, water: 4.1, nutrients: 1.9, kcal: 11800, value: 760,
     o2: 1.7, morale: 9, science: 3, seed: 350, radSens: 0.4, colour: '#c9a05c',
+    fresh: 0.94, src: 'est',
     note: "Oil, protein and calories from one plant, and it fixes its own nitrogen into the bargain. A CELSS-era shortlist crop that never left the shortlist."
   },
   {
     id: 'rapeseed', name: 'Rapeseed', cultivar: "'Westar'", kind: 'grain',
     days: 78, dli: 26, water: 3.7, nutrients: 1.7, kcal: 7600, value: 660,
     o2: 1.6, morale: 4, science: 3, seed: 275, radSens: 0.45, colour: '#e2c94e',
+    fresh: 0.68, src: 'est',
     note: "Flew in the Chang'e-4 canister and germinated on the far side. Cooking oil is not a luxury in a closed kitchen — it is most of what makes the staples edible."
   },
   {
     id: 'cotton', name: 'Cotton', cultivar: '', kind: 'fibre',
     days: 118, dli: 28, water: 4.4, nutrients: 1.8, kcal: 0, value: 1020,
     o2: 1.6, morale: 6, science: 5, seed: 320, radSens: 0.5, colour: '#e8e4d8',
+    fresh: 0,
     note: "The first plant to germinate on the Moon, in the Chang'e-4 biosphere canister in January 2019. Feeds nobody, and a colony that cannot make cloth or wadding imports both forever."
   },
   {
     id: 'zinnia', name: 'Zinnia', cultivar: '', kind: 'flower',
     days: 60, dli: 20, water: 3.0, nutrients: 1.3, kcal: 0, value: 120,
     o2: 1.1, morale: 26, science: 2, seed: 150, radSens: 0.7, colour: '#e8994b',
+    fresh: 0,
     note: "Flowered on the ISS in 2016 after a fungal scare — a study in crew morale as much as botany."
   },
   {
     id: 'sunflower', name: 'Dwarf Sunflower', cultivar: "'Elf'", kind: 'flower',
     days: 72, dli: 22, water: 3.6, nutrients: 1.4, kcal: 2500, value: 340,
     o2: 1.3, morale: 28, science: 2, seed: 175, radSens: 0.6, colour: '#f2b33d',
+    fresh: 0.19, src: 'est',
     note: "Grown in orbit off-programme, in a bag, by a crew member who wanted something to look at. It tracked a light it could not see and everybody watched it do it."
   },
   {
     id: 'marigold', name: 'Marigold', cultivar: "'Nasturtium mix'", kind: 'flower',
     days: 48, dli: 19, water: 2.9, nutrients: 1.2, kcal: 90, value: 210,
     o2: 1.0, morale: 21, science: 1, seed: 130, radSens: 0.65, colour: '#ef8b3c',
+    fresh: 0.3, src: 'est',
     note: "Edible petals, a fast turn and a colour nothing else in the hall provides. Cut for the table as often as for the vase."
   },
   {
     id: 'arabidopsis', name: 'Arabidopsis', cultivar: 'Col-0', kind: 'research',
     days: 42, dli: 14, water: 1.8, nutrients: 0.8, kcal: 0, value: 60,
     o2: 0.6, morale: 0, science: 14, seed: 80, radSens: 0.8, colour: '#7fbf6a',
+    fresh: 0,
     note: "The model plant behind most spaceflight gene-expression work. Pays in data, not dinner."
   },
   {
@@ -220,7 +302,7 @@ const CROPS = [
 const TRAITS = [
   { id: 'hi', name: 'Improved harvest index',
     basis: 'Reduced-stature alleles and altered assimilate partitioning: the plant spends less of its carbon on stem and more on the part you eat.',
-    mods: { kcal: 1.35, value: 1.25 },
+    mods: { kcal: 1.35, value: 1.25, fresh: 1.35 },
     gain: 'More edible yield from the same floor and the same lamp hours.' },
   { id: 'biofort', name: 'Biofortification',
     basis: 'Provitamin-A, mineral and anthocyanin accumulation in the edible tissue.',
@@ -228,7 +310,7 @@ const TRAITS = [
     gain: 'Sells for far more, and a crew fed on it stays cheerful longer.' },
   { id: 'bypass', name: 'Photorespiratory bypass',
     basis: 'An engineered route around photorespiration, so less fixed carbon is thrown away recovering from it.',
-    mods: { days: 0.85, kcal: 1.20 },
+    mods: { days: 0.85, kcal: 1.20, fresh: 1.20 },
     gain: 'Grows faster and heavier for the same light.' },
   { id: 'npq', name: 'Faster NPQ relaxation',
     basis: 'Tuned recovery from non-photochemical quenching, so the canopy stops wasting light in the minutes after it returns.',
@@ -249,7 +331,7 @@ const TRAITS = [
   { id: 'lowlight', name: 'Low-light tolerance',
     basis: 'A lowered light-saturation point: the canopy reaches full rate under a dimmer lamp.',
     mods: { dli: 0.70, light: 0.74 },
-    gain: 'Keeps growing on the power you can spare after sunset.' },
+    gain: 'Keeps growing on the power you can spare after sunset, and loses less when the lamps are turned down.' },
   { id: 'perchlorate', name: 'Perchlorate tolerance',
     basis: 'Microbial perchlorate reduction carried by the crop\u2019s root associates.',
     mods: { soilFloor: 0.20 },
@@ -268,7 +350,7 @@ const TRAITS = [
     gain: 'Its vault accession never degrades, and tired-seed years cannot touch it.' },
   { id: 'fruitset', name: 'Assisted fruit set',
     basis: 'Reliable self-pollination without wind or insects to move the pollen.',
-    mods: { kcal: 1.15, value: 1.15, setFloor: 1 },
+    mods: { kcal: 1.15, value: 1.15, fresh: 1.15, setFloor: 1 },
     gain: 'A fruiting crop that actually fruits, every time, in a sealed hall.' },
   { id: 'nfix', name: 'Nitrogen partnership',
     basis: 'An introduced diazotroph association fixing atmospheric nitrogen at the root.',
@@ -334,6 +416,230 @@ const GMO = [
     note: 'The model plant put to work: a pharmaceutical protein recovered from a crop that was only ever data before.' }
 ];
 
+/* ---------- studies ----------
+
+   Published trials the farm can re-run. Each watches the harvest records for a
+   matching pair — the same crop grown two ways, alike in everything else — and
+   when it finds one sets the farm's figure beside the published one. The farm's
+   figure measures this model, not plants: the point is to watch the lesson play
+   out, and to see where a game is kinder or harsher than the Moon. */
+const baseOf = id => id.replace(/_g$/, '');
+/* fresh mass per tile per day of hall occupancy; the area units cancel in a ratio */
+const perDay = r => (r.n > 0 && r.a > 0 ? r.kg / r.a / r.n : 0);
+/* two first cuts alike in every way the study is not about */
+function pairUp(s, isA, isB, ignore) {
+  const recs = s.records || [];
+  const skip = new Set(ignore || []);
+  const alike = (a, b) => baseOf(a.c) === baseOf(b.c) && Math.abs(a.d - b.d) <= 150
+    && (skip.has('sub') || a.sub === b.sub) && Math.abs(a.bf - b.bf) <= 0.03
+    && (skip.has('p') || a.p === b.p) && (skip.has('pp') || a.pp === b.pp)
+    && (skip.has('fans') || a.fans === b.fans) && (skip.has('tp') || a.tp === b.tp)
+    && (skip.has('ppm') || Math.abs(a.ppm - b.ppm) <= 300)
+    && (skip.has('a') || a.a === b.a);
+  for (const a of recs) {
+    if (!isA(a)) continue;
+    for (const b of recs) if (b !== a && isB(b) && alike(a, b)) return [a, b];
+  }
+  return null;
+}
+const x2 = v => v.toFixed(2);
+
+const STUDIES = [
+  { id: 'eden_light', name: 'The EDEN ISS light trial', science: 15,
+    cite: 'Zabel et al. 2020, Front Plant Sci 11:656',
+    protocol: 'Bring in arugula grown under High (600 µmol) and arugula grown under Standard (330), sown direct, in matching halls on matching beds.',
+    published: 'EDEN ISS: 126.0 → 189.3 g/m²/d, ×1.50 for 1.82× the light (n = 9 and 8 cycles).',
+    check: s => {
+      const p = pairUp(s, r => baseOf(r.c) === 'arugula' && r.p === 600 && !r.tp && r.q >= 0.9,
+                          r => baseOf(r.c) === 'arugula' && r.p === 330 && !r.tp && r.q >= 0.9, ['p', 'ppm', 'a']);
+      if (!p) return null;
+      const mine = perDay(p[0]) / perDay(p[1]);
+      return { mine, text: `Your arugula under 600 µmol made ×${x2(mine)} the fresh mass a day; EDEN ISS measured ×1.50.` };
+    } },
+  { id: 'apollo', name: 'Arabidopsis in Apollo soil', science: 18,
+    cite: 'Paul et al. 2022, Commun Biol 5:382',
+    protocol: 'Bring in Arabidopsis from a raw regolith bed (its first crop or two) and from a fully worked or sintered bed.',
+    published: 'In Apollo soil, rosettes reached 2–13% of their size in simulant, and leaves came 32–65% as fast; the most weathered soil grew worst.',
+    check: s => {
+      const recs = s.records || [];
+      const raw = recs.find(r => baseOf(r.c) === 'arabidopsis' && r.sub === 'regolith' && r.bed < 0.8);
+      const good = recs.find(r => baseOf(r.c) === 'arabidopsis' && r.bed >= 0.99);
+      if (!raw || !good) return null;
+      const mine = raw.q / Math.max(0.01, good.q);
+      return { mine, text: `Your first Arabidopsis in raw regolith yielded ${Math.round(mine * 100)}% of a worked bed's. In Apollo soil the rosettes reached 2–13% of their size in simulant — the farm is kinder than the Moon.` };
+    } },
+  { id: 'flare', name: 'The first plant data from a solar particle event', science: 30,
+    cite: 'Plant_response_to_radiation (this group)',
+    protocol: 'Keep the lamps on through a solar flare with Arabidopsis growing, and leave it in until its response has run its course.',
+    published: 'Resilience index at the 2–6 h nadir: cosmic rays 0.56, spaceflight 0.68, gamma 0.81, against a baseline of 0.79. Solar particle events: no plant studies at all.',
+    check: s => {
+      if (!s.flare || !s.flare.complete) return null;
+      const mine = s.flare.nadir;
+      return { mine, text: `Arabidopsis held through the flare bottomed at ×${x2(mine)} growth and recovered within the day — the first plant response ever logged through a solar particle event.` };
+    } },
+  { id: 'still_air', name: 'Still air at one-sixth g', science: 12,
+    cite: 'LunarLeaf-CFD (this group)',
+    protocol: 'Bring in the same crop from two halls of the same size, over twelve tiles, one with canopy fans and one without.',
+    published: 'Still air at lunar gravity leaves a leaf 71% of its Earth boundary-layer conductance, a dense canopy far less; fans at 2–6.5 cm/s restore it.',
+    check: s => {
+      const p = pairUp(s, r => r.a > 12 && r.fans, r => r.a > 12 && !r.fans, ['fans', 'ppm']);
+      if (!p) return null;
+      const mine = p[1].n / p[0].n;
+      return { mine, text: `Your fanned hall grew ×${x2(mine)} as fast as the still one. In the CFD, airflow — not gravity — decides how well a lunar canopy breathes.` };
+    } },
+  { id: 'nursery', name: 'Transplants against direct sowing', science: 10,
+    cite: 'Zabel et al. 2020, Front Plant Sci 11:656',
+    protocol: 'Bring in the same crop sown direct and sown from nursery transplants, in matching halls.',
+    published: 'EDEN ISS raised every seedling 10–20 days in rockwool before it went into a rack.',
+    check: s => {
+      const p = pairUp(s, r => r.tp, r => !r.tp, ['tp', 'ppm']);
+      if (!p) return null;
+      const mine = p[0].n / p[1].n;
+      return { mine, text: `Transplants stood in the hall ${Math.round(mine * 100)}% as long as direct-sown seed — the nursery's fortnight bought back.` };
+    } },
+  { id: 'enrich', name: 'Photorespiration and enriched air', science: 14,
+    cite: 'Photorespiration_multiomics_microgravity (this group)',
+    protocol: 'Bring in the same crop grown at the 1000 ppm setpoint and grown in air enriched to 1,800 ppm or more, in matching halls.',
+    published: 'At 3,500 ppm photorespiration falls to 2.6% of fixation, a twelve-fold drop; the +8–11% growth that implies is our inference.',
+    check: s => {
+      const p = pairUp(s, r => r.ppm >= 1800, r => r.ppm <= 1050, ['ppm']);
+      if (!p) return null;
+      const mine = p[1].n / p[0].n;
+      return { mine, text: `The enriched crop grew ×${x2(mine)} as fast. Most of what photorespiration throws away at 400 ppm is already saved at 1000; past that the returns are small.` };
+    } }
+];
+
+/* ---------- field notes ----------
+
+   The sources behind the farm, filed as the farm meets them. Each says what was
+   found, by whom, and what it does here. */
+const FIELD_NOTES = [
+  { id: 'eden', title: 'EDEN ISS: a greenhouse that fed a station',
+    cite: 'Zabel et al. 2020, Front Plant Sci 11:656 · doi:10.3389/fpls.2020.00656 · NASA OSDR OSD-895',
+    text: 'Through 2018 the EDEN ISS Mobile Test Facility at Neumayer III grew 268 kg of fresh food on 12.5 m² of racks for an Antarctic overwintering crew — 0.075 kg per square metre per day across the season. One operator ran it, a few hours a day.',
+    farm: 'Ten crops carry its measured cycle lengths and yields; its lamps, climate setpoints, tanks and nursery are the farm’s defaults.',
+    unlock: s => s.day >= 1 },
+  { id: 'eden_light', title: 'More light, less per mole',
+    cite: 'Zabel et al. 2020 — the arugula light trial',
+    text: 'Arugula under 600 µmol/m²/s made half as much again a day as arugula under 330, but got 17% less from every mole of light. Light is a curve that bends over.',
+    farm: 'Every lamp setting and photoperiod runs on a curve fitted to those two numbers.',
+    unlock: s => s.photoperiod !== 16 || s.fields.some(f => (f.ppfd || 330) !== 330) },
+  { id: 'benchmarks', title: 'Kilograms per square metre per day',
+    cite: 'EDEN ISS; Lunar Palace 1 (Fu et al. 2016); CEEF, the South Pole chamber and NASA’s BPC as tabulated in the ISS_EDEN comparison',
+    text: 'Every closed-agriculture facility reports fresh food per square metre per day: EDEN ISS 0.075, Lunar Palace 1 0.068, NASA’s Biomass Production Chamber about 0.17 under ideal control. Fresh mass flatters watery crops — a cucumber is 96% water.',
+    farm: 'The Systems tab and the report track your farm against them.',
+    unlock: s => s.day >= 30 },
+  { id: 'lp1', title: 'Lunar Palace 1: closing the loop with people inside',
+    cite: 'Li et al. 2015, Life Sci Space Res 7:9 · Fu et al. 2016, Astrobiology 16:925 · Dong et al. 2017, Astrobiology 17:78',
+    text: 'Three volunteers sealed in for 105 days with 21 crops, mealworms and a waste loop. 8.13% of mealworm feed came back as larval mass, 20.5% of urine nitrogen was recovered, 41% of solid waste degraded.',
+    farm: 'The recycling compartments run on those ratios.',
+    unlock: s => ['worms', 'nitrifier', 'digester'].some(t => s.map.some(x => x.b && x.b.type === t)) },
+  { id: 'apollo', title: 'Plants in Apollo soil',
+    cite: 'Paul et al. 2022, Commun Biol 5:382 · NASA OSDR OSD-476',
+    text: 'Arabidopsis grown in a gram each of Apollo 11, 12 and 17 regolith made leaves at a third to two-thirds the pace of plants in simulant, and rosettes a tenth the size. The more weathered the soil, the worse it grew.',
+    farm: 'A first crop in raw regolith yields about half; freshly broken crater-rim ejecta is younger and kinder.',
+    unlock: s => (s.stats.thinHarvest || 0) > 0 },
+  { id: 'sinter', title: 'Firing the dust',
+    cite: 'lunar-regolith-blss-review (this group), on Paul et al. 2022 and Hasenstein 2026',
+    text: 'Raw regolith holds under 12% air at the roots and runs at pH 9–11; fired into aggregate it holds 25–30%, sits near neutral and comes out of a 500 °C kiln sterile. At one-sixth g water climbs only 4.2 mm by capillarity, so the grain size matters.',
+    farm: 'Sintered beds yield nearly in full from the first crop and grow less mould. Encoded qualitatively: parts of the review’s reference list are still being checked.',
+    unlock: s => (s.stats.sinteredHalls || 0) > 0 || s.fields.some(f => f.substrate === 'aero') },
+  { id: 'tanks', title: 'Two tanks and a recipe change',
+    cite: 'Zabel et al. 2020 · NASA OSDR OSD-895 (raw record)',
+    text: 'EDEN ISS fed its racks from a leafy tank (EC 2.21, pH 6.06) and a fruit tank (EC 3.49, pH 5.91), held with nitric acid and potassium hydroxide and replaced every two to three months. When the tomatoes showed calcium deficiency the fruit recipe was changed mid-season.',
+    farm: 'The tank room runs both, recipes and all.',
+    unlock: s => s.map.some(x => x.b && x.b.type === 'tanks') },
+  { id: 'nursery', title: 'Seedlings first',
+    cite: 'Zabel et al. 2020 · deepspace-seed-stress-decoder (this group)',
+    text: 'EDEN ISS raised every seedling 10–20 days in rockwool before it went into a rack. Germination is also when a plant is most exposed: the first hours are the window in which several stresses converge on the root tip.',
+    farm: 'The nursery puts a hall a fortnight ahead, and a flare is hardest on a hall that has just been sown.',
+    unlock: s => s.map.some(x => x.b && x.b.type === 'nursery') },
+  { id: 'cfd', title: 'Still air on the Moon',
+    cite: 'LunarLeaf-CFD (this group)',
+    text: 'At one-sixth g warm air barely rises: a leaf keeps 71% of its Earth boundary-layer conductance, a dense canopy far less, and fans at 2–6.5 cm/s restore it. A sealed, lit chamber draws its CO₂ to nothing in seven minutes. The enclosure matters about 25 times more than the gravity does.',
+    farm: 'Big halls need canopy fans, and a failed air handler seals a hall.',
+    unlock: s => s.fields.some(f => f.w * f.h > 12 || f.fans || f.sealed > 0) },
+  { id: 'photoresp', title: 'What enriched air buys',
+    cite: 'Photorespiration_multiomics_microgravity (this group)',
+    text: 'At ISS-cabin CO₂ (3,500 ppm) photorespiration falls to 2.6% of fixation, a twelve-fold drop from outdoor air. Leaf photosynthesis at lunar gravity is about 98% of Earth’s — the enclosure, not the gravity, sets the carbon supply.',
+    farm: 'Enrichment buys up to a tenth more growth — our inference from those numbers, not a measured yield.',
+    unlock: s => (s.co2Set || 1000) > 1000 },
+  { id: 'habitat', title: 'The crew’s own breath',
+    cite: 'Habitat_model (this group) · Zabel et al. 2020',
+    text: 'In a 63.1 m³ module with the ventilation off, two crew take the air to 5,000 ppm in 6.3 hours and six in 2.1. EDEN ISS had no CO₂ removal at all, and spent most of its winter at 2,000–4,000 ppm because of it.',
+    farm: 'A scrubber fault puts the crew’s breath in the halls; past 2,500 ppm, morale pays.',
+    unlock: s => (s.stats.ppmPeak || 0) > 2500 || s.flags.scrubber > 0 },
+  { id: 'radiation', title: 'How a plant takes a dose',
+    cite: 'Plant_response_to_radiation (this group: 299 samples, 10 NASA OSDR studies)',
+    text: 'The response runs in three phases: recognition in the first two hours, a crisis at 2–6 h, recovery within the day. Cosmic rays disrupt the networks most, gamma least. Solar particle events — the most acute hazard on the lunar surface — have no plant studies at all.',
+    farm: 'A flare is a dip and a recovery for the canopy, real damage to a seedling, and a chance at data nobody has.',
+    unlock: s => (s.stats.flares || 0) > 0 },
+  { id: 'veg05', title: 'What flight does to a leaf’s microbes',
+    cite: 'VEG-05 dwarf tomato, ISS · veg05-integrated-omics (this group)',
+    text: 'Grown on the ISS, ‘Red Robin’ tomato leaves carried a fungal community 3.7 times as far from normal as ground controls (bacteria 2.1 times), and two Fusarium variants turned up. Under blue-rich light the leaves changed 4,716 genes in flight; under red-rich, 523.',
+    farm: 'A closed farm is a gift to opportunists. Mould follows wet air, spreads hall to hall, and UV-C is the answer.',
+    unlock: s => (s.stats.infections || 0) > 0 }
+];
+
+/* ---------- how the farm measures up ----------
+
+   Fresh edible mass per square metre of growing area per day, over a whole
+   season — the one figure every closed-agriculture facility reports. EDEN ISS
+   is taken from its own data release; the others as tabulated beside it in the
+   ISS_EDEN comparison (source papers named), not re-derived, so treat them as
+   approximate. Fresh mass flatters watery crops: a cucumber is 96% water, and a
+   farm of them out-scores a wheat farm that feeds far more people. */
+const BENCHMARKS = [
+  { id: 'lp1', name: 'Lunar Palace 1', year: 2016, kgm2d: 0.068,
+    src: 'Fu et al. 2016, Astrobiology', note: 'a 21-crop bioregenerative run with three crew sealed inside' },
+  { id: 'eden', name: 'EDEN ISS', year: 2018, kgm2d: 0.075,
+    src: 'Zabel et al. 2020, Front Plant Sci', note: 'one Antarctic winter, 12.5 m² of racks, mostly salad and fruit' },
+  { id: 'ceef', name: 'CEEF, Japan', year: 2005, kgm2d: 0.095, approx: true,
+    src: 'Masuda et al. 2005', note: 'closed-ecology habitation trials at Rokkasho' },
+  { id: 'spfgc', name: 'South Pole Food Growth Chamber', year: 2006, kgm2d: 0.13, approx: true,
+    src: 'Patterson et al. 2012', note: 'heavy on cucumber and lettuce' },
+  { id: 'bpc', name: 'KSC Biomass Production Chamber', year: 2008, kgm2d: 0.17, approx: true,
+    src: 'Wheeler et al. 2008', note: 'NASA’s monoculture batches under ideal control' }
+];
+/* the EDEN ISS 2018 season, for the per-crew comparison: 268 kg of fresh food
+   off 12.5 m² in 286 days, for a station of ten */
+const EDEN_SEASON = { kg: 268, m2: 12.5, days: 286, crew: 10 };
+
+/* ---------- the nutrient tanks ----------
+
+   EDEN ISS fed its racks from two tanks, mixed automatically from concentrated
+   stock and deionised water and misted onto bare roots for 30 s every 6 min.
+   Setpoints, tolerances and the replacement interval are theirs (Zabel et al.
+   2020; NASA OSDR OSD-895). The recipes are read from the raw OSDR record, in
+   mol per 100 L (micronutrients in mmol per 100 L). The fruit recipe was changed
+   mid-season when tomato showed calcium deficiency: calcium up, potassium down. */
+const TANKS = {
+  leafy: { name: 'Tank 1 · leafy', ec: 2.21, ph: 6.06, ecSd: 0.13, phSd: 0.18, days: 90,
+    recipe: { 'NH₄⁺': 0.122, 'Ca²⁺': 0.419, 'K⁺': 1.028, 'Mg²⁺': 0.135, 'NO₃⁻': 1.785, 'Cl⁻': 0.068,
+              'SO₄²⁻': 0.109, 'P': 0.189 },
+    micro: { Fe: 3.795, Mn: 0.189, Zn: 0.244, B: 2.84, Cu: 0.068, Mo: 0.041 } },
+  fruit: { name: 'Tank 2 · fruit', ec: 3.49, ph: 5.91, ecSd: 0.17, phSd: 0.12, days: 60,
+    recipe: { 'NH₄⁺': 0.226, 'Ca²⁺': 0.597, 'K⁺': 1.503, 'Mg²⁺': 0.226, 'NO₃⁻': 2.347, 'Cl⁻': 0.104,
+              'SO₄²⁻': 0.332, 'P': 0.267 },
+    adjusted: { 'Ca²⁺': 0.711, 'K⁺': 1.378, 'NO₃⁻': 2.450 },
+    micro: { Fe: 5.161, Mn: 2.059, Zn: 0.825, B: 4.321, Cu: 0.164, Mo: 0.103 } }
+};
+
+/* What a hall is floored with. The regolith figures are Paul et al. 2022
+   (Arabidopsis in Apollo soil, NASA OSDR OSD-476): against a basalt simulant,
+   leaves came 32–65% as fast and rosettes grew to 2–13% of the size, and the
+   most weathered soil (Apollo 11) was the worst. Sintering and aeroponics are
+   encoded qualitatively: fired regolith drains, holds air and sits near neutral
+   pH where raw regolith runs at 9–11. */
+const SUBSTRATES = {
+  regolith: { name: 'Regolith beds', short: 'Regolith',
+    desc: 'Raw lunar regolith, worked into soil harvest by harvest. Free, slow, and thin for the first crops: Arabidopsis grown in Apollo soil made rosettes a tenth the size of the same plant in simulant.' },
+  sintered: { name: 'Sintered beds', short: 'Sintered',
+    desc: 'Regolith fired into porous aggregate. Drains, holds air at the roots in one-sixth gravity, sits near neutral pH, and comes out of the kiln sterile — nearly full yield from the first crop, and less mould.' },
+  aero: { name: 'Aeroponic racks', short: 'Aeroponic',
+    desc: 'EDEN ISS’s system: bare roots misted with nutrient solution. The fastest bed there is, but it lives on the tank room and its pumps — in a brownout the roots dry within hours — and it feels every drift in the solution.' }
+};
+
 /* Structures you place on the surface. `once` means one is all the farm needs. */
 const BUILDINGS = [
   { id: 'track', name: 'Regolith Track', cost: 120, science: 0, line: true, key: 'T',
@@ -367,6 +673,10 @@ const BUILDINGS = [
   { id: 'reef', name: 'Reef Microcosm', cost: 9800, science: 30, once: true, key: 'F',
     speculative: true,
     desc: 'A closed marine microcosm: calcifying corals, their algal symbionts and the invertebrates that live in them. SPECULATIVE — no reef has been flown, and calcification is a local carbon dioxide source, not a sink. It earns its floor on the carbonate it lays down for construction, on holding marine lines the vault could not otherwise take, and on being the most watchable thing on the station.' },
+  { id: 'tanks', name: 'Nutrient Tank Room', cost: 4400, science: 14, once: true, key: 'M',
+    desc: 'EDEN ISS’s two-tank system: a leafy solution and a fruit solution, dosed for pH and fed automatically to every hall on the network. The tanks drift — salts build, pH climbs — and need replacing every two to three months. Required for aeroponic racks. Draws 0.15 kW.' },
+  { id: 'nursery', name: 'Seedling Nursery', cost: 3600, science: 10, key: 'E',
+    desc: 'Rockwool blocks under their own lamps, where EDEN ISS raised every seedling for ten to twenty days before transplanting it. Each nursery raises up to twelve tiles of transplants a fortnight, and a hall sown from them starts a fortnight ahead. Draws 0.2 kW.' },
   { id: 'vault', name: 'Lunar Seed Vault', cost: 18000, science: 40, once: true, key: 'N',
     desc: 'Sunk into the lava tube through the skylight, where the rock holds one temperature and metres of basalt stop what the surface cannot. Banks a living accession of every line you have grown. Needs the oxidation loop and regolith overburden before anyone will sign it off.' }
 ];
@@ -374,7 +684,9 @@ const BUILDINGS = [
 /* Equipment you fit farm-wide rather than place on a tile. */
 const UPGRADES = [
   { id: 'recovery', name: 'Condensate Recovery', cost: 4200, science: 15, repeat: true,
-    desc: 'Better humidity capture. +6% of all water use returned to the loop.' },
+    desc: 'Better humidity capture. +6% of all water use returned to the loop, and +15% dehumidifier capacity in the halls.' },
+  { id: 'radiator', name: 'Radiator Wings', cost: 3800, science: 14, repeat: true,
+    desc: 'More deployed radiator area. +40% heat rejection, so the halls can run their lamps harder before the canopy cooks — and stay cool at lunar noon, when the radiators look at a hot sky.' },
   { id: 'led', name: 'Deep-Red LED Retrofit', cost: 3600, science: 18, repeat: true,
     desc: 'Cuts lighting draw per house by 15%. The single biggest power win.' },
   { id: 'shield', name: 'Regolith Overburden', cost: 6400, science: 22, repeat: false,
@@ -390,16 +702,19 @@ const UPGRADES = [
 ];
 
 /* Event deck. Each returns a modal with one or more choices. */
+/* the fruiting crops the fruit tank feeds — what the calcium alert watches for */
+const LF_FRUIT_TANK = ['tomato', 'pepper', 'strawberry', 'cucumber'];
+
 const EVENTS = [
   {
     id: 'spe', weight: 10, minDay: 12,
     title: 'Solar Particle Event',
-    text: 'A flare on the near limb. Particle flux at the surface climbs fast, and the trays sit closest to the skylight.',
+    text: 'A flare on the near limb. Particle flux at the surface climbs fast, and the trays sit closest to the skylight. A plant takes a dose better than a person does: its stress response peaks at two to six hours and has settled within the day. A seedling is another matter.',
     choices: [
       { label: 'Shutter the bays and shelter', effect: 'spe_shelter',
         hint: 'Lights off for 12 hours. Crops idle, crew safe.' },
       { label: 'Keep the lights on', effect: 'spe_ride',
-        hint: 'No lost growth, but radiation damage and a dose to the crew.' }
+        hint: 'The canopy dips and recovers within a day. Newly sown halls lose seedlings, and the crew takes a dose. Arabidopsis in the halls would log the first plant data from a flare.' }
     ]
   },
   {
@@ -509,9 +824,9 @@ const EVENTS = [
     text: 'Conductivity is climbing across the manifold and the pH with it. Salts are accumulating faster than the crop is taking them up, which is the usual way of things in a tight loop.',
     choices: [
       { label: 'Flush and re-mix (120 nutrients)', effect: 'ec_flush',
-        hint: 'Dump the solution and start clean.' },
+        hint: 'Dump the solution and start clean. With a tank room, both tanks are replaced.' },
       { label: 'Dilute and carry on', effect: 'ec_ride',
-        hint: 'Cheaper, but every hall loses most of its nutrient charge.' }
+        hint: 'Cheaper, but every hall loses most of its nutrient charge, and the tanks drift further.' }
     ]
   },
   {
@@ -625,10 +940,45 @@ const EVENTS = [
   {
     id: 'thermal', weight: 5, minDay: 18,
     title: 'Radiator Fouling',
-    text: 'The farm is running warm. Dust on the radiator panels is cutting heat rejection, and the canopy feels it first.',
+    text: 'The farm is running warm. Dust on the radiator panels has halved their heat rejection, and the lamps are the biggest heat load in the halls. The canopy feels it first.',
     choices: [
       { label: 'Scrub the radiators (500 cr)', effect: 'therm_fix', hint: 'Back to nominal.' },
-      { label: 'Throttle the lights instead', effect: 'therm_throttle', hint: 'Growth slows for a few days.' }
+      { label: 'Throttle the lights instead', effect: 'therm_throttle',
+        hint: 'Every hall on Low for four days: four-tenths less heat, two-thirds the growth.' }
+    ]
+  },
+  {
+    id: 'calcium', weight: 6, minDay: 30,
+    when: s => s.map.some(t => t.b && t.b.type === 'tanks') && !(s.tanks && s.tanks.recipeFixed)
+      && s.fields.some(f => f.crop && !f.dead && LF_FRUIT_TANK.includes(f.crop.replace(/_g$/, ''))),
+    title: 'Calcium Deficiency in the Fruit',
+    text: 'The newest tomato leaves are curling and the fruit is browning at the blossom end. Calcium moves only with the transpiration stream, and the fruit is not getting its share. EDEN ISS met exactly this in 2018, and changed the recipe mid-season.',
+    choices: [
+      { label: 'Change the fruit recipe (40 nutrients)', effect: 'ca_fix',
+        hint: 'EDEN ISS’s fix: calcium 0.597 → 0.711, potassium 1.503 → 1.378 mol per 100 L. Permanent.' },
+      { label: 'Spray calcium and carry on', effect: 'ca_ride',
+        hint: 'For twenty days fruit from the fruit tank sells at 70% and feeds at 85%.' }
+    ]
+  },
+  {
+    id: 'scrubber', weight: 6, minDay: 20,
+    title: 'CO\u2082 Scrubber Down',
+    text: 'The amine bed in the hall air loop has stopped regenerating. With nothing taking CO\u2082 out, the crew\u2019s own breathing is the source — which is exactly how EDEN ISS spent most of an Antarctic winter at 2,000 to 4,000 ppm.',
+    choices: [
+      { label: 'Swap the bed (900 cr)', effect: 'scrub_fix', hint: 'Back to the setpoint within hours.' },
+      { label: 'Run without it for three days', effect: 'scrub_ride',
+        hint: 'The canopy grows faster on the extra carbon. The crew get headaches, and morale pays.' }
+    ]
+  },
+  {
+    id: 'airhandler', weight: 5, minDay: 16,
+    when: s => s.fields.some(f => f.crop && !f.dead),
+    title: 'Air Handler Seized',
+    text: 'A fan bearing in one hall\u2019s air handler has seized. With the lamps on and no air exchange, a sealed canopy draws its CO\u2082 down to nothing in minutes — and then it simply stops.',
+    choices: [
+      { label: 'Replace the bearing (400 cr)', effect: 'air_fix', hint: 'Air moving again today.' },
+      { label: 'Seal the hall until a part comes', effect: 'air_seal',
+        hint: 'The biggest lit hall barely grows for three days.' }
     ]
   }
 ];
@@ -686,7 +1036,33 @@ const MILESTONES = [
   { id: 'nowaste', text: 'Process a thousand units of station waste',
     done: s => (s.stats.wasteProcessed || 0) >= 1000 },
   { id: 'ark', text: 'Bank every line the farm can grow',
-    done: s => Object.keys((s.vault && s.vault.accessions) || {}).length >= CROPS.length + GMO.length }
+    done: s => Object.keys((s.vault && s.vault.accessions) || {}).length >= CROPS.length + GMO.length },
+  /* the season figure, so a farm has to keep it up rather than spike it once */
+  { id: 'lp1', text: 'Match Lunar Palace 1: 0.068 kg of fresh food per m² per day, over the season',
+    done: s => s.day >= 60 && (s.stats.kgm2d || 0) >= 0.068 },
+  { id: 'eden', text: 'Out-grow EDEN ISS: 0.075 kg per m² per day, over the season',
+    done: s => s.day >= 60 && (s.stats.kgm2d || 0) >= 0.075 },
+  { id: 'bpc', text: 'Reach the KSC Biomass Production Chamber: about 0.17 kg per m² per day',
+    done: s => s.day >= 60 && (s.stats.kgm2d || 0) >= 0.17 },
+  { id: 'highlight', text: 'Bring in a crop grown under 600 µmol of light',
+    done: s => (s.stats.highLight || 0) >= 1 },
+  { id: 'picks', text: 'Pick one cut-and-come-again planting ten times',
+    done: s => (s.stats.maxPicks || 0) >= 10 },
+  { id: 'aero', text: 'Bring in a crop grown on bare roots in mist',
+    done: s => (s.stats.aeroHarvests || 0) >= 1 },
+  { id: 'sintered', text: 'Fire a hall’s regolith into sintered beds',
+    done: s => (s.stats.sinteredHalls || 0) >= 1 },
+  { id: 'tanks90', text: 'Hold both nutrient tanks in band for ninety days',
+    done: s => (s.stats.tanksInBand || 0) >= 90 },
+  { id: 'transplant', text: 'Sow a hall from the nursery',
+    done: s => (s.stats.transplants || 0) >= 1 },
+  { id: 'flarestudy', text: 'Collect the first plant data from a solar particle event',
+    done: s => !!(s.studies && s.studies.flare) },
+  { id: 'studies3', text: 'Re-run three published trials on your own farm',
+    done: s => Object.keys(s.studies || {}).length >= 3 },
+  { id: 'notes', text: 'File every field note',
+    done: s => Object.keys(s.notes || {}).length >= FIELD_NOTES.length }
 ];
 
-window.LF_DATA = { K, CROPS, TRAITS, GMO, BUILDINGS, UPGRADES, EVENTS, MILESTONES };
+window.LF_DATA = { K, CROPS, TRAITS, GMO, BUILDINGS, UPGRADES, EVENTS, MILESTONES, BENCHMARKS, EDEN_SEASON,
+                   TANKS, SUBSTRATES, LF_FRUIT_TANK, STUDIES, FIELD_NOTES };

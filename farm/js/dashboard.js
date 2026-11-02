@@ -39,18 +39,37 @@
     { key: 'audience', title: 'Broadcast audience', unit: 'viewers',
       good: v => v >= 400, warn: v => v >= 120 },
     { key: 'accessions', title: 'Lines banked in the vault', unit: 'accessions',
-      good: v => v >= 20, warn: v => v >= 8 }
+      good: v => v >= 20, warn: v => v >= 8 },
+    /* the figure the analogue facilities publish, with two of them drawn in */
+    { key: 'kg', title: 'Fresh produce per m² (30 days)', unit: 'kg/m²/d',
+      good: v => v >= 0.075, warn: v => v >= 0.04, fmt: v => v.toFixed(3),
+      refs: [{ v: 0.075, label: 'EDEN ISS' }, { v: 0.068, label: 'Lunar Palace 1' }] },
+    /* the three dials EDEN ISS lost through its winter */
+    { key: 'ppm', title: 'Peak CO₂ in the halls', unit: 'ppm',
+      good: v => v <= 2500, warn: v => v <= 5000,
+      refs: [{ v: 1000, label: 'setpoint' }, { v: 2500, label: 'crew limit' }] },
+    { key: 'rh', title: 'Peak humidity in the halls', unit: '%',
+      good: v => v <= 72, warn: v => v <= 80, refs: [{ v: 80, label: 'mould' }] },
+    { key: 'tmin', title: 'Coldest hour under the lamps', unit: '°C',
+      good: v => v >= 18, warn: v => v >= 15, fmt: v => v.toFixed(1), refs: [{ v: 18, label: 'cold' }] }
   ];
+
+  /* a metric added in a later version is missing from older samples, so each
+     panel draws only the days that actually carry it */
+  const series = (hist, key) => hist.filter(h => typeof h[key] === 'number' && isFinite(h[key]));
 
   const fmtNum = v => Math.round(v).toLocaleString();
 
   /* ---------- one panel ---------- */
 
-  function panel(hist, p) {
+  function panel(all, p) {
+    const hist = series(all, p.key);
+    if (hist.length < 2) return '';
     const W = 300, H = 104, PADL = 4, PADR = 4, PADT = 12, PADB = 16;
     const vals = hist.map(h => h[p.key]);
     const last = vals[vals.length - 1];
-    const lo = Math.min(...vals), hi = Math.max(...vals);
+    const refs = p.refs || [];
+    const lo = Math.min(...vals, ...refs.map(r => r.v)), hi = Math.max(...vals, ...refs.map(r => r.v));
     const span = (hi - lo) || Math.max(1, Math.abs(hi) * 0.1);
     const y0 = lo - span * 0.12, y1 = hi + span * 0.12;
     const x = i => PADL + (i / Math.max(1, hist.length - 1)) * (W - PADL - PADR);
@@ -71,6 +90,11 @@
     const line = hist.map((h, i) => `${x(i).toFixed(1)},${y(h[p.key]).toFixed(1)}`).join(' ');
     const areaPts = `${x(0).toFixed(1)},${(H - PADB).toFixed(1)} ${line} ${x(hist.length - 1).toFixed(1)},${(H - PADB).toFixed(1)}`;
     const status = p.good(last) ? GOOD : p.warn(last) ? WARN : BAD;
+    /* reference lines sit behind the series, dashed and quiet, labelled at the right */
+    const refLines = refs.map(r => `<line x1="${PADL}" y1="${y(r.v).toFixed(1)}" x2="${W - PADR}" y2="${y(r.v).toFixed(1)}"
+        stroke="rgba(255,255,255,0.28)" stroke-width="1" stroke-dasharray="3 3"/>
+      <text x="${W - PADR - 2}" y="${(y(r.v) - 2.5).toFixed(1)}" text-anchor="end" font-size="8"
+        fill="rgba(255,255,255,0.45)" font-family="ui-monospace,monospace">${r.label}</text>`).join('');
     const shown = p.fmt ? p.fmt(last) : fmtNum(last);
 
     return `
@@ -82,6 +106,7 @@
         <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img"
              aria-label="${p.title} from day ${hist[0].d} to day ${hist[hist.length - 1].d}">
           ${bands}
+          ${refLines}
           <line x1="${PADL}" y1="${H - PADB}" x2="${W - PADR}" y2="${H - PADB}" stroke="rgba(255,255,255,0.12)" stroke-width="1"/>
           <polygon points="${areaPts}" fill="rgba(138,180,255,0.13)"/>
           <polyline points="${line}" fill="none" stroke="${INK}" stroke-width="2"
@@ -98,6 +123,7 @@
 
   function facts(s) {
     const h = s.history;
+    const kg = s.stats.kgm2d || 0;
     const now = h[h.length - 1];
     const back = h[Math.max(0, h.length - 31)];
     const closure = s.stats.lastClosure;
@@ -109,7 +135,7 @@
     return { now, closure, foodTrend, shedding, unserviced, infected, growing,
              days: s.day, harvests: s.stats.harvests, nights: s.stats.nightsSurvived,
              crew: s.crew, tiles: S.totalTiles(s), morale: Math.round(s.morale),
-             sunlit: S.isSunlit(s) };
+             sunlit: S.isSunlit(s), kg, freshKg: s.stats.freshKg || 0, edenRatio: kg / 0.075 };
   }
 
   function earthVoice(s, f) {
@@ -118,6 +144,7 @@
     lines.push(`Food closure to date measured at ${Math.round(f.closure * 100)} per cent of crew requirement; stores stand at ${f.now.food.toFixed(1)} days of reserve and are ${f.foodTrend >= 0 ? 'accumulating' : 'drawing down'}.`);
     lines.push(`Atmospheric reserves: oxygen ${fmtNum(f.now.o2)} kg, carbon dioxide ${fmtNum(f.now.co2)} kg. Water inventory ${fmtNum(f.now.water)} L. ${f.harvests} harvest${f.harvests === 1 ? '' : 's'} logged to date across ${f.nights} completed lunar night${f.nights === 1 ? '' : 's'}.`);
     if (f.growing.length) lines.push(`Crops presently under cultivation: ${f.growing.join(', ')}.`);
+    if (f.freshKg > 0) lines.push(`Season productivity ${f.kg.toFixed(3)} kg fresh mass per square metre per day, ${f.edenRatio.toFixed(2)} times the EDEN ISS 2018 figure; ${fmtNum(f.freshKg)} kg harvested to date.`);
     const flags = [];
     if (f.shedding) flags.push(`grow lighting is load-shed to ${s.litFields} of ${s.wantFields} halls`);
     if (f.now.o2 < 90) flags.push('oxygen reserve below advisory threshold');
@@ -141,6 +168,9 @@
       : `We are growing about ${Math.round(f.closure * 100)} per cent of what we eat, so the rest still comes up from Earth. The pantry holds ${f.now.food.toFixed(1)} days and is ${f.foodTrend >= 0 ? 'filling again' : 'going down'}.`);
     lines.push(`There is ${fmtNum(f.now.o2)} kg of oxygen banked and ${fmtNum(f.now.co2)} kg of carbon dioxide for the plants to breathe, with ${fmtNum(f.now.water)} litres in the loop. We have brought in ${f.harvests} harvest${f.harvests === 1 ? '' : 's'} and come through ${f.nights} long night${f.nights === 1 ? '' : 's'}.`);
     if (f.growing.length) lines.push(`Growing right now: ${f.growing.join(', ')}.`);
+    if (f.freshKg > 0) lines.push(f.edenRatio >= 1
+      ? `Square metre for square metre we are out-growing the EDEN ISS greenhouse in Antarctica — ${fmtNum(f.freshKg)} kg of fresh food so far.`
+      : `We have picked ${fmtNum(f.freshKg)} kg of fresh food so far, about ${Math.round(f.edenRatio * 100)} per cent of what the EDEN ISS greenhouse managed per square metre.`);
     const worries = [];
     if (f.shedding) worries.push(`the lamps are off in some halls to save power — ${s.litFields} of ${s.wantFields} are lit`);
     if (f.now.o2 < 90) worries.push('the oxygen bank is lower than we would like');
@@ -171,7 +201,8 @@
       ['Days run', f.days],
       ['Harvests', f.harvests],
       ['Lunar nights', f.nights],
-      ['Closure', Math.round(f.closure * 100) + '%']
+      ['Closure', Math.round(f.closure * 100) + '%'],
+      ['kg/m²/d, season', f.kg.toFixed(3)]
     ].map(([k, v]) => `<div class="dstat"><b>${v}</b><span>${k}</span></div>`).join('');
 
     return `
@@ -197,10 +228,10 @@
 
   /* Hover readout: nearest sample under the pointer, shared tooltip. */
   function wireHover(root, s, tip) {
-    const hist = s.history;
     root.querySelectorAll('.dpanel').forEach(fig => {
       const svg = fig.querySelector('svg');
       const p = PANELS.find(x => x.key === fig.dataset.key);
+      const hist = series(s.history, p.key);
       svg.addEventListener('mousemove', e => {
         const r = svg.getBoundingClientRect();
         const frac = (e.clientX - r.left) / r.width;

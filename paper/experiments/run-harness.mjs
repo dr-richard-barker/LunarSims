@@ -1,9 +1,17 @@
-/* Headless runner for metro/harness.html.
+/* Headless runner for a game's harness.html — metro by default, or any game
+   folder named on the command line:
+
+     node paper/experiments/run-harness.mjs          # metro
+     node paper/experiments/run-harness.mjs farm
+
    The game modules are DOM-free and so are the scenarios; only the result
    rendering touches the DOM. So stub just enough document for the runner and
    report to stdout, with a per-scenario timer so a slow one is obvious. */
 import fs from 'fs';
-const ROOT = process.argv[2] || '/Users/drb_laptop/Documents/LunarSims/metro';
+import path from 'path';
+import { fileURLToPath } from 'url';
+const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const ROOT = path.resolve(REPO, process.argv[2] || 'metro');
 
 global.window = {};
 global.localStorage = (() => {
@@ -37,23 +45,38 @@ const html = fs.readFileSync(`${ROOT}/harness.html`, 'utf8');
 for (const m of html.matchAll(/<script src="([^"]+)"><\/script>/g))
   eval(fs.readFileSync(`${ROOT}/${m[1]}`, 'utf8'));
 
-const body = html.slice(html.indexOf('<script>\n(function'), html.lastIndexOf('</script>'));
+/* The scenarios are the inline block that opens with `(function`. It ends at
+   the first </script> after it — not the last in the file, since the pages now
+   carry an analytics tag below it. */
+const start = html.indexOf('<script>\n(function');
+if (start < 0) throw new Error(`run-harness: no inline scenario block in ${ROOT}/harness.html`);
+const body = html.slice(start, html.indexOf('</script>', start));
 const inner = body.slice(body.indexOf('(function'));
 
 const results = [];
 
-/* Swap the DOM-rendering tail for a collector, keeping judge() verbatim. */
-const patched = inner
-  .replace("const out = document.getElementById('out');",
-           "const out = { appendChild(){} };")
-  .replace('SCENARIOS.forEach(sc => {',
-           'SCENARIOS.forEach(sc => { const __t0 = Date.now(); if (process.env.TRACE) process.stderr.write("> "+sc.name+"\\n");')
-  .replace('out.appendChild(box);',
-           'globalThis.__results.push({ name: sc.name, pass: scPass, crash, ms: Date.now() - __t0, rows: rows.map(([l,g,w]) => [l, g, w, judge(g,w)]) });')
-  .replace("const el = document.getElementById('summary');", 'const el = { };');
+/* Swap the DOM-rendering tail for a collector, keeping judge() verbatim. Each
+   marker must be found: a silent miss used to leave __t0 undefined and take the
+   whole eval down with an error that pointed nowhere near the cause. */
+function swap(src, from, to) {
+  const hit = typeof from === 'string' ? src.includes(from) : from.test(src);
+  if (!hit) throw new Error(`run-harness: marker not found in ${ROOT}/harness.html: ${from}`);
+  return src.replace(from, to);
+}
+let patched = inner;
+patched = swap(patched, "const out = document.getElementById('out');",
+               "const out = { appendChild(){} };");
+/* metro writes `sc => {`, farm writes `(sc, i) => {` */
+patched = swap(patched, /SCENARIOS\.forEach\((\(sc(?:, *\w+)?\)|sc) => \{/,
+               m => m + ' const __t0 = Date.now(); if (process.env.TRACE) process.stderr.write("> "+sc.name+"\\n");');
+patched = swap(patched, 'out.appendChild(box);',
+               'globalThis.__results.push({ name: sc.name, pass: scPass, crash, ms: Date.now() - __t0, rows: rows.map(([l,g,w]) => [l, g, w, judge(g,w)]) });');
+patched = swap(patched, "const el = document.getElementById('summary');", 'const el = { };');
 
 globalThis.__results = results;
 eval(patched);
+/* DUMP=file.json keeps every check's value, so two revisions can be diffed */
+if (process.env.DUMP) fs.writeFileSync(process.env.DUMP, JSON.stringify(results, null, 1));
 
 let passed = 0, failed = 0, broke = 0;
 for (const r of results) {

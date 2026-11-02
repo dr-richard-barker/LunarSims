@@ -419,10 +419,12 @@
     groundShadow(ctx, f.x, f.y, f.w, f.h, HALL_Z, sv);
     contact(ctx, f.x, f.y, f.w, f.h);
 
+    /* the glow follows the dimmer: Low is a dull pink, High floods the plot */
+    const glow = 0.22 * Math.pow(S.ppfdEff(s, f) / S.PPFD.std, 0.6);
     if (f.litNow) {
       const p = iso(f.x + f.w / 2, f.y + f.h / 2);
       const g = ctx.createRadialGradient(p.x, p.y, 6, p.x, p.y, Math.max(f.w, f.h) * TW * 0.55);
-      g.addColorStop(0, 'rgba(255,90,190,0.22)');
+      g.addColorStop(0, `rgba(255,90,190,${glow.toFixed(3)})`);
       g.addColorStop(1, 'rgba(255,90,190,0)');
       ctx.fillStyle = g;
       ctx.fillRect(iso(f.x, f.y + f.h).x - TW, iso(f.x, f.y).y - HALL_Z - TH,
@@ -435,16 +437,24 @@
 
     /* growing beds and the canopy itself */
     const c = f.crop ? S.cropById(f.crop) : null;
+    const sub = f.substrate || 'regolith';
     for (let ty = 0; ty < f.h; ty++) {
       for (let tx = 0; tx < f.w; tx++) {
-        /* raw regolith is pale grey dust; worked beds darken as they condition */
+        /* raw regolith is pale grey dust; worked beds darken as they condition.
+           Fired beds are terracotta; aeroponic racks are white trays over mist. */
         const soil = f.soil;
-        const rr0 = Math.round(126 - 66 * soil);
-        const gg0 = Math.round(120 - 70 * soil);
-        const bb0 = Math.round(112 - 70 * soil);
-        ctx.fillStyle = f.dead ? 'rgba(74,66,54,0.9)' : `rgba(${rr0},${gg0},${bb0},0.92)`;
+        let bedCol;
+        if (sub === 'aero') bedCol = 'rgba(214,222,230,0.88)';
+        else if (sub === 'sintered') bedCol = `rgba(${Math.round(172 - 60 * soil)},${Math.round(98 - 48 * soil)},${Math.round(70 - 36 * soil)},0.92)`;
+        else bedCol = `rgba(${Math.round(126 - 66 * soil)},${Math.round(120 - 70 * soil)},${Math.round(112 - 70 * soil)},0.92)`;
+        ctx.fillStyle = f.dead ? 'rgba(74,66,54,0.9)' : bedCol;
         diamond(ctx, f.x + tx + 0.08, f.y + ty + 0.08, 0.84, 0.84); ctx.fill();
-        if (soil < 0.55) {
+        if (sub === 'aero') {
+          /* the tray's grid of net pots */
+          ctx.strokeStyle = 'rgba(120,140,160,0.45)';
+          ctx.lineWidth = 1;
+          diamond(ctx, f.x + tx + 0.2, f.y + ty + 0.2, 0.6, 0.6); ctx.stroke();
+        } else if (soil < 0.55 && sub === 'regolith') {
           /* unbroken dust still shows the grader's tracks */
           ctx.strokeStyle = `rgba(255,255,255,${0.05 + (1 - soil) * 0.05})`;
           ctx.lineWidth = 1;
@@ -477,9 +487,10 @@
 
     if (site) return drawScaffold(ctx, f.x, f.y, f.w, f.h, HALL_Z, site, l);
 
-    /* glass walls */
-    const glassR = f.litNow ? 'rgba(255,140,210,0.20)' : 'rgba(150,185,220,0.15)';
-    const glassL = f.litNow ? 'rgba(220,110,190,0.26)' : 'rgba(120,155,195,0.20)';
+    /* glass walls — tinted warm when the halls are running hot */
+    const hot = f.litNow && s.air && s.air.t > 26;
+    const glassR = hot ? 'rgba(255,150,90,0.24)' : f.litNow ? 'rgba(255,140,210,0.20)' : 'rgba(150,185,220,0.15)';
+    const glassL = hot ? 'rgba(235,120,70,0.30)' : f.litNow ? 'rgba(220,110,190,0.26)' : 'rgba(120,155,195,0.20)';
     box(ctx, f.x, f.y, f.w, f.h, HALL_Z, '#8fb4d8', l, {
       right: glassR, left: glassL,
       top: f.litNow ? 'rgba(255,150,215,0.17)' : 'rgba(175,205,235,0.13)', noRim: true
@@ -501,6 +512,25 @@
     for (const [cx, cy] of [[f.x, f.y], [f.x + f.w, f.y], [f.x + f.w, f.y + f.h], [f.x, f.y + f.h]]) {
       const p = iso(cx, cy);
       ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x, p.y - HALL_Z); ctx.stroke();
+    }
+
+    /* condensation: a hall in air above 80% fogs its own glass */
+    if (c && !f.dead && s.air && s.air.rh > 80 && !S.isCulture(c)) {
+      ctx.fillStyle = `rgba(225,232,240,${Math.min(0.32, (s.air.rh - 80) / 50).toFixed(3)})`;
+      diamond(ctx, f.x, f.y, f.w, f.h, HALL_Z * 0.55); ctx.fill();
+    }
+
+    /* the canopy fans, on the roof's far corner */
+    if (f.fans) {
+      const fp = iso(f.x + 0.55, f.y + 0.55);
+      const fx = fp.x, fy = fp.y - HALL_Z - 4;
+      ctx.strokeStyle = 'rgba(205,225,245,0.85)'; ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.arc(fx, fy, 5.5, 0, 7); ctx.stroke();
+      const spin = (s.hour * 0.9) % (Math.PI * 2);
+      for (let i = 0; i < 3; i++) {
+        const a = spin + i * 2.094;
+        ctx.beginPath(); ctx.moveTo(fx, fy); ctx.lineTo(fx + Math.cos(a) * 4.5, fy + Math.sin(a) * 2.6); ctx.stroke();
+      }
     }
 
     /* label and pips float above the ridge */
@@ -533,6 +563,10 @@
     if (f.crop && f.moisture < 0.25) dot('#4aa8ff');
     if (f.crop && f.feed < 0.12) dot('#c58cff');
     if (!f.serviced) dot('#ff7a68');
+    const tankId = c ? S.tankFor(c) : null;
+    if (tankId && S.count(s, 'tanks') && !S.inBand(s, tankId)) dot('#ff9f43');
+    if (f.sealed > 0) dot('#9aa3b5');
+    if (f.radH >= 0) dot('#5ee0e6');
 
     if (selected || hovered) {
       ctx.strokeStyle = selected ? '#ffd166' : 'rgba(255,255,255,0.4)';
@@ -693,7 +727,7 @@
 
     const Z = { solar: 26, battery: 24, hab: 30, isru: 42, composter: 32, reactor: 34, pad: 4,
                 studio: 34, vault: 27,
-                worms: 30, nitrifier: 36, digester: 38, reef: 28 }[type] || 26;
+                worms: 30, nitrifier: 36, digester: 38, reef: 28, tanks: 30, nursery: 20 }[type] || 26;
     groundShadow(ctx, x + 0.1, y + 0.1, 0.8, 0.8, Z, sv);
     contact(ctx, x, y, 1, 1);
     if (site) return drawScaffold(ctx, x, y, 1, 1, Z, site, l);
@@ -1037,6 +1071,39 @@
         ctx.lineTo(p.x + 15, wl + 4);
         ctx.lineTo(p.x - 15, wl + 4);
         ctx.closePath(); ctx.fill();
+        break;
+      }
+      case 'tanks': {
+        /* EDEN ISS's two bulk tanks on a skid, with a lamp that reads green while
+           both are in band */
+        box(ctx, x + 0.12, y + 0.18, 0.76, 0.64, Z * 0.25, '#6b7480', l, { stroke: grey(150, l) });
+        const cols = ['#7fa8c9', '#c99a7f'];
+        [-9, 9].forEach((dx, i) => {
+          const cx = p.x + dx, base = p.y - Z * 0.25;
+          ctx.fillStyle = tone(cols[i], l, 1);
+          ctx.fillRect(cx - 6, base - Z * 0.7, 12, Z * 0.7);
+          ctx.beginPath(); ctx.ellipse(cx, base - Z * 0.7, 6, 3, 0, 0, 7); ctx.fill();
+          ctx.strokeStyle = grey(175, l); ctx.lineWidth = 1;
+          ctx.beginPath(); ctx.ellipse(cx, base - Z * 0.7, 6, 3, 0, 0, 7); ctx.stroke();
+          ctx.strokeRect(cx - 6, base - Z * 0.7, 12, Z * 0.7);
+        });
+        const ok = s.tanks && S.inBand(s, 'leafy') && S.inBand(s, 'fruit');
+        ctx.fillStyle = ok ? 'rgba(110,231,160,0.95)' : 'rgba(255,159,67,0.95)';
+        ctx.beginPath(); ctx.arc(p.x, p.y - Z - 4, 2.6, 0, 7); ctx.fill();
+        break;
+      }
+      case 'nursery': {
+        /* a low bench of rockwool trays under its own lamp; the trays fill as the
+           transplants come on */
+        box(ctx, x + 0.12, y + 0.2, 0.76, 0.6, Z * 0.6, '#7d8579', l, { stroke: grey(150, l) });
+        const ready = s.nursery ? clamp(s.nursery.stock / Math.max(1, S.count(s, 'nursery') * S.NURSERY_TILES), 0, 1) : 0;
+        for (let i = 0; i < 12; i++) {
+          const gx = p.x - 13 + (i % 6) * 5.2, gy = p.y - Z * 0.6 + 3 + Math.floor(i / 6) * 5;
+          ctx.fillStyle = i < Math.round(ready * 12) ? 'rgba(126,200,110,0.95)' : 'rgba(205,195,170,0.75)';
+          ctx.beginPath(); ctx.arc(gx, gy, 1.8, 0, 7); ctx.fill();
+        }
+        ctx.fillStyle = `rgba(255,120,200,${0.35 + l * 0.3})`;
+        ctx.fillRect(p.x - 14, p.y - Z - 5, 28, 2.5);
         break;
       }
       case 'pad': {
